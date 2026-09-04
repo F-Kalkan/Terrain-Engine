@@ -15,7 +15,7 @@ void PrintLosResult(LineOfSightResult los)
     }
     else
     {
-        std::cout << "Blocking point: none" << std::endl;
+        std::cout << "Blocking point: None" << std::endl;
     }
 
     std::cout << "Clearance deficit: " << los.clearanceDeficit << std::endl;
@@ -38,15 +38,30 @@ int main()
     GeoPoint a{ 2, 0 };
     GeoPoint b{ 2, 4 };
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 4);
     PrintLosResult(los);
 
     // LineOfSight Test 2 - Clear Sight
     GeoPoint a2{ 0, 0 };
     GeoPoint b2{ 0, 4 };
     std::vector<ProfileSample> flatProfile = GetTerrainProfile(a2, b2, 1.0, sampler);
-    LineOfSightResult flatLos = ComputeLineOfSight(flatProfile, 2.0, 2.0);
+    LineOfSightResult flatLos = ComputeLineOfSight(flatProfile, 2.0, 2.0, 4);
     PrintLosResult(flatLos);
+    
+    
+    
+    // LineOfSight Test 3 - Curved
+    std::vector<ProfileSample> curvatureProfile;
+    for (int i = 0; i <= 10; i++)
+    {
+        ProfileSample s;
+        s.point = GeoPoint{ 0, 0 };
+        s.elevation = 0;
+        curvatureProfile.push_back(s);
+    }
+
+    LineOfSightResult curvatureLos = ComputeLineOfSight(curvatureProfile, 2.0, 2.0, 50000.0);
+    PrintLosResult(curvatureLos);
 
     return 0;
 }

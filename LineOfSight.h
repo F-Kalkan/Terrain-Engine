@@ -10,17 +10,21 @@ struct LineOfSightResult
     double clearanceDeficit;
 };
 
-LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double hA, double hB)
+LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double hA, double hB, double totalDistance)
 {
+
+    const double k = 4.0 / 3.0;
+    const double R = 6371000.0;
+
     LineOfSightResult result;
     result.isVisible = true;
     result.clearanceDeficit = 0;
-
+    double worstDeficit = -999999;
 
     double observerEyeHeight = profile.front().elevation + hA;
     double targetEyeHeight = profile.back().elevation + hB;
 
-    double worstDeficit = -999999;
+    
 
     for (int i = 0; i < profile.size(); i++)
     {
@@ -28,8 +32,13 @@ LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double 
 
         double lineHeight = observerEyeHeight + t * (targetEyeHeight - observerEyeHeight);
 
-        double deficit = profile[i].elevation - lineHeight;
-
+        double d1 = t * totalDistance;
+        double d2 = totalDistance - d1;
+        double curvatureDrop = (d1 * d2) / (2 * k * R);
+         
+        double correctedElevation = profile[i].elevation + curvatureDrop;
+        double deficit = correctedElevation - lineHeight;
+        
         if (deficit > worstDeficit)
         {
             worstDeficit = deficit;
