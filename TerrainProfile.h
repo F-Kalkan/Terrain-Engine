@@ -1,0 +1,42 @@
+#pragma once
+#include <vector>
+#include "IElevationSampler.h"
+#include <cmath>
+
+struct GeoPoint
+{
+    double latitude;
+    double longitude;
+};
+
+struct ProfileSample
+{
+    GeoPoint point;
+    double elevation;
+};
+
+std::vector<ProfileSample> GetTerrainProfile(GeoPoint a, GeoPoint b, double spacing, IElevationSampler& sampler)
+{
+    std::vector<ProfileSample> result;
+
+    double totalDistance = sqrt(pow(b.latitude - a.latitude, 2) + pow(b.longitude - a.longitude, 2));
+
+    int sampleCount = (int)(totalDistance / spacing);
+
+    for (int i = 0; i <= sampleCount; i++)
+    {
+        double t = (double)i / sampleCount;
+
+        GeoPoint current;
+        current.latitude = a.latitude + t * (b.latitude - a.latitude);
+        current.longitude = a.longitude + t * (b.longitude - a.longitude);
+
+        ProfileSample sample;   
+        sample.point = current;
+        sample.elevation = sampler.GetElevation(current.latitude, current.longitude);
+
+        result.push_back(sample);
+    }
+
+    return result;
+}
