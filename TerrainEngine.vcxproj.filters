@@ -24,6 +24,9 @@
     <ClInclude Include="LineOfSight.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Viewshed.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">

@@ -2,6 +2,7 @@
 #include "IElevationSampler.h"
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
+#include "Viewshed.h"
 
 void PrintLosResult(LineOfSightResult los)
 {
@@ -54,14 +55,30 @@ int main()
     std::vector<ProfileSample> curvatureProfile;
     for (int i = 0; i <= 10; i++)
     {
+        double t = (double)i / 10;
         ProfileSample s;
-        s.point = GeoPoint{ 0, 0 };
+        s.point = GeoPoint{ 0, t * 50000.0 };  // longitude'u mesafe olarak kullan
         s.elevation = 0;
         curvatureProfile.push_back(s);
     }
 
     LineOfSightResult curvatureLos = ComputeLineOfSight(curvatureProfile, 2.0, 2.0, 50000.0);
     PrintLosResult(curvatureLos);
+    
+    
+    
+    // Viewshed Test From (0,0)
+    GeoPoint observerPos{ 0, 0 };
+    ViewshedResult viewshed = ComputeViewshedNaive(observerPos, 2.0, 5, 5, 1.0, sampler);
+
+    for (int row = 0; row < 5; row++)
+    {
+        for (int col = 0; col < 5; col++)
+        {
+            std::cout << (viewshed.visible[row][col] ? "#" : ".") << " ";
+        }
+        std::cout << std::endl;
+    }
 
     return 0;
 }
