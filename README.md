@@ -1,5 +1,15 @@
 ﻿# Terrain Line-of-Sight and Viewshed Engine
 
+## Why this exists
+
+"Can point A see point B, given the terrain in between?" comes up in a lot of
+practical contexts: planning where a radio or telecom tower needs line of sight to
+another tower, choosing an observation/camera position that covers the most ground,
+or checking whether a ridge blocks a sightline before you hike somewhere to find out.
+This library answers that question against real elevation data, accounting for how
+far the ground actually drops away due to Earth's curvature — a flat map alone gets
+this wrong past a few kilometres.
+
 A C++17 library and command-line tool that answers three questions about the ground
 between two points:
 
@@ -10,6 +20,23 @@ between two points:
    and clearance deficit of the blocking point.
 3. **Viewshed** — from one observer, which cells within a radius are visible, as a
    raster mask.
+
+## Quick start
+
+1. Clone this repository and open `TerrainEngine.sln` in Visual Studio 2022.
+2. Build the solution (`x64`, `Release` recommended for real use).
+3. Run `TerrainEngine.exe` with no arguments — this runs the 10-case test suite and a
+   small demo against the included sample tile (`DATA/N36W112.hgt`, a stretch of the
+   Grand Canyon), and writes `profile_output.pgm` / `viewshed_output.pgm` you can open
+   in any image viewer that supports PGM (e.g. IrfanView, GIMP).
+4. To ask your own question, use the CLI directly, e.g.: 
+  ```
+  TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002694 2.0 2.0
+  ```
+   This asks: standing 2 m above the ground at (36.3, -111.5), can you see a point
+   2 m above the ground at (36.35, -111.45)? The answer, and if blocked, exactly where
+   and by how much.
+    
 
 ## Architecture / dependency list
 
