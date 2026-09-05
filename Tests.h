@@ -6,8 +6,6 @@
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
 
-
-
 // TEST 1 
 void TestFlatPlateauEverythingVisible()
 {
@@ -24,7 +22,7 @@ void TestFlatPlateauEverythingVisible()
     LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 2.0);
 
     assert(los.isVisible == true);
-    std::cout << "Pass: TestFlatPlateauEverythingVisible" << std::endl;
+    std::cout << "PASS: TestFlatPlateauEverythingVisible" << std::endl;
 }
 
 // TEST 2  
@@ -46,7 +44,7 @@ void TestWallBlocksView()
 
     assert(los.isVisible == false);
     assert(std::abs(los.clearanceDeficit - 38.0) < 0.001);
-    std::cout << "Pass: TestWallBlocksView" << std::endl;
+    std::cout << "PASS: TestWallBlocksView" << std::endl;
 }
 
 // TEST 3 
@@ -72,7 +70,7 @@ void TestCurvatureBlocksFlatTerrain()
 
     assert(los.isVisible == false);
     assert(std::abs(los.clearanceDeficit - 34.79) < 0.1);
-    std::cout << "Pass: TestCurvatureBlocksFlatTerrain" << std::endl;
+    std::cout << "PASS: TestCurvatureBlocksFlatTerrain" << std::endl;
 }
 
 // TEST 4
@@ -135,4 +133,30 @@ void TestViewshedDetectsVoid()
 
     assert(foundUnknown == true);
     std::cout << "PASS: TestViewshedDetectsVoid" << std::endl;
+}
+
+// TEST 6
+void TestDeterminism()
+{
+    std::vector<std::vector<double>> testGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 20, 30, 20, 10},
+        {10, 30, 50, 30, 10},
+        {10, 20, 30, 20, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(testGrid);
+
+    GeoPoint a{ 2, 0 };
+    GeoPoint b{ 2, 4 };
+
+    std::vector<ProfileSample> profile1 = GetTerrainProfile(a, b, 1.0, sampler);
+    LineOfSightResult los1 = ComputeLineOfSight(profile1, 2.0, 2.0, 4.0);
+
+    std::vector<ProfileSample> profile2 = GetTerrainProfile(a, b, 1.0, sampler);
+    LineOfSightResult los2 = ComputeLineOfSight(profile2, 2.0, 2.0, 4.0);
+
+    assert(los1.isVisible == los2.isVisible);
+    assert(los1.clearanceDeficit == los2.clearanceDeficit);
+    std::cout << "PASS: TestDeterminism" << std::endl;
 }

@@ -15,6 +15,7 @@ int main()
     TestCurvatureBlocksFlatTerrain();
     TestVoidPointIsDegraded();
     TestViewshedDetectsVoid();
+    TestDeterminism();
 
     std::cout << "-------------------------" << std::endl;
 
