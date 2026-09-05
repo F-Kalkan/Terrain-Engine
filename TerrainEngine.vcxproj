@@ -126,6 +126,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="IElevationSampler.h" />
+    <ClInclude Include="ImageWriter.h" />
     <ClInclude Include="LineOfSight.h" />
     <ClInclude Include="RealElevationSampler.h" />
     <ClInclude Include="TerrainProfile.h" />

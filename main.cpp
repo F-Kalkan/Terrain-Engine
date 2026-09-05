@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
+#include "ImageWriter.h"
 
 void RunPerformanceBenchmark()
 {
@@ -41,6 +42,41 @@ void RunPerformanceBenchmark()
     auto end2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> fastTime = end2 - start2;
     std::cout << radiusKm << "km fast viewshed (" << gridSize << "x" << gridSize << "), Time: " << fastTime.count() << " ms" << std::endl;
+
+
+    WriteProfilePGM(profile, "profile_output.pgm");
+    WriteViewshedPGM(fastResult, "viewshed_output.pgm");
+
+
+
+    //Temporary Test
+    double smallRadiusKm = 2.0;
+    double smallRadiusInDegrees = (smallRadiusKm * 1000.0) / metersPerDegreeLat;
+    int smallGridSize = (int)(2 * smallRadiusInDegrees / spacingInDegrees);
+
+    ViewshedResult smallFast = ComputeViewshedFast(viewshedObserver, 2.0, smallGridSize, smallGridSize, spacingInDegrees, sampler);
+    ViewshedResult smallNaive = ComputeViewshedNaive(viewshedObserver, 2.0, smallGridSize, smallGridSize, spacingInDegrees, sampler);
+
+    int mismatches = 0;
+    int totalValid = 0;
+    for (int row = 0; row < smallGridSize; row++)
+    {
+        for (int col = 0; col < smallGridSize; col++)
+        {
+            if (smallFast.visible[row][col].has_value() && smallNaive.visible[row][col].has_value())
+            {
+                totalValid++;
+                if (*smallFast.visible[row][col] != *smallNaive.visible[row][col])
+                {
+                    mismatches++;
+                }
+            }
+        }
+    }
+
+    std::cout << smallRadiusKm << "km karsilastirma (" << smallGridSize << "x" << smallGridSize << "): "
+        << mismatches << " / " << totalValid << " hucre farkli" << std::endl;
+
 }
 
 int main()
@@ -123,6 +159,33 @@ int main()
     std::cout << "-------------------------" << std::endl;
  
     RunPerformanceBenchmark();
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     std::cout << "-------------------------" << std::endl;
 
