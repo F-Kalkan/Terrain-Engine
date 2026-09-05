@@ -195,3 +195,11 @@ assertion. All 10 + the tolerance check pass identically in Debug and Release.
 `cli_viewshed_output.pgm` (produced by the `viewshed` CLI command) — plain P5 binary
 PGM, written by a single self-contained writer (`ImageWriter.h`), no graphics
 dependency.
+
+**Orientation note:** in the viewshed PGM/PNG, west is left and east is right (as
+expected), but **north is at the bottom of the image, not the top** — row 0 (written
+first, so the top of the image) corresponds to the observer's south, because
+`ComputeViewshedFast`/`ComputeViewshedNaive` compute `target.latitude = observer.latitude
++ (row - centerRow) * spacing`, and increasing `row` means increasing latitude (further
+north). This is not a standard north-up map; it's the raw grid orientation exactly as
+computed. Flip the image vertically if you want a conventional north-up view.
