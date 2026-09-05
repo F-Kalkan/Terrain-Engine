@@ -11,7 +11,7 @@ struct ViewshedResult
 };
 
 //Naive ViewShed
-ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHeight, int gridRows, int gridCols, double spacing, IElevationSampler& sampler)
+inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHeight, int gridRows, int gridCols, double spacing, IElevationSampler& sampler, double k = 4.0 / 3.0)
 {
     ViewshedResult result;
     result.visible.resize(gridRows, std::vector<std::optional<bool>>(gridCols, std::nullopt));
@@ -33,7 +33,7 @@ ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHeight, in
             }
 
             std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacing, sampler);
-            LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, 0, distance);
+            LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, 0, distance, k);
 
             if (los.isDegraded)
             {
@@ -51,12 +51,11 @@ ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHeight, in
 }
 
 //Fast ViewShed
-ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeight, int gridRows, int gridCols, double spacing, IElevationSampler& sampler)
+inline ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeight, int gridRows, int gridCols, double spacing, IElevationSampler& sampler, double k = 4.0 / 3.0)
 {
     ViewshedResult result;
     result.visible.resize(gridRows, std::vector<std::optional<bool>>(gridCols, std::nullopt));
 
-    const double k = 4.0 / 3.0;
     const double R = 6371000.0;
 
     int centerRow = gridRows / 2;

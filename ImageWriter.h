@@ -5,7 +5,7 @@
 #include "TerrainProfile.h"
 #include "Viewshed.h"
 
-void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePath)
+inline void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePath)
 {
     int rows = (int)viewshed.visible.size();
     int cols = (int)viewshed.visible[0].size();
@@ -35,7 +35,7 @@ void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePath)
     }
 }
 
-void WriteProfilePGM(const std::vector<ProfileSample>& profile, std::string filePath, int imageHeight = 200)
+inline void WriteProfilePGM(const std::vector<ProfileSample>& profile, std::string filePath, int imageHeight = 200)
 {
     int width = (int)profile.size();
 

@@ -11,10 +11,9 @@ struct LineOfSightResult
     double clearanceDeficit = 0.0;
 };
 
-LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double hA, double hB, double totalDistance)
+inline LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double hA, double hB, double totalDistance, double k = 4.0 / 3.0)
 {
 
-    const double k = 4.0 / 3.0;
     const double R = 6371000.0;
 
     LineOfSightResult result;

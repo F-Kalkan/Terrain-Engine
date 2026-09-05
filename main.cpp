@@ -13,7 +13,7 @@
 
 void RunPerformanceBenchmark()
 {
-    RealElevationSampler sampler("Data/N36W112.hgt", 36.0, -112.0);
+    RealElevationSampler sampler("DATA/N36W112.hgt", 36.0, -112.0);
 
     double metersPerDegreeLat = 111320.0;
     double spacingInDegrees = 30.0 / metersPerDegreeLat;
@@ -74,8 +74,14 @@ void RunPerformanceBenchmark()
         }
     }
 
-    std::cout << smallRadiusKm << "km karsilastirma (" << smallGridSize << "x" << smallGridSize << "): "
-        << mismatches << " / " << totalValid << " hucre farkli" << std::endl;
+    double mismatchRatio = (double)mismatches / totalValid;
+    double tolerance = 0.05; // Ridgeline disagreement between fast's off-axis ray sampling and naive's exact per-target LOS; see notes.
+
+    std::cout << smallRadiusKm << "km comparison (" << smallGridSize << "x" << smallGridSize << "): "
+        << mismatches << " / " << totalValid << " cells differ (" << (mismatchRatio * 100.0)
+        << "%, tolerance: " << (tolerance * 100.0) << "%)" << std::endl;
+
+    Expect(mismatchRatio < tolerance, "FastViewshedMatchesNaive on real SRTM data within stated tolerance");
 
 }
 
@@ -97,6 +103,11 @@ int main(int argc, char* argv[])
             double spacing = std::stod(argv[9]);
 
             RealElevationSampler sampler(hgtFile, swLat, swLon);
+            if (!sampler.IsLoaded())
+            {
+                std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
+                return 1;
+            }
             GeoPoint a{ aLat, aLon };
             GeoPoint b{ bLat, bLon };
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
@@ -115,7 +126,7 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        if (mode == "los" && argc == 12)
+        if (mode == "los" && (argc == 12 || argc == 13))
         {
             std::string hgtFile = argv[2];
             double swLat = std::stod(argv[3]);
@@ -127,14 +138,20 @@ int main(int argc, char* argv[])
             double spacing = std::stod(argv[9]);
             double hA = std::stod(argv[10]);
             double hB = std::stod(argv[11]);
+            double k = (argc == 13) ? std::stod(argv[12]) : (4.0 / 3.0);
 
             RealElevationSampler sampler(hgtFile, swLat, swLon);
             GeoPoint a{ aLat, aLon };
+            if (!sampler.IsLoaded())
+            {
+                std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
+                return 1;
+            }
             GeoPoint b{ bLat, bLon };
             double distance = sqrt(pow(bLat - aLat, 2) + pow(bLon - aLon, 2)) * 111320.0;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            LineOfSightResult los = ComputeLineOfSight(profile, hA, hB, distance);
+            LineOfSightResult los = ComputeLineOfSight(profile, hA, hB, distance, k);
 
             std::cout << "Visible: " << (los.isVisible ? "YES" : "NO") << std::endl;
             if (los.blockingPoint.has_value())
@@ -147,7 +164,7 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        if (mode == "viewshed" && argc == 10)
+        if (mode == "viewshed" && (argc == 10 || argc == 11))
         {
             std::string hgtFile = argv[2];
             double swLat = std::stod(argv[3]);
@@ -157,21 +174,92 @@ int main(int argc, char* argv[])
             int gridSize = std::stoi(argv[7]);
             double spacing = std::stod(argv[8]);
             double height = std::stod(argv[9]);
+            double k = (argc == 11) ? std::stod(argv[10]) : (4.0 / 3.0);
 
             RealElevationSampler sampler(hgtFile, swLat, swLon);
+            if (!sampler.IsLoaded())
+            {
+                std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
+                return 1;
+            }
             GeoPoint observer{ obsLat, obsLon };
 
-            ViewshedResult result = ComputeViewshedFast(observer, height, gridSize, gridSize, spacing, sampler);
+            ViewshedResult result = ComputeViewshedFast(observer, height, gridSize, gridSize, spacing, sampler, k);
             WriteViewshedPGM(result, "cli_viewshed_output.pgm");
 
             std::cout << "Viewshed written to cli_viewshed_output.pgm" << std::endl;
             return 0;
         }
+        
+        if (mode == "benchmark" && argc == 6)
+        {
+            std::string subMode = argv[2];
+            std::string hgtFile = argv[3];
+            double swLat = std::stod(argv[4]);
+            double swLon = std::stod(argv[5]);
+
+            RealElevationSampler sampler(hgtFile, swLat, swLon);
+            if (!sampler.IsLoaded())
+            {
+                std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
+                return 1;
+            }
+            double metersPerDegreeLat = 111320.0;
+            double spacingInDegrees = 30.0 / metersPerDegreeLat;
+
+            if (subMode == "profile")
+            {
+                double latDeltaFor50km = 50000.0 / metersPerDegreeLat;
+                GeoPoint a{ swLat + 0.3, swLon + 0.5 };
+                GeoPoint b{ a.latitude + latDeltaFor50km, a.longitude };
+
+                auto start = std::chrono::high_resolution_clock::now();
+                std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacingInDegrees, sampler);
+                LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 50000.0);
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double, std::milli> elapsed = end - start;
+
+                PROCESS_MEMORY_COUNTERS pmc;
+                GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+                double peakMB = pmc.PeakWorkingSetSize / (1024.0 * 1024.0);
+
+                std::cout << "Profile benchmark: 50km @ 30m spacing (" << profile.size() << " samples)" << std::endl;
+                std::cout << "Wall time: " << elapsed.count() << " ms" << std::endl;
+                std::cout << "Peak memory: " << peakMB << " MB" << std::endl;
+                return 0;
+            }
+
+            if (subMode == "viewshed")
+            {
+                double radiusKm = 30.0;
+                double radiusInDegrees = (radiusKm * 1000.0) / metersPerDegreeLat;
+                int gridSize = (int)(2 * radiusInDegrees / spacingInDegrees);
+                GeoPoint observer{ swLat + 0.5, swLon + 0.5 };
+
+                auto start = std::chrono::high_resolution_clock::now();
+                ViewshedResult result = ComputeViewshedFast(observer, 2.0, gridSize, gridSize, spacingInDegrees, sampler);
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double, std::milli> elapsed = end - start;
+
+                PROCESS_MEMORY_COUNTERS pmc;
+                GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+                double peakMB = pmc.PeakWorkingSetSize / (1024.0 * 1024.0);
+
+                std::cout << "Viewshed benchmark: 30km radius @ 30m data (" << gridSize << "x" << gridSize << ")" << std::endl;
+                std::cout << "Wall time: " << elapsed.count() << " ms" << std::endl;
+                std::cout << "Peak memory: " << peakMB << " MB" << std::endl;
+                return 0;
+            }
+
+            std::cout << "Unknown benchmark mode. Use 'profile' or 'viewshed'." << std::endl;
+            return 1;
+        }
 
         std::cout << "Usage:" << std::endl;
+        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>" << std::endl;
         std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing>" << std::endl;
-        std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB>" << std::endl;
-        std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height>" << std::endl;
+        std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k]" << std::endl;
+        std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k]" << std::endl;
         return 1;
     }
 
@@ -227,7 +315,7 @@ int main(int argc, char* argv[])
 
     std::cout << "-------------------------" << std::endl;
 
-    RealElevationSampler realSampler("Data/N36W112.hgt", 36.0, -112.0);
+    RealElevationSampler realSampler("DATA/N36W112.hgt", 36.0, -112.0);
     auto elevation = realSampler.GetElevation(36.5, -111.5);
     if (elevation.has_value())
     {

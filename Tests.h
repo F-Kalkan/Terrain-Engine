@@ -6,6 +6,19 @@
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
 #include "Viewshed.h"
+#include <string>
+
+inline void Expect(bool condition, const std::string& testName)
+{
+    if (condition)
+    {
+        std::cout << "PASS: " << testName << std::endl;
+    }
+    else
+    {
+        std::cout << "FAIL: " << testName << std::endl;
+    }
+}
 
 // TEST 1 
 void TestFlatPlateauEverythingVisible()
@@ -22,8 +35,7 @@ void TestFlatPlateauEverythingVisible()
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 2.0);
 
-    assert(los.isVisible == true);
-    std::cout << "PASS: TestFlatPlateauEverythingVisible" << std::endl;
+    Expect(los.isVisible == true, "TestFlatPlateauEverythingVisible");
 }
 
 // TEST 2  
@@ -43,9 +55,7 @@ void TestWallBlocksView()
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 4.0);
 
-    assert(los.isVisible == false);
-    assert(std::abs(los.clearanceDeficit - 38.0) < 0.001);
-    std::cout << "PASS: TestWallBlocksView" << std::endl;
+    Expect(los.isVisible == false && std::abs(los.clearanceDeficit - 38.0) < 0.001, "TestWallBlocksView");
 }
 
 // TEST 3 
@@ -56,7 +66,7 @@ void TestCurvatureBlocksFlatTerrain()
     // But for Earths curvature;
     // Calculation: middle point (d1=d2=25000m), curvature drop = 25000*25000 / (2 * 4/3 * 6371000) ~= 36.79m
     // deficit = 36.79 - 2 = ~34.79m
-    
+
     std::vector<ProfileSample> curvatureProfile;
     for (int i = 0; i <= 10; i++)
     {
@@ -67,11 +77,14 @@ void TestCurvatureBlocksFlatTerrain()
         curvatureProfile.push_back(s);
     }
 
-    LineOfSightResult los = ComputeLineOfSight(curvatureProfile, 2.0, 2.0, 50000.0);
+    // Flat-earth comparison: an enormous k makes the curvature term negligible,
+    // So the exact same geometry must report visible when curvature is effectively switched off.
+    LineOfSightResult flatEarth = ComputeLineOfSight(curvatureProfile, 2.0, 2.0, 50000.0, 1e12);
 
-    assert(los.isVisible == false);
-    assert(std::abs(los.clearanceDeficit - 34.79) < 0.1);
-    std::cout << "PASS: TestCurvatureBlocksFlatTerrain" << std::endl;
+    LineOfSightResult curved = ComputeLineOfSight(curvatureProfile, 2.0, 2.0, 50000.0);
+
+    Expect(flatEarth.isVisible == true && curved.isVisible == false && std::abs(curved.clearanceDeficit - 34.79) < 0.1,
+        "TestCurvatureBlocksFlatTerrain (flat-earth visible vs curved blocked)");
 }
 
 // TEST 4
@@ -98,8 +111,7 @@ void TestVoidPointIsDegraded()
 
     LineOfSightResult los = ComputeLineOfSight(voidProfile, 2.0, 2.0, 2.0);
 
-    assert(los.isDegraded == true);
-    std::cout << "PASS: TestVoidPointIsDegraded" << std::endl;
+    Expect(los.isDegraded == true, "TestVoidPointIsDegraded");
 }
 
 // TEST 5
@@ -132,8 +144,7 @@ void TestViewshedDetectsVoid()
         }
     }
 
-    assert(foundUnknown == true);
-    std::cout << "PASS: TestViewshedDetectsVoid" << std::endl;
+    Expect(foundUnknown == true, "TestViewshedDetectsVoid");
 }
 
 // TEST 6
@@ -157,9 +168,7 @@ void TestDeterminism()
     std::vector<ProfileSample> profile2 = GetTerrainProfile(a, b, 1.0, sampler);
     LineOfSightResult los2 = ComputeLineOfSight(profile2, 2.0, 2.0, 4.0);
 
-    assert(los1.isVisible == los2.isVisible);
-    assert(los1.clearanceDeficit == los2.clearanceDeficit);
-    std::cout << "PASS: TestDeterminism" << std::endl;
+    Expect(los1.isVisible == los2.isVisible && los1.clearanceDeficit == los2.clearanceDeficit, "TestDeterminism");
 }
 
 //Test 7
@@ -190,8 +199,7 @@ void TestFastViewshedMatchesNaive()
         }
     }
 
-    assert(mismatches == 0);
-    std::cout << "PASS: TestFastViewshedMatchesNaive" << std::endl;
+    Expect(mismatches == 0, "TestFastViewshedMatchesNaive");
 }
 
 //TEST 8    
@@ -215,9 +223,7 @@ void TestSymmetricHillReciprocity()
     std::vector<ProfileSample> profileBA = GetTerrainProfile(b, a, 1.0, sampler);
     LineOfSightResult losBA = ComputeLineOfSight(profileBA, 2.0, 2.0, 4.0);
 
-    assert(losAB.isVisible == losBA.isVisible);
-    assert(std::abs(losAB.clearanceDeficit - losBA.clearanceDeficit) < 0.001);
-    std::cout << "PASS: TestSymmetricHillReciprocity" << std::endl;
+    Expect(losAB.isVisible == losBA.isVisible && std::abs(losAB.clearanceDeficit - losBA.clearanceDeficit) < 0.001, "TestSymmetricHillReciprocity");
 }
 
 //TEST 9    
@@ -238,8 +244,7 @@ void TestObserverBelowRim()
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 2.0);
 
-    assert(los.isVisible == false);
-    std::cout << "PASS: TestObserverBelowRim" << std::endl;
+    Expect(los.isVisible == false, "TestObserverBelowRim");
 }
 
 //TEST 10
@@ -257,6 +262,5 @@ void TestTargetOnFarSlopeVisible()
 
     LineOfSightResult los = ComputeLineOfSight(slopeProfile, 2.0, 2.0, 4.0);
 
-    assert(los.isVisible == true);
-    std::cout << "PASS: TestTargetOnFarSlopeVisible" << std::endl;
+    Expect(los.isVisible == true, "TestTargetOnFarSlopeVisible");
 }

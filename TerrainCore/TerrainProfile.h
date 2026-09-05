@@ -17,13 +17,14 @@ struct ProfileSample
     std::optional<double> elevation;
 };
 
-std::vector<ProfileSample> GetTerrainProfile(GeoPoint a, GeoPoint b, double spacing, IElevationSampler& sampler)
+inline std::vector<ProfileSample> GetTerrainProfile(GeoPoint a, GeoPoint b, double spacing, IElevationSampler& sampler)
 {
     std::vector<ProfileSample> result;
 
     double totalDistance = sqrt(pow(b.latitude - a.latitude, 2) + pow(b.longitude - a.longitude, 2));
 
     int sampleCount = (int)(totalDistance / spacing);
+    if (sampleCount < 1) sampleCount = 1;
 
     for (int i = 0; i <= sampleCount; i++)
     {

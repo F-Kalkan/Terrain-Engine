@@ -6,3 +6,4 @@ Release/
 *.pdb
 *.ilk
 *.log
+*.vcxproj.user

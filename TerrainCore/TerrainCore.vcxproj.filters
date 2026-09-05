@@ -15,15 +15,21 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Tests.h">
+    <ClInclude Include="IElevationSampler.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ImageWriter.h">
+    <ClInclude Include="LineOfSight.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TerrainProfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Viewshed.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="TerrainCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
