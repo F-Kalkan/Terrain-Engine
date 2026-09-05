@@ -127,6 +127,7 @@
     <ClInclude Include="IElevationSampler.h" />
     <ClInclude Include="LineOfSight.h" />
     <ClInclude Include="TerrainProfile.h" />
+    <ClInclude Include="Tests.h" />
     <ClInclude Include="Viewshed.h" />
   </ItemGroup>
   <ItemGroup>
