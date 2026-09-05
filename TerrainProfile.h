@@ -2,6 +2,8 @@
 #include <vector>
 #include "IElevationSampler.h"
 #include <cmath>
+#include <optional>
+
 
 struct GeoPoint
 {
@@ -12,7 +14,7 @@ struct GeoPoint
 struct ProfileSample
 {
     GeoPoint point;
-    double elevation;
+    std::optional<double> elevation;
 };
 
 std::vector<ProfileSample> GetTerrainProfile(GeoPoint a, GeoPoint b, double spacing, IElevationSampler& sampler)

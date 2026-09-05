@@ -11,6 +11,8 @@ int main()
     TestFlatPlateauEverythingVisible();
     TestWallBlocksView();
     TestCurvatureBlocksFlatTerrain();
+    TestVoidPointIsDegraded();
+    TestViewshedDetectsVoid();
 
     std::cout << "-------------------------" << std::endl;
 
@@ -32,7 +34,18 @@ int main()
     {
         for (int col = 0; col < 5; col++)
         {
-            std::cout << (viewshed.visible[row][col] ? "#" : ".") << " ";
+            if (!viewshed.visible[row][col].has_value())
+            {
+                std::cout << "? ";
+            }
+            else if (*viewshed.visible[row][col])
+            {
+                std::cout << "# ";
+            }
+            else
+            {
+                std::cout << ". ";
+            }
         }
         std::cout << std::endl;
     }

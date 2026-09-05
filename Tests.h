@@ -74,3 +74,65 @@ void TestCurvatureBlocksFlatTerrain()
     assert(std::abs(los.clearanceDeficit - 34.79) < 0.1);
     std::cout << "Pass: TestCurvatureBlocksFlatTerrain" << std::endl;
 }
+
+// TEST 4
+void TestVoidPointIsDegraded()
+{
+    // P2 = Void. Function must skip that point and mark it as degraded.
+
+    std::vector<ProfileSample> voidProfile;
+
+    ProfileSample p0;
+    p0.point = GeoPoint{ 0, 0 };
+    p0.elevation = 10;
+    voidProfile.push_back(p0);
+
+    ProfileSample p1;
+    p1.point = GeoPoint{ 0, 1 };
+    p1.elevation = std::nullopt;
+    voidProfile.push_back(p1);
+
+    ProfileSample p2;
+    p2.point = GeoPoint{ 0, 2 };
+    p2.elevation = 10;
+    voidProfile.push_back(p2);
+
+    LineOfSightResult los = ComputeLineOfSight(voidProfile, 2.0, 2.0, 2.0);
+
+    assert(los.isDegraded == true);
+    std::cout << "PASS: TestVoidPointIsDegraded" << std::endl;
+}
+
+// TEST 5
+void TestViewshedDetectsVoid()
+{
+    // Testing viewshed outside the grid
+    // It should return as ?
+
+    std::vector<std::vector<double>> smallGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(smallGrid);
+
+    GeoPoint observerPos{ 0, 0 };
+    ViewshedResult viewshed = ComputeViewshedNaive(observerPos, 2.0, 7, 7, 1.0, sampler);
+
+    bool foundUnknown = false;
+    for (int row = 0; row < 7; row++)
+    {
+        for (int col = 0; col < 7; col++)
+        {
+            if (!viewshed.visible[row][col].has_value())
+            {
+                foundUnknown = true;
+            }
+        }
+    }
+
+    assert(foundUnknown == true);
+    std::cout << "PASS: TestViewshedDetectsVoid" << std::endl;
+}
