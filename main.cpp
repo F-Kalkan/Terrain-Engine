@@ -89,7 +89,10 @@ int main()
     TestViewshedDetectsVoid();
     TestDeterminism();
     TestFastViewshedMatchesNaive();
-    
+    TestSymmetricHillReciprocity();
+    TestObserverBelowRim();
+    TestTargetOnFarSlopeVisible();
+
 
     std::cout << "-------------------------" << std::endl;
 

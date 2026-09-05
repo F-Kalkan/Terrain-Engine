@@ -4,11 +4,11 @@
 
 struct LineOfSightResult
 {
-    bool isVisible;
-    bool isDegraded;
+    bool isVisible = false;
+    bool isDegraded = false;
     std::optional<GeoPoint> blockingPoint;
     std::optional<double> blockingElevation;
-    double clearanceDeficit;
+    double clearanceDeficit = 0.0;
 };
 
 LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double hA, double hB, double totalDistance)

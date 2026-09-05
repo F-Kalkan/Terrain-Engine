@@ -193,3 +193,70 @@ void TestFastViewshedMatchesNaive()
     assert(mismatches == 0);
     std::cout << "PASS: TestFastViewshedMatchesNaive" << std::endl;
 }
+
+//TEST 8    
+void TestSymmetricHillReciprocity()
+{
+    std::vector<std::vector<double>> testGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 20, 30, 20, 10},
+        {10, 30, 50, 30, 10},
+        {10, 20, 30, 20, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(testGrid);
+
+    GeoPoint a{ 2, 0 };
+    GeoPoint b{ 2, 4 };
+
+    std::vector<ProfileSample> profileAB = GetTerrainProfile(a, b, 1.0, sampler);
+    LineOfSightResult losAB = ComputeLineOfSight(profileAB, 2.0, 2.0, 4.0);
+
+    std::vector<ProfileSample> profileBA = GetTerrainProfile(b, a, 1.0, sampler);
+    LineOfSightResult losBA = ComputeLineOfSight(profileBA, 2.0, 2.0, 4.0);
+
+    assert(losAB.isVisible == losBA.isVisible);
+    assert(std::abs(losAB.clearanceDeficit - losBA.clearanceDeficit) < 0.001);
+    std::cout << "PASS: TestSymmetricHillReciprocity" << std::endl;
+}
+
+//TEST 9    
+void TestObserverBelowRim()
+{
+    std::vector<std::vector<double>> testGrid = {
+        {5, 5, 5, 5, 5},
+        {5, 30, 30, 30, 5},
+        {5, 30, 5, 30, 5},
+        {5, 30, 30, 30, 5},
+        {5, 5, 5, 5, 5}
+    };
+    FakeElevationSampler sampler(testGrid);
+
+    GeoPoint a{ 2, 2 };
+    GeoPoint b{ 2, 4 };
+
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
+    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 2.0);
+
+    assert(los.isVisible == false);
+    std::cout << "PASS: TestObserverBelowRim" << std::endl;
+}
+
+//TEST 10
+void TestTargetOnFarSlopeVisible()
+{
+    std::vector<ProfileSample> slopeProfile;
+    double elevations[] = { 0, 5, 10, 15, 20 };
+    for (int i = 0; i < 5; i++)
+    {
+        ProfileSample s;
+        s.point = GeoPoint{ 0, (double)i };
+        s.elevation = elevations[i];
+        slopeProfile.push_back(s);
+    }
+
+    LineOfSightResult los = ComputeLineOfSight(slopeProfile, 2.0, 2.0, 4.0);
+
+    assert(los.isVisible == true);
+    std::cout << "PASS: TestTargetOnFarSlopeVisible" << std::endl;
+}
