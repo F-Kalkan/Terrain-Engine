@@ -78,8 +78,9 @@ only a demo/tooling one.
   `ComputeLineOfSight`, `ComputeViewshedNaive`, and `ComputeViewshedFast` — settable
   from the CLI (`los`/`viewshed` commands take an optional trailing `k` argument).
 - **Interpolation**: two modes, chosen via `InterpolationMode` (`Nearest` default,
-  `Bilinear` alternative), on both `FakeElevationSampler` and `RealElevationSampler`.
-  Bilinear returns `nullopt` if any of the 4 surrounding cells is out of bounds or a
+  `Bilinear` alternative), on both `FakeElevationSampler` and `RealElevationSampler` —
+  settable from the CLI (`profile`/`los`/`viewshed` commands take an optional trailing
+  `nearest`/`bilinear` argument). Bilinear returns `nullopt` if any of the 4 surrounding cells is out of bounds or a
   void, rather than interpolating across a hole.
 - **Sampling**: `sampleCount = max(1, floor(totalDistance / spacing))`; the profile
   always has at least 2 samples (the two endpoints), even if the two points are closer
@@ -175,9 +176,9 @@ links both and produces `TerrainEngine.exe`.
 ## CLI usage
 ```
 TerrainEngine.exe # run the 10-case test suite + demo
-TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing>
-TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k]
-TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k]
+TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
+TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
+TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear]
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 ```
 Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002694 2.0 2.0
