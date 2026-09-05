@@ -91,7 +91,7 @@ int main(int argc, char* argv[])
     {
         std::string mode = argv[1];
 
-        if (mode == "profile" && argc == 10)
+        if (mode == "profile" && (argc == 10 || argc == 11))
         {
             std::string hgtFile = argv[2];
             double swLat = std::stod(argv[3]);
@@ -101,8 +101,10 @@ int main(int argc, char* argv[])
             double bLat = std::stod(argv[7]);
             double bLon = std::stod(argv[8]);
             double spacing = std::stod(argv[9]);
+            InterpolationMode interp = InterpolationMode::Nearest;
+            if (argc == 11 && std::string(argv[10]) == "bilinear") interp = InterpolationMode::Bilinear;
 
-            RealElevationSampler sampler(hgtFile, swLat, swLon);
+            RealElevationSampler sampler(hgtFile, swLat, swLon, interp);
             if (!sampler.IsLoaded())
             {
                 std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
@@ -126,7 +128,7 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        if (mode == "los" && (argc == 12 || argc == 13))
+        if (mode == "los" && (argc == 12 || argc == 13 || argc == 14))
         {
             std::string hgtFile = argv[2];
             double swLat = std::stod(argv[3]);
@@ -138,9 +140,11 @@ int main(int argc, char* argv[])
             double spacing = std::stod(argv[9]);
             double hA = std::stod(argv[10]);
             double hB = std::stod(argv[11]);
-            double k = (argc == 13) ? std::stod(argv[12]) : (4.0 / 3.0);
+            double k = (argc >= 13) ? std::stod(argv[12]) : (4.0 / 3.0);
+            InterpolationMode interp = InterpolationMode::Nearest;
+            if (argc == 14 && std::string(argv[13]) == "bilinear") interp = InterpolationMode::Bilinear;
 
-            RealElevationSampler sampler(hgtFile, swLat, swLon);
+            RealElevationSampler sampler(hgtFile, swLat, swLon, interp);
             GeoPoint a{ aLat, aLon };
             if (!sampler.IsLoaded())
             {
@@ -164,7 +168,7 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        if (mode == "viewshed" && (argc == 10 || argc == 11))
+        if (mode == "viewshed" && (argc == 10 || argc == 11 || argc == 12))
         {
             std::string hgtFile = argv[2];
             double swLat = std::stod(argv[3]);
@@ -174,9 +178,11 @@ int main(int argc, char* argv[])
             int gridSize = std::stoi(argv[7]);
             double spacing = std::stod(argv[8]);
             double height = std::stod(argv[9]);
-            double k = (argc == 11) ? std::stod(argv[10]) : (4.0 / 3.0);
+            double k = (argc >= 11) ? std::stod(argv[10]) : (4.0 / 3.0);
+            InterpolationMode interp = InterpolationMode::Nearest;
+            if (argc == 12 && std::string(argv[11]) == "bilinear") interp = InterpolationMode::Bilinear;
 
-            RealElevationSampler sampler(hgtFile, swLat, swLon);
+            RealElevationSampler sampler(hgtFile, swLat, swLon, interp);
             if (!sampler.IsLoaded())
             {
                 std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
@@ -257,9 +263,9 @@ int main(int argc, char* argv[])
 
         std::cout << "Usage:" << std::endl;
         std::cout << "  TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>" << std::endl;
-        std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing>" << std::endl;
-        std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k]" << std::endl;
-        std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k]" << std::endl;
+        std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]" << std::endl;
+        std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
+        std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear]" << std::endl;
         return 1;
     }
 
