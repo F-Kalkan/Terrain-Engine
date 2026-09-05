@@ -5,6 +5,7 @@
 #include "IElevationSampler.h"
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
+#include "Viewshed.h"
 
 // TEST 1 
 void TestFlatPlateauEverythingVisible()
@@ -159,4 +160,36 @@ void TestDeterminism()
     assert(los1.isVisible == los2.isVisible);
     assert(los1.clearanceDeficit == los2.clearanceDeficit);
     std::cout << "PASS: TestDeterminism" << std::endl;
+}
+
+//Test 7
+void TestFastViewshedMatchesNaive()
+{
+    std::vector<std::vector<double>> testGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 20, 30, 20, 10},
+        {10, 30, 50, 30, 10},
+        {10, 20, 30, 20, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(testGrid);
+    GeoPoint observerPos{ 0, 0 };
+
+    ViewshedResult naive = ComputeViewshedNaive(observerPos, 2.0, 5, 5, 1.0, sampler);
+    ViewshedResult fast = ComputeViewshedFast(observerPos, 2.0, 5, 5, 1.0, sampler);
+
+    int mismatches = 0;
+    for (int row = 0; row < 5; row++)
+    {
+        for (int col = 0; col < 5; col++)
+        {
+            if (naive.visible[row][col] != fast.visible[row][col])
+            {
+                mismatches++;
+            }
+        }
+    }
+
+    assert(mismatches == 0);
+    std::cout << "PASS: TestFastViewshedMatchesNaive" << std::endl;
 }
