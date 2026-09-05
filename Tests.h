@@ -117,7 +117,7 @@ void TestViewshedDetectsVoid()
     };
     FakeElevationSampler sampler(smallGrid);
 
-    GeoPoint observerPos{ 0, 0 };
+    GeoPoint observerPos{ 2, 2 };
     ViewshedResult viewshed = ComputeViewshedNaive(observerPos, 2.0, 7, 7, 1.0, sampler);
 
     bool foundUnknown = false;
@@ -173,7 +173,7 @@ void TestFastViewshedMatchesNaive()
         {10, 10, 10, 10, 10}
     };
     FakeElevationSampler sampler(testGrid);
-    GeoPoint observerPos{ 0, 0 };
+    GeoPoint observerPos{ 2, 2 };
 
     ViewshedResult naive = ComputeViewshedNaive(observerPos, 2.0, 5, 5, 1.0, sampler);
     ViewshedResult fast = ComputeViewshedFast(observerPos, 2.0, 5, 5, 1.0, sampler);

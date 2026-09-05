@@ -16,16 +16,14 @@ ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHeight, in
     ViewshedResult result;
     result.visible.resize(gridRows, std::vector<std::optional<bool>>(gridCols, std::nullopt));
 
+    int centerRow = gridRows / 2;
+    int centerCol = gridCols / 2;
+
     for (int row = 0; row < gridRows; row++)
     {
         for (int col = 0; col < gridCols; col++)
         {
-            
-            GeoPoint target{ 
-                (double)row, 
-                (double)col 
-            };
-            
+            GeoPoint target{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (col - centerCol) * spacing };
             double distance = sqrt(pow(target.latitude - observer.latitude, 2) + pow(target.longitude - observer.longitude, 2));
 
             if (distance == 0)
@@ -36,7 +34,7 @@ ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHeight, in
 
             std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacing, sampler);
             LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, 0, distance);
-            
+
             if (los.isDegraded)
             {
                 result.visible[row][col] = std::nullopt;
@@ -61,6 +59,9 @@ ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeight, int
     const double k = 4.0 / 3.0;
     const double R = 6371000.0;
 
+    int centerRow = gridRows / 2;
+    int centerCol = gridCols / 2;
+
     auto observerElevation = sampler.GetElevation(observer.latitude, observer.longitude);
     
     if (!observerElevation.has_value())
@@ -73,14 +74,14 @@ ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeight, int
     
     for (int col = 0; col < gridCols; col++)
     {
-        boundaryCells.push_back(GeoPoint{ 0, (double)col });
-        boundaryCells.push_back(GeoPoint{ (double)(gridRows - 1), (double)col });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (0 - centerRow) * spacing, observer.longitude + (col - centerCol) * spacing });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (gridRows - 1 - centerRow) * spacing, observer.longitude + (col - centerCol) * spacing });
     }
     
     for (int row = 0; row < gridRows; row++)
     {
-        boundaryCells.push_back(GeoPoint{ (double)row, 0 });
-        boundaryCells.push_back(GeoPoint{ (double)row, (double)(gridCols - 1) });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (0 - centerCol) * spacing });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (gridCols - 1 - centerCol) * spacing });
     }
 
     for (const auto& target : boundaryCells)
@@ -97,9 +98,8 @@ ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeight, int
 
         for (int i = 1; i < profile.size(); i++)
         {
-            int row = (int)round(profile[i].point.latitude);
-            int col = (int)round(profile[i].point.longitude);
-            
+            int row = (int)round((profile[i].point.latitude - observer.latitude) / spacing) + centerRow;
+            int col = (int)round((profile[i].point.longitude - observer.longitude) / spacing) + centerCol;
             if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) continue;
 
             if (row == lastRow && col == lastCol) continue;
@@ -133,13 +133,7 @@ ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeight, int
         }
     }
 
-    int obsRow = (int)round(observer.latitude);
-    int obsCol = (int)round(observer.longitude);
-    
-    if (obsRow >= 0 && obsRow < gridRows && obsCol >= 0 && obsCol < gridCols)
-    {
-        result.visible[obsRow][obsCol] = true;
-    }
+    result.visible[centerRow][centerCol] = true;
 
     return result;
 }
