@@ -4,6 +4,8 @@
 #include "LineOfSight.h"
 #include "Viewshed.h"
 #include "Tests.h"
+#include "RealElevationSampler.h"
+
 
 int main()
 {
@@ -50,5 +52,21 @@ int main()
         std::cout << std::endl;
     }
 
+    std::cout << "-------------------------" << std::endl;
+
+    RealElevationSampler realSampler("Data/N36W112.hgt", 36.0, -112.0);
+    auto elevation = realSampler.GetElevation(36.5, -111.5);
+    if (elevation.has_value())
+    {
+        std::cout << "Elevation Near Grand Canyon: " << *elevation << "m" << std::endl;
+    }
+    else
+    {
+        std::cout << "No Data" << std::endl;
+    }
+
+    std::cout << "-------------------------" << std::endl;
+
     return 0;
 }
+
