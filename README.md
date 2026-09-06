@@ -149,8 +149,8 @@ AMD Ryzen 7 3800X (8 cores / 16 threads), 16 GB RAM, Windows 11 Pro x64, Release
 
 | Operation                                   | Wall time | Peak memory |
 |-----------------------------------------------|-----------|--------------|
-| 50 km profile @ 30 m spacing (1,667 samples)     | ~0.09–0.2 ms | ~11.9 MB |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | ~232–252 ms  | ~16.6 MB |
+| 50 km profile @ 30 m spacing (1,667 samples)     | ~0.12–0.27 ms | ~11.2 MB |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | ~275–282 ms   | ~24.0 MB |
 
 Each row was measured as its own process (`TerrainEngine.exe benchmark profile ...` /
 `TerrainEngine.exe benchmark viewshed ...`), so the two peak-memory figures are

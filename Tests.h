@@ -734,8 +734,8 @@ void TestBlockingFeatureClassificationIsSpacingInvariant()
 //TEST 23
 void TestViewshedLongitudeSpacingCorrectsForLatitude()
 {
-    // REVIEW.md: "the viewshed's geometry... actually covers ±30 km north-south
-    // and ±24.1 km east-west... It is an ellipse described as a circle." The
+    // REVIEW.md: "the viewshed's geometry... actually covers Â±30 km north-south
+    // and Â±24.1 km east-west... It is an ellipse described as a circle." The
     // distance/curvature fix in TerrainProfile.h doesn't touch this -- it's a
     // separate bug in how the viewshed functions choose which longitude to
     // query per grid column. LongitudeSpacingForLatitude widens the longitude
