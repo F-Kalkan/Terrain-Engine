@@ -127,6 +127,15 @@ only a demo/tooling one.
 - Distances up to the tested 50 km (profile) / 30 km radius (viewshed); the flat-plane
   distance approximation is not validated beyond that.
 - No threading — determinism across thread counts is satisfied vacuously.
+- **Unvalidated inputs, not exercised by any test or CLI path today:**
+  - `spacing <= 0` passed to `GetTerrainProfile` divides by zero (`sampleCount = totalDistance / spacing`).
+    No CLI argument or test ever passes a non-positive spacing, so this has never been hit in practice.
+  - `FakeElevationSampler` constructed with an empty grid (`{}`) would index `grid[0]` out of
+    bounds in its bilinear path. Every test and demo grid is non-empty; this is a latent
+    fragility in test-only code, not a path real data goes through.
+  - `LongitudeSpacingForLatitude` divides by `cos(latitude)`, which is zero exactly at the poles
+    (±90°). Consistent with the existing "would drift ... near the poles" caveat above — this
+    is the same known limitation surfacing as a division rather than a gradual drift.
 
 ## What it deliberately does not model
 
