@@ -197,6 +197,62 @@ int main(int argc, char* argv[])
             return 0;
         }
         
+        if (mode == "fresnel" && (argc == 13 || argc == 14))
+        {
+            std::string hgtFile = argv[2];
+            double swLat = std::stod(argv[3]);
+            double swLon = std::stod(argv[4]);
+            double aLat = std::stod(argv[5]);
+            double aLon = std::stod(argv[6]);
+            double bLat = std::stod(argv[7]);
+            double bLon = std::stod(argv[8]);
+            double spacing = std::stod(argv[9]);
+            double hA = std::stod(argv[10]);
+            double hB = std::stod(argv[11]);
+            double frequencyMHz = std::stod(argv[12]);
+            double k = (argc == 14) ? std::stod(argv[13]) : (4.0 / 3.0);
+
+            RealElevationSampler sampler(hgtFile, swLat, swLon);
+            if (!sampler.IsLoaded())
+            {
+                std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
+                return 1;
+            }
+            GeoPoint a{ aLat, aLon };
+            GeoPoint b{ bLat, bLon };
+            double distance = sqrt(pow(bLat - aLat, 2) + pow(bLon - aLon, 2)) * 111320.0;
+
+            std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
+            FresnelClearanceResult result = ComputeFresnelClearance(profile, hA, hB, distance, frequencyMHz * 1e6, k);
+
+            if (result.isDegraded)
+            {
+                std::cout << "Status: UNKNOWN (degraded -- no interior sample between the two points, or a void was hit)" << std::endl;
+            }
+            else
+            {
+                std::cout << "Min Fresnel clearance fraction: " << result.minClearanceFraction << std::endl;
+                if (result.worstPoint.has_value())
+                {
+                    std::cout << "Worst point: " << result.worstPoint->latitude << ", " << result.worstPoint->longitude << std::endl;
+                }
+                if (result.minClearanceFraction >= 1.0)
+                {
+                    std::cout << "Status: CLEAR (full first Fresnel zone unobstructed)" << std::endl;
+                }
+                else if (result.minClearanceFraction >= 0.0)
+                {
+                    std::cout << "Status: PARTIALLY OBSTRUCTED" << std::endl;
+                }
+                else
+                {
+                    std::cout << "Status: BLOCKED (line of sight itself obstructed)" << std::endl;
+                }
+            }
+            std::cout << "Degraded: " << (result.isDegraded ? "YES" : "NO") << std::endl;
+            return 0;
+        }
+
         if (mode == "benchmark" && argc == 6)
         {
             std::string subMode = argv[2];
@@ -266,6 +322,7 @@ int main(int argc, char* argv[])
         std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear]" << std::endl;
+        std::cout << "  TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> <frequencyMHz> [k]" << std::endl;
         return 1;
     }
 
@@ -281,6 +338,7 @@ int main(int argc, char* argv[])
     TestSymmetricHillReciprocity();
     TestObserverBelowRim();
     TestTargetOnFarSlopeVisible();
+    TestFresnelClearancePartialObstruction();
 
 
     std::cout << "-------------------------" << std::endl;

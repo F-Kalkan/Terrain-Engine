@@ -64,3 +64,70 @@ inline LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, 
 
     return result;
 }
+
+struct FresnelClearanceResult
+{
+    double minClearanceFraction = 0.0;
+    std::optional<GeoPoint> worstPoint;
+    bool isDegraded = false;
+};
+
+inline FresnelClearanceResult ComputeFresnelClearance(std::vector<ProfileSample> profile, double hA, double hB, double totalDistance, double frequencyHz, double k = 4.0 / 3.0)
+{
+    const double R = 6371000.0;
+    const double c = 299792458.0; // speed of light, m/s
+    double wavelength = c / frequencyHz;
+
+    FresnelClearanceResult result;
+    double bestKnownFraction = 1e18;
+
+    if (!profile.front().elevation.has_value() || !profile.back().elevation.has_value())
+    {
+        result.isDegraded = true;
+        return result;
+    }
+
+    double observerEyeHeight = *profile.front().elevation + hA;
+    double targetEyeHeight = *profile.back().elevation + hB;
+
+    for (int i = 0; i < profile.size(); i++)
+    {
+        if (!profile[i].elevation.has_value())
+        {
+            result.isDegraded = true;
+            continue;
+        }
+
+        double t = (double)i / (profile.size() - 1);
+        double d1 = t * totalDistance;
+        double d2 = totalDistance - d1;
+
+        if (d1 <= 0 || d2 <= 0) continue; // Fresnel radius is 0 at the antennas themselves
+
+        double lineHeight = observerEyeHeight + t * (targetEyeHeight - observerEyeHeight);
+        double curvatureDrop = (d1 * d2) / (2 * k * R);
+        double correctedElevation = *profile[i].elevation + curvatureDrop;
+
+        double clearance = lineHeight - correctedElevation; // positive = clear of terrain
+        double fresnelRadius = sqrt(wavelength * d1 * d2 / totalDistance);
+        double fraction = clearance / fresnelRadius;
+
+        if (fraction < bestKnownFraction)
+        {
+            bestKnownFraction = fraction;
+            result.worstPoint = profile[i].point;
+        }
+    }
+
+    if (bestKnownFraction >= 1e18)
+    {
+        // No interior sample existed between the two endpoints (points closer
+        // than one spacing unit apart) -- nothing was actually evaluated.
+        result.isDegraded = true;
+        result.minClearanceFraction = 0.0;
+        return result;
+    }
+
+    result.minClearanceFraction = bestKnownFraction;
+    return result;
+}

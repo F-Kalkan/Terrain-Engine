@@ -264,3 +264,26 @@ void TestTargetOnFarSlopeVisible()
 
     Expect(los.isVisible == true, "TestTargetOnFarSlopeVisible");
 }
+
+//TEST 11
+void TestFresnelClearancePartialObstruction()
+{
+    // Flat terrain (0m) except a 40m bump exactly at the midpoint.
+    // 10km link, 50m masts both ends, 2.4 GHz.
+    // Hand calc: wavelength=0.124914m, curvatureDrop(mid)=1.47151m,
+    // clearance=50-(40+1.47151)=8.52849m, fresnelRadius=sqrt(0.124914*5000*5000/10000)=17.6716m
+    // fraction = 8.52849/17.6716 ~= 0.4826 (partially obstructed, but not fully blocked)
+    std::vector<ProfileSample> profile;
+    for (int i = 0; i <= 10; i++)
+    {
+        ProfileSample s;
+        s.point = GeoPoint{ 0, (double)i };
+        s.elevation = (i == 5) ? 40.0 : 0.0;
+        profile.push_back(s);
+    }
+
+    FresnelClearanceResult result = ComputeFresnelClearance(profile, 50.0, 50.0, 10000.0, 2.4e9);
+
+    Expect(std::abs(result.minClearanceFraction - 0.4826) < 0.001 && result.worstPoint.has_value() && result.worstPoint->longitude == 5.0,
+        "TestFresnelClearancePartialObstruction");
+}
