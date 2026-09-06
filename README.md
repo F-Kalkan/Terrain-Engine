@@ -104,10 +104,10 @@ only a demo/tooling one.
 ## What it deliberately does not model
 
 - Vertical datum conversion (geoid ↔ ellipsoid).
-- Fresnel-zone / radio-path clearance.
 - Atmospheric refraction beyond the constant `k`.
 - Multiple elevation tiles / tile-boundary stitching.
-- Batch line-of-sight (N observers × M targets).
+- Batch line-of-sight (N observers × M targets) — see "Stretch goals implemented"
+  below if this has since been added.
 
 ## Determinism and floating-point settings
 
@@ -204,3 +204,15 @@ first, so the top of the image) corresponds to the observer's south, because
 + (row - centerRow) * spacing`, and increasing `row` means increasing latitude (further
 north). This is not a standard north-up map; it's the raw grid orientation exactly as
 computed. Flip the image vertically if you want a conventional north-up view.
+
+## Stretch goals implemented
+
+- **Fresnel-zone clearance** — `ComputeFresnelClearance` (in `LineOfSight.h`) reports
+  the worst-case fraction of the first Fresnel zone that is clear along a path, given
+  a frequency, instead of a boolean visible/blocked answer. `>= 1.0` means fully clear,
+  `0` to `1` means the terrain intrudes into the Fresnel zone without touching the
+  direct line, `< 0` means the direct line itself is blocked. Exposed via
+  `TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon>
+  <spacing> <hA> <hB> <frequencyMHz> [k]`. If the two points are closer together than
+  one sampling step, there is no interior sample to evaluate a Fresnel radius at, and
+  the result is reported as degraded rather than a false "fully clear".
