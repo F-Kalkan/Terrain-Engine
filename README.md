@@ -229,3 +229,12 @@ computed. Flip the image vertically if you want a conventional north-up view.
   `ComputeViewshedFast` need no changes to use it — a path crossing from one tile into
   another gets seamless elevation data, with zero gap or void exactly at the boundary
   (verified with a profile whose path crosses the seam directly).
+
+- **A "why" answer** — `ClassifyBlockingFeature` (in `LineOfSight.h`) looks at the
+  blocking point's immediate profile neighbours and classifies it as a local
+  peak/ridge, a rising slope, a falling slope, or a plateau, rather than only
+  reporting a position and elevation. Attached to `LineOfSightResult::blockingFeature`
+  and printed by the `los` CLI command as `Blocking feature: ...`. This is a
+  profile-local shape classification, not a named-landmark lookup (that would need an
+  external gazetteer, out of scope) — but it turns "blocked" into "blocked by what kind
+  of terrain," which is what the geometry itself can honestly answer.
