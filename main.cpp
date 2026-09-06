@@ -390,6 +390,7 @@ int main(int argc, char* argv[])
     TestTargetOnFarSlopeVisible();
     TestFresnelClearancePartialObstruction();
     TestBatchLineOfSightMatchesIndividualCalls();
+    TestMultiTileSeamIsInvisible();
 
 
     std::cout << "-------------------------" << std::endl;

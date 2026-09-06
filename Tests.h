@@ -323,3 +323,30 @@ void TestBatchLineOfSightMatchesIndividualCalls()
         && batchResults[1].isVisible == direct2.isVisible,
         "TestBatchLineOfSightMatchesIndividualCalls");
 }
+
+//TEST 13
+void TestMultiTileSeamIsInvisible()
+{
+    // Tile A covers world lat [0,1), lon [0,1). Tile B covers world lat [1,2), lon [0,1).
+    // Query (0.3, 0.3) falls in Tile A; query (1.3, 0.3) falls in Tile B.
+    // Both must resolve to the correct tile's data through the SAME sampler,
+    // with no gap/void at the seam, and a point outside both tiles must be void.
+    std::vector<std::vector<double>> gridA = { {111.0} };
+    FakeElevationSampler tileA(gridA);
+
+    std::vector<std::vector<double>> gridB = { {0.0}, {222.0} }; // row 0 unused padding, row 1 is the real data
+    FakeElevationSampler tileB(gridB);
+
+    MultiTileElevationSampler multi;
+    multi.AddTile(0.0, 0.0, tileA);
+    multi.AddTile(1.0, 0.0, tileB);
+
+    auto valueInTileA = multi.GetElevation(0.3, 0.3);
+    auto valueInTileB = multi.GetElevation(1.3, 0.3);
+    auto valueOutsideBoth = multi.GetElevation(5.0, 5.0);
+
+    Expect(valueInTileA.has_value() && *valueInTileA == 111.0
+        && valueInTileB.has_value() && *valueInTileB == 222.0
+        && !valueOutsideBoth.has_value(),
+        "TestMultiTileSeamIsInvisible");
+}

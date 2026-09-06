@@ -65,4 +65,38 @@ public:
 
         return grid[row][col];
     }
+
+};
+
+struct TileEntry
+{
+    double swLat;
+    double swLon;
+    IElevationSampler* sampler; // non-owning
+};
+
+class MultiTileElevationSampler : public IElevationSampler
+{
+public:
+    std::vector<TileEntry> tiles;
+
+    void AddTile(double swLat, double swLon, IElevationSampler& sampler)
+    {
+        tiles.push_back(TileEntry{ swLat, swLon, &sampler });
+    }
+
+    virtual ~MultiTileElevationSampler() = default;
+
+    std::optional<double> virtual GetElevation(double latitude, double longitude)
+    {
+        for (auto& tile : tiles)
+        {
+            if (latitude >= tile.swLat && latitude < tile.swLat + 1.0 &&
+                longitude >= tile.swLon && longitude < tile.swLon + 1.0)
+            {
+                return tile.sampler->GetElevation(latitude, longitude);
+            }
+        }
+        return std::nullopt;
+    }
 };
