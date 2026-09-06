@@ -163,6 +163,7 @@ int main(int argc, char* argv[])
             {
                 std::cout << "Blocking point: " << los.blockingPoint->latitude << ", " << los.blockingPoint->longitude << std::endl;
                 std::cout << "Blocking elevation: " << *los.blockingElevation << std::endl;
+                std::cout << "Blocking feature: " << TerrainFeatureTypeToString(los.blockingFeature) << std::endl;
             }
             std::cout << "Clearance deficit: " << los.clearanceDeficit << std::endl;
             std::cout << "Degraded: " << (los.isDegraded ? "YES" : "NO") << std::endl;
@@ -391,6 +392,7 @@ int main(int argc, char* argv[])
     TestFresnelClearancePartialObstruction();
     TestBatchLineOfSightMatchesIndividualCalls();
     TestMultiTileSeamIsInvisible();
+    TestBlockingFeatureIsLocalPeak();
 
 
     std::cout << "-------------------------" << std::endl;

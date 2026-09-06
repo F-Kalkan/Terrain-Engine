@@ -350,3 +350,27 @@ void TestMultiTileSeamIsInvisible()
         && !valueOutsideBoth.has_value(),
         "TestMultiTileSeamIsInvisible");
 }
+
+//TEST 14
+void TestBlockingFeatureIsLocalPeak()
+{
+    // Same pyramid shape as the wall test: elevations along the path are
+    // 10,30,50,30,10 -- the blocking point (50) is higher than both its
+    // immediate neighbours (30, 30), which is exactly a local peak.
+    std::vector<std::vector<double>> testGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 20, 30, 20, 10},
+        {10, 30, 50, 30, 10},
+        {10, 20, 30, 20, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(testGrid);
+
+    GeoPoint a{ 2, 0 };
+    GeoPoint b{ 2, 4 };
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
+    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 4.0);
+
+    Expect(los.isVisible == false && los.blockingFeature == TerrainFeatureType::LocalPeak,
+        "TestBlockingFeatureIsLocalPeak");
+}

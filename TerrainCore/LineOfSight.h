@@ -1,6 +1,47 @@
 #pragma once
 #include <optional>
 #include "TerrainProfile.h"
+#include <string>
+
+enum class TerrainFeatureType
+{
+    Unknown,
+    LocalPeak,
+    RisingSlope,
+    FallingSlope,
+    Plateau
+};
+
+inline std::string TerrainFeatureTypeToString(TerrainFeatureType type)
+{
+    switch (type)
+    {
+    case TerrainFeatureType::LocalPeak: return "local peak / ridge";
+    case TerrainFeatureType::RisingSlope: return "rising slope";
+    case TerrainFeatureType::FallingSlope: return "falling slope";
+    case TerrainFeatureType::Plateau: return "plateau / flat ground";
+    default: return "unknown";
+    }
+}
+
+inline TerrainFeatureType ClassifyBlockingFeature(const std::vector<ProfileSample>& profile, int index)
+{
+    if (index <= 0 || index >= (int)profile.size() - 1) return TerrainFeatureType::Unknown;
+    if (!profile[index - 1].elevation.has_value() || !profile[index + 1].elevation.has_value()) return TerrainFeatureType::Unknown;
+
+    const double epsilon = 1.0; // metres of tolerance before treating neighbours as "the same height"
+    double before = *profile[index - 1].elevation;
+    double at = *profile[index].elevation;
+    double after = *profile[index + 1].elevation;
+
+    double risingIn = at - before;   // positive: still climbing into this point
+    double risingOut = after - at;   // positive: still climbing past this point
+
+    if (risingIn > epsilon && risingOut < -epsilon) return TerrainFeatureType::LocalPeak;
+    if (std::abs(risingIn) <= epsilon && std::abs(risingOut) <= epsilon) return TerrainFeatureType::Plateau;
+    if (risingIn > epsilon || risingOut > epsilon) return TerrainFeatureType::RisingSlope;
+    return TerrainFeatureType::FallingSlope;
+}
 
 struct LineOfSightResult
 {
@@ -9,6 +50,7 @@ struct LineOfSightResult
     std::optional<GeoPoint> blockingPoint;
     std::optional<double> blockingElevation;
     double clearanceDeficit = 0.0;
+    TerrainFeatureType blockingFeature = TerrainFeatureType::Unknown;
 };
 
 inline LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, double hA, double hB, double totalDistance, double k = 4.0 / 3.0)
@@ -58,6 +100,7 @@ inline LineOfSightResult ComputeLineOfSight(std::vector<ProfileSample> profile, 
                 result.blockingPoint = profile[i].point;
                 result.blockingElevation = profile[i].elevation;
                 result.clearanceDeficit = deficit;
+                result.blockingFeature = ClassifyBlockingFeature(profile, i);
             }
         }
     }
