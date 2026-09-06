@@ -12,7 +12,7 @@
 #include "ImageWriter.h"
 #include <fstream>
 
-void RunPerformanceBenchmark()
+void RunWallTimeBenchmark()
 {
     RealElevationSampler sampler("DATA/N36W112.hgt", 36.0, -112.0);
 
@@ -462,7 +462,7 @@ int main(int argc, char* argv[])
 
     std::cout << "-------------------------" << std::endl;
 
-    RunPerformanceBenchmark();
+    RunWallTimeBenchmark();
 
     std::cout << "-------------------------" << std::endl;
 
