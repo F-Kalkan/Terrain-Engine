@@ -106,8 +106,6 @@ only a demo/tooling one.
 - Vertical datum conversion (geoid ↔ ellipsoid).
 - Atmospheric refraction beyond the constant `k`.
 - Multiple elevation tiles / tile-boundary stitching.
-- Batch line-of-sight (N observers × M targets) — see "Stretch goals implemented"
-  below if this has since been added.
 
 ## Determinism and floating-point settings
 
@@ -216,3 +214,12 @@ computed. Flip the image vertically if you want a conventional north-up view.
   <spacing> <hA> <hB> <frequencyMHz> [k]`. If the two points are closer together than
   one sampling step, there is no interior sample to evaluate a Fresnel radius at, and
   the result is reported as degraded rather than a false "fully clear".
+
+- **Batch line of sight** — `ComputeBatchLineOfSight` (in `LineOfSight.h`) takes a list
+  of `BatchLineOfSightQuery` entries (observer, target, heights, distance) and a single
+  shared `IElevationSampler`, returning one `LineOfSightResult` per query. The shared
+  work is the sampler itself: one file load serves the whole batch, instead of N*M
+  separate CLI invocations each reconstructing a `RealElevationSampler` (and re-reading
+  the whole `.hgt` file) from scratch. Exposed via `TerrainEngine.exe batch <hgtFile>
+  <swLat> <swLon> <queriesFile> [k]`, where `queriesFile` is a plain text file: a
+  spacing value on the first line, then one `aLat aLon bLat bLon hA hB` per line.
