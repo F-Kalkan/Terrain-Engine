@@ -104,7 +104,6 @@ only a demo/tooling one.
 ## What it deliberately does not model
 
 - Vertical datum conversion (geoid ↔ ellipsoid).
-- Atmospheric refraction beyond the constant `k`.
 
 ## Determinism and floating-point settings
 
