@@ -105,7 +105,6 @@ only a demo/tooling one.
 
 - Vertical datum conversion (geoid ↔ ellipsoid).
 - Atmospheric refraction beyond the constant `k`.
-- Multiple elevation tiles / tile-boundary stitching.
 
 ## Determinism and floating-point settings
 
@@ -223,3 +222,11 @@ computed. Flip the image vertically if you want a conventional north-up view.
   the whole `.hgt` file) from scratch. Exposed via `TerrainEngine.exe batch <hgtFile>
   <swLat> <swLon> <queriesFile> [k]`, where `queriesFile` is a plain text file: a
   spacing value on the first line, then one `aLat aLon bLat bLon hA hB` per line.
+
+- **Tile boundaries** — `MultiTileElevationSampler` (in `IElevationSampler.h`) composes
+  multiple `IElevationSampler` instances, each registered with its own south-west
+  corner, and routes each query to whichever tile's 1°×1° box contains it. Because it
+  implements `IElevationSampler` itself, `GetTerrainProfile`/`ComputeLineOfSight`/
+  `ComputeViewshedFast` need no changes to use it — a path crossing from one tile into
+  another gets seamless elevation data, with zero gap or void exactly at the boundary
+  (verified with a profile whose path crosses the seam directly).
