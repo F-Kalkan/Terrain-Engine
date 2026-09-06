@@ -18,17 +18,17 @@ inline void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePat
         for (int col = 0; col < cols; col++)
         {
             unsigned char pixel;
-            if (!viewshed.visible[row][col].has_value())
+            switch (viewshed.visible[row][col])
             {
-                pixel = 128;
-            }
-            else if (*viewshed.visible[row][col])
-            {
+            case CellVisibility::Visible:
                 pixel = 255;
-            }
-            else
-            {
+                break;
+            case CellVisibility::NotVisible:
                 pixel = 0;
+                break;
+            default: // Degraded or NotCovered -- both render as "unknown"
+                pixel = 128;
+                break;
             }
             file.write((char*)&pixel, 1);
         }

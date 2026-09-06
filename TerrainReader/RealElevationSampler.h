@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <vector>
 #include <fstream>
 #include <cmath>
@@ -41,7 +42,7 @@ public:
     bool IsLoaded() const
     {
         return loadedSuccessfully;
-    }
+    }   
 
     std::optional<double> virtual GetElevation(double latitude, double longitude)
     {

@@ -7,3 +7,4 @@ Release/
 *.ilk
 *.log
 *.vcxproj.user
+*.pgm

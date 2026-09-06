@@ -75,6 +75,11 @@ struct TileEntry
     IElevationSampler* sampler; // non-owning
 };
 
+// Selects a tile by its registered south-west corner, then passes the query's
+// WORLD latitude/longitude straight through to that tile's sampler, untranslated.
+// Only correct if the sub-sampler itself can place a world coordinate on its own
+// grid (RealElevationSampler does, via its own stored corner); a sampler that
+// treats coordinates as raw local indices is not usable here without adapting it.
 class MultiTileElevationSampler : public IElevationSampler
 {
 public:

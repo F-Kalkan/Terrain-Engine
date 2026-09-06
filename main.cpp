@@ -16,6 +16,12 @@ void RunWallTimeBenchmark()
 {
     RealElevationSampler sampler("DATA/N36W112.hgt", 36.0, -112.0);
 
+    if (!sampler.IsLoaded())
+    {
+        std::cout << "RunWallTimeBenchmark: could not load DATA/N36W112.hgt -- skipping (missing data, not a test failure)." << std::endl;
+        return;
+    }
+
     double metersPerDegreeLat = 111320.0;
     double spacingInDegrees = 30.0 / metersPerDegreeLat;
 
@@ -26,7 +32,7 @@ void RunWallTimeBenchmark()
 
     auto start1 = std::chrono::high_resolution_clock::now();
     std::vector<ProfileSample> profile = GetTerrainProfile(profileA, profileB, spacingInDegrees, sampler);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 50000.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
     auto end1 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> profileTime = end1 - start1;
     std::cout << "50km profile (" << profile.size() << " samples), Time: " << profileTime.count() << " ms" << std::endl;
@@ -55,22 +61,38 @@ void RunWallTimeBenchmark()
     double smallRadiusInDegrees = (smallRadiusKm * 1000.0) / metersPerDegreeLat;
     int smallGridSize = (int)(2 * smallRadiusInDegrees / spacingInDegrees);
 
+    auto startSmallFast = std::chrono::high_resolution_clock::now();
     ViewshedResult smallFast = ComputeViewshedFast(viewshedObserver, 2.0, smallGridSize, smallGridSize, spacingInDegrees, sampler);
+    auto endSmallFast = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> smallFastTime = endSmallFast - startSmallFast;
+
+    auto startSmallNaive = std::chrono::high_resolution_clock::now();
     ViewshedResult smallNaive = ComputeViewshedNaive(viewshedObserver, 2.0, smallGridSize, smallGridSize, spacingInDegrees, sampler);
+    auto endSmallNaive = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> smallNaiveTime = endSmallNaive - startSmallNaive;
+
+    std::cout << smallRadiusKm << "km naive viewshed (" << smallGridSize << "x" << smallGridSize << "), Time: " << smallNaiveTime.count() << " ms" << std::endl;
+    std::cout << smallRadiusKm << "km fast viewshed (" << smallGridSize << "x" << smallGridSize << "), Time: " << smallFastTime.count() << " ms" << std::endl;
+    std::cout << "Speed-up (naive / fast): " << (smallNaiveTime.count() / smallFastTime.count()) << "x" << std::endl;
 
     int mismatches = 0;
     int totalValid = 0;
+    int excludedCells = 0;
     for (int row = 0; row < smallGridSize; row++)
     {
         for (int col = 0; col < smallGridSize; col++)
         {
-            if (smallFast.visible[row][col].has_value() && smallNaive.visible[row][col].has_value())
+            if (IsConfident(smallFast.visible[row][col]) && IsConfident(smallNaive.visible[row][col]))
             {
                 totalValid++;
-                if (*smallFast.visible[row][col] != *smallNaive.visible[row][col])
+                if (smallFast.visible[row][col] != smallNaive.visible[row][col])
                 {
                     mismatches++;
                 }
+            }
+            else
+            {
+                excludedCells++;
             }
         }
     }
@@ -80,7 +102,8 @@ void RunWallTimeBenchmark()
 
     std::cout << smallRadiusKm << "km comparison (" << smallGridSize << "x" << smallGridSize << "): "
         << mismatches << " / " << totalValid << " cells differ (" << (mismatchRatio * 100.0)
-        << "%, tolerance: " << (tolerance * 100.0) << "%)" << std::endl;
+        << "%, tolerance: " << (tolerance * 100.0) << "%), " << excludedCells
+        << " cell(s) excluded (not confident in both algorithms)" << std::endl;
 
     Expect(mismatchRatio < tolerance, "FastViewshedMatchesNaive on real SRTM data within stated tolerance");
 
@@ -153,10 +176,9 @@ int main(int argc, char* argv[])
                 return 1;
             }
             GeoPoint b{ bLat, bLon };
-            double distance = sqrt(pow(bLat - aLat, 2) + pow(bLon - aLon, 2)) * 111320.0;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            LineOfSightResult los = ComputeLineOfSight(profile, hA, hB, distance, k);
+            LineOfSightResult los = ComputeLineOfSight(profile, hA, hB, k);
 
             std::cout << "Visible: " << (los.isVisible ? "YES" : "NO") << std::endl;
             if (los.blockingPoint.has_value())
@@ -222,10 +244,9 @@ int main(int argc, char* argv[])
             }
             GeoPoint a{ aLat, aLon };
             GeoPoint b{ bLat, bLon };
-            double distance = sqrt(pow(bLat - aLat, 2) + pow(bLon - aLon, 2)) * 111320.0;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            FresnelClearanceResult result = ComputeFresnelClearance(profile, hA, hB, distance, frequencyMHz * 1e6, k);
+            FresnelClearanceResult result = ComputeFresnelClearance(profile, hA, hB, frequencyMHz * 1e6, k);
 
             if (result.isDegraded)
             {
@@ -287,7 +308,6 @@ int main(int argc, char* argv[])
                 q.observerHeight = hA;
                 q.target = GeoPoint{ bLat, bLon };
                 q.targetHeight = hB;
-                q.totalDistanceMeters = sqrt(pow(bLat - aLat, 2) + pow(bLon - aLon, 2)) * 111320.0;
                 queries.push_back(q);
             }
 
@@ -327,7 +347,7 @@ int main(int argc, char* argv[])
 
                 auto start = std::chrono::high_resolution_clock::now();
                 std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacingInDegrees, sampler);
-                LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0, 50000.0);
+                LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double, std::milli> elapsed = end - start;
 
@@ -393,7 +413,14 @@ int main(int argc, char* argv[])
     TestBatchLineOfSightMatchesIndividualCalls();
     TestMultiTileSeamIsInvisible();
     TestBlockingFeatureIsLocalPeak();
-
+    TestFastViewshedVoidDegradesDownstream();
+    TestRealElevationSamplerReadsVoidFromFile();    
+    TestInterpolationModesDifferOnRidgeline();
+    TestProfileMatchesFrozenOracle();
+    TestNarrowSpikeCanFallBetweenSamples();
+    TestMultiTileProfileCrossesSeamWithoutGap();
+    TestEmptyAndSingleSampleProfilesAreDegradedNotUB();
+    TestBlockingFeatureClassificationIsSpacingInvariant();
 
     std::cout << "-------------------------" << std::endl;
 
@@ -415,17 +442,17 @@ int main(int argc, char* argv[])
     {
         for (int col = 0; col < 5; col++)
         {
-            if (!viewshed.visible[row][col].has_value())
-            {
-                std::cout << "? ";
-            }
-            else if (*viewshed.visible[row][col])
+            if (viewshed.visible[row][col] == CellVisibility::Visible)
             {
                 std::cout << "# ";
             }
-            else
+            else if (viewshed.visible[row][col] == CellVisibility::NotVisible)
             {
                 std::cout << ". ";
+            }
+            else
+            {
+                std::cout << "? ";
             }
         }
         std::cout << std::endl;
@@ -453,9 +480,9 @@ int main(int argc, char* argv[])
     {
         for (int col = 0; col < 5; col++)
         {
-            if (!fastViewshed.visible[row][col].has_value()) std::cout << "? ";
-            else if (*fastViewshed.visible[row][col]) std::cout << "# ";
-            else std::cout << ". ";
+            if (fastViewshed.visible[row][col] == CellVisibility::Visible) std::cout << "# ";
+            else if (fastViewshed.visible[row][col] == CellVisibility::NotVisible) std::cout << ". ";
+            else std::cout << "? ";
         }
         std::cout << std::endl;
     }
@@ -473,5 +500,5 @@ int main(int argc, char* argv[])
         std::cout << "Peak memory usage: " << peakMB << " MB" << std::endl;
     }
 
-    return 0;
-}
+    return (g_testFailureCount == 0) ? 0 : 1;
+}   
