@@ -21,6 +21,18 @@ inline bool IsConfident(CellVisibility v)
     return v == CellVisibility::Visible || v == CellVisibility::NotVisible;
 }
 
+// A degree of longitude covers less real ground than a degree of latitude away
+// from the equator, shrinking by a factor of cos(latitude). A viewshed grid
+// that steps by the same number of degrees on both axes is therefore an
+// ellipse in real-world terms -- narrower east-west -- not the circle its
+// "radius" implies. Widening the longitude step by 1/cos(latitude) makes a
+// column step cover the same real distance as a row step, at any latitude.
+inline double LongitudeSpacingForLatitude(double spacingDeg, double latitudeDeg)
+{
+    const double degToRad = 3.14159265358979323846 / 180.0;
+    return spacingDeg / cos(latitudeDeg * degToRad);
+}
+
 struct ViewshedResult
 {
     std::vector<std::vector<CellVisibility>> visible;
@@ -34,6 +46,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHei
 
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
+    double lonSpacing = LongitudeSpacingForLatitude(spacing, observer.latitude);
 
     for (int row = 0; row < gridRows; row++)
     {
@@ -45,7 +58,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, double observerHei
                 continue;
             }
 
-            GeoPoint target{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (col - centerCol) * spacing };
+            GeoPoint target{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (col - centerCol) * lonSpacing };
 
             std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacing, sampler);
             LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, 0, k);
@@ -75,6 +88,7 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeig
 
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
+    double lonSpacing = LongitudeSpacingForLatitude(spacing, observer.latitude);
 
     auto observerElevation = sampler.GetElevation(observer.latitude, observer.longitude);
 
@@ -88,14 +102,14 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeig
 
     for (int col = 0; col < gridCols; col++)
     {
-        boundaryCells.push_back(GeoPoint{ observer.latitude + (0 - centerRow) * spacing, observer.longitude + (col - centerCol) * spacing });
-        boundaryCells.push_back(GeoPoint{ observer.latitude + (gridRows - 1 - centerRow) * spacing, observer.longitude + (col - centerCol) * spacing });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (0 - centerRow) * spacing, observer.longitude + (col - centerCol) * lonSpacing });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (gridRows - 1 - centerRow) * spacing, observer.longitude + (col - centerCol) * lonSpacing });
     }
 
     for (int row = 0; row < gridRows; row++)
     {
-        boundaryCells.push_back(GeoPoint{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (0 - centerCol) * spacing });
-        boundaryCells.push_back(GeoPoint{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (gridCols - 1 - centerCol) * spacing });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (0 - centerCol) * lonSpacing });
+        boundaryCells.push_back(GeoPoint{ observer.latitude + (row - centerRow) * spacing, observer.longitude + (gridCols - 1 - centerCol) * lonSpacing });
     }
 
     for (const auto& target : boundaryCells)
@@ -114,7 +128,7 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, double observerHeig
         for (size_t i = 1; i < profile.size(); i++)
         {
             int row = (int)round((profile[i].point.latitude - observer.latitude) / spacing) + centerRow;
-            int col = (int)round((profile[i].point.longitude - observer.longitude) / spacing) + centerCol;
+            int col = (int)round((profile[i].point.longitude - observer.longitude) / lonSpacing) + centerCol;
             if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) continue;
 
             if (row == lastRow && col == lastCol) continue;

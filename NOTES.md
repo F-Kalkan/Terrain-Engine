@@ -53,6 +53,15 @@ answer more precisely — it doesn't make that ray point at the cell being asked
 The mismatch is inherent to "assign by nearest ray" and only goes away by computing an
 exact per-cell direction, which is the naive algorithm by definition.
 
+A third change moved the ratio again, this time for an unrelated reason: fixing the
+viewshed grid's longitude spacing (see `README.md`, "Viewshed grid shape") so a
+"30 km radius" grid is a real-world circle instead of an ellipse also changed the real
+spacing between the fast algorithm's boundary rays. The ratio went from 3.58% to
+4.65% — still under the 5% tolerance, but the fix wasn't chosen to improve or preserve
+that number, it was chosen because the old grid shape was wrong regardless of what it
+did to the mismatch ratio. Worth recording so a future reader doesn't mistake the
+shift for noise or a regression.
+
 ## What I'd change about the API if I started again
 
 - Make `k`, the interpolation mode, and the (currently unmodeled) vertical datum all

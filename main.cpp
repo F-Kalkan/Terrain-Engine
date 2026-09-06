@@ -421,6 +421,7 @@ int main(int argc, char* argv[])
     TestMultiTileProfileCrossesSeamWithoutGap();
     TestEmptyAndSingleSampleProfilesAreDegradedNotUB();
     TestBlockingFeatureClassificationIsSpacingInvariant();
+    TestViewshedLongitudeSpacingCorrectsForLatitude();
 
     std::cout << "-------------------------" << std::endl;
 

@@ -66,9 +66,25 @@ only a demo/tooling one.
 
 - **Horizontal coordinates**: geodetic latitude/longitude in degrees. Distances are
   computed as a flat-plane (Euclidean) approximation in degree-space, converted to
-  metres with a fixed constant (111,320 m per degree of latitude). This is accurate
-  enough at the scales tested here (up to 50 km) but is **not** a true geodesic
-  calculation and would drift at larger distances or near the poles.
+  metres with a fixed constant (111,320 m per degree of latitude) and a
+  `cos(latitude)` correction on the longitude component (`GetTerrainProfile`, in
+  `TerrainProfile.h`) — a degree of longitude covers less real ground than a degree
+  of latitude away from the equator, and skipping that correction is a 24% distance
+  error (54% on the curvature term, since it scales with distance squared) at this
+  project's demo latitude. This is accurate enough at the scales tested here (up to
+  50 km) but is **not** a true geodesic calculation and would drift at larger
+  distances or near the poles.
+- **Viewshed grid shape**: `ComputeViewshedNaive`/`ComputeViewshedFast` take one
+  `spacing` value (degrees of latitude per row) and derive the column spacing from
+  it via `LongitudeSpacingForLatitude` (`Viewshed.h`), widening it by
+  `1/cos(observer latitude)` so a column step covers the same real ground distance
+  as a row step. Without this, a grid built from equal degree-steps on both axes is
+  an ellipse in real-world terms — narrower east-west — even though every individual
+  cell's line-of-sight answer (which depends on `GetTerrainProfile`'s distance, not
+  on which cells get queried in the first place) is already correct; verified for
+  the included tile's latitude (36.5°N) at a "30 km radius": north/south reach
+  30,000 m, east/west reach 29,970 m, both real distances measured through
+  `GetTerrainProfile`.
 - **Vertical datum**: **not modeled.** Elevation values are taken directly from the
   SRTM file (heights above the EGM96 geoid) and added straight to `hA`/`hB` without
   any conversion to/from the WGS84 ellipsoid. This is a known, deliberate gap — the
@@ -152,7 +168,7 @@ adding new information the source data doesn't have.
 On a 2 km-radius viewshed over the real SRTM tile (133×133 = 17,689 grid cells total,
 17,687 of them valid in both algorithms and **2 excluded** because at least one
 algorithm wasn't confident there), the fast (boundary-ray-sweep) algorithm disagrees
-with the naive (one-LOS-per-cell) algorithm on **634 cells (3.58%)**, asserted to stay
+with the naive (one-LOS-per-cell) algorithm on **822 cells (4.65%)**, asserted to stay
 under a 5% tolerance (`TestFastViewshedMatchesNaive on real SRTM data within stated
 tolerance` in the CLI's test/benchmark output, which now also prints the
 excluded-cell count directly alongside the ratio).
@@ -164,16 +180,20 @@ interior cell just off a boundary ray's path is judged by a slightly different s
 than the one a naive per-target LOS would use for it. That difference in the assumed
 sightline only changes the answer where the terrain's slope is changing fast underfoot,
 which is exactly a ridgeline; over flat or smoothly-sloped ground the two sightlines
-agree. Two attempts to shrink this gap (casting more, angularly-denser rays; using
-`ceil` instead of `floor` for the profile's sample count) both made the mismatch worse
-(4.85%, then 4.29%) — see `NOTES.md` for why.
+agree. Two earlier attempts to shrink this gap (casting more, angularly-denser rays;
+using `ceil` instead of `floor` for the profile's sample count) both made the mismatch
+worse (4.85%, then 4.29%) — see `NOTES.md` for why. The ratio moved again, from 3.58%
+to the current 4.65%, when the "Viewshed grid shape" fix above changed the real-world
+spacing of the fast algorithm's boundary rays; it is still comfortably under the 5%
+tolerance, but closer to it than before, which is worth knowing rather than discovering
+under a slightly different tile or radius.
 
 **Performance side of the same comparison** (Release build, same real SRTM tile):
 
 | Radius / grid                        | Naive         | Fast          | Speed-up   |
 |----------------------------------------|---------------|---------------|------------|
-| 2 km / 133×133 (17,687 valid cells)    | ~32–33 ms     | ~1.5–1.6 ms   | ~20–23x    |
-| 30 km / 2000×2000 (the table above)    | ~59.0–59.3 s  | ~232–270 ms   | ~220–255x  |
+| 2 km / 133×133 (17,687 valid cells)    | ~31–33 ms     | ~1.5–1.8 ms   | ~18–20x    |
+| 30 km / 2000×2000 (the table above)    | ~65–67 s      | ~278–293 ms   | ~220–240x  |
 
 Naive's cost grows faster than fast's as the radius grows: it runs one full profile +
 line-of-sight per cell, so its total work scales with roughly (cell count) ×

@@ -730,3 +730,25 @@ void TestBlockingFeatureClassificationIsSpacingInvariant()
     Expect(fineResult == TerrainFeatureType::RisingSlope && coarseResult == TerrainFeatureType::RisingSlope,
         "TestBlockingFeatureClassificationIsSpacingInvariant");
 }
+
+//TEST 23
+void TestViewshedLongitudeSpacingCorrectsForLatitude()
+{
+    // REVIEW.md: "the viewshed's geometry... actually covers ±30 km north-south
+    // and ±24.1 km east-west... It is an ellipse described as a circle." The
+    // distance/curvature fix in TerrainProfile.h doesn't touch this -- it's a
+    // separate bug in how the viewshed functions choose which longitude to
+    // query per grid column. LongitudeSpacingForLatitude widens the longitude
+    // step by 1/cos(latitude) so a column step covers the same real ground
+    // distance as a row step, at any latitude.
+    double spacingDeg = 30.0 / 111320.0;
+    double degToRad = 3.14159265358979323846 / 180.0;
+
+    double atEquator = LongitudeSpacingForLatitude(spacingDeg, 0.0);
+    double at36_5 = LongitudeSpacingForLatitude(spacingDeg, 36.5);
+    double expectedRatioAt36_5 = 1.0 / cos(36.5 * degToRad);
+
+    Expect(std::abs(atEquator - spacingDeg) < 1e-12
+        && std::abs(at36_5 / spacingDeg - expectedRatioAt36_5) < 1e-9,
+        "TestViewshedLongitudeSpacingCorrectsForLatitude");
+}
