@@ -10,6 +10,7 @@
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 #include "ImageWriter.h"
+#include <fstream>
 
 void RunPerformanceBenchmark()
 {
@@ -253,6 +254,54 @@ int main(int argc, char* argv[])
             return 0;
         }
 
+        if (mode == "batch" && (argc == 6 || argc == 7))
+        {
+            std::string hgtFile = argv[2];
+            double swLat = std::stod(argv[3]);
+            double swLon = std::stod(argv[4]);
+            std::string queriesFile = argv[5];
+            double k = (argc == 7) ? std::stod(argv[6]) : (4.0 / 3.0);
+
+            RealElevationSampler sampler(hgtFile, swLat, swLon);
+            if (!sampler.IsLoaded())
+            {
+                std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
+                return 1;
+            }
+
+            std::ifstream queryFile(queriesFile);
+            if (!queryFile.is_open())
+            {
+                std::cout << "Error: could not open queries file: " << queriesFile << std::endl;
+                return 1;
+            }
+
+            std::vector<BatchLineOfSightQuery> queries;
+            double aLat, aLon, bLat, bLon, hA, hB, spacing;
+            queryFile >> spacing;
+            while (queryFile >> aLat >> aLon >> bLat >> bLon >> hA >> hB)
+            {
+                BatchLineOfSightQuery q;
+                q.observer = GeoPoint{ aLat, aLon };
+                q.observerHeight = hA;
+                q.target = GeoPoint{ bLat, bLon };
+                q.targetHeight = hB;
+                q.totalDistanceMeters = sqrt(pow(bLat - aLat, 2) + pow(bLon - aLon, 2)) * 111320.0;
+                queries.push_back(q);
+            }
+
+            std::vector<LineOfSightResult> results = ComputeBatchLineOfSight(queries, spacing, sampler, k);
+
+            for (size_t i = 0; i < results.size(); i++)
+            {
+                std::cout << "Query " << i << ": Visible=" << (results[i].isVisible ? "YES" : "NO")
+                    << ", ClearanceDeficit=" << results[i].clearanceDeficit
+                    << ", Degraded=" << (results[i].isDegraded ? "YES" : "NO") << std::endl;
+            }
+            return 0;
+        }
+
+
         if (mode == "benchmark" && argc == 6)
         {
             std::string subMode = argv[2];
@@ -323,6 +372,7 @@ int main(int argc, char* argv[])
         std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> <frequencyMHz> [k]" << std::endl;
+        std::cout << "  TerrainEngine.exe batch <hgtFile> <swLat> <swLon> <queriesFile> [k]" << std::endl;
         return 1;
     }
 
@@ -339,6 +389,7 @@ int main(int argc, char* argv[])
     TestObserverBelowRim();
     TestTargetOnFarSlopeVisible();
     TestFresnelClearancePartialObstruction();
+    TestBatchLineOfSightMatchesIndividualCalls();
 
 
     std::cout << "-------------------------" << std::endl;

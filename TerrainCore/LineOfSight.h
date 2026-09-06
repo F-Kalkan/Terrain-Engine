@@ -131,3 +131,24 @@ inline FresnelClearanceResult ComputeFresnelClearance(std::vector<ProfileSample>
     result.minClearanceFraction = bestKnownFraction;
     return result;
 }
+
+struct BatchLineOfSightQuery
+{
+    GeoPoint observer;
+    double observerHeight = 0.0;
+    GeoPoint target;
+    double targetHeight = 0.0;
+    double totalDistanceMeters = 0.0;
+};
+
+inline std::vector<LineOfSightResult> ComputeBatchLineOfSight(const std::vector<BatchLineOfSightQuery>& queries, double spacing, IElevationSampler& sampler, double k = 4.0 / 3.0)
+{
+    std::vector<LineOfSightResult> results;
+    results.reserve(queries.size());
+    for (const auto& q : queries)
+    {
+        std::vector<ProfileSample> profile = GetTerrainProfile(q.observer, q.target, spacing, sampler);
+        results.push_back(ComputeLineOfSight(profile, q.observerHeight, q.targetHeight, q.totalDistanceMeters, k));
+    }
+    return results;
+}

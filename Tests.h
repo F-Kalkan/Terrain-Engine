@@ -287,3 +287,39 @@ void TestFresnelClearancePartialObstruction()
     Expect(std::abs(result.minClearanceFraction - 0.4826) < 0.001 && result.worstPoint.has_value() && result.worstPoint->longitude == 5.0,
         "TestFresnelClearancePartialObstruction");
 }
+
+//TEST 12
+void TestBatchLineOfSightMatchesIndividualCalls()
+{
+    std::vector<std::vector<double>> testGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 20, 30, 20, 10},
+        {10, 30, 50, 30, 10},
+        {10, 20, 30, 20, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(testGrid);
+
+    GeoPoint observer{ 2, 0 };
+    GeoPoint targetBlocked{ 2, 4 };
+    GeoPoint targetClear{ 0, 4 };
+
+    std::vector<BatchLineOfSightQuery> queries = {
+        { observer, 2.0, targetBlocked, 2.0, 4.0 },
+        { observer, 2.0, targetClear, 2.0, sqrt(4.0 * 4.0 + 2.0 * 2.0) }
+    };
+
+    std::vector<LineOfSightResult> batchResults = ComputeBatchLineOfSight(queries, 1.0, sampler);
+
+    std::vector<ProfileSample> profile1 = GetTerrainProfile(observer, targetBlocked, 1.0, sampler);
+    LineOfSightResult direct1 = ComputeLineOfSight(profile1, 2.0, 2.0, 4.0);
+
+    std::vector<ProfileSample> profile2 = GetTerrainProfile(observer, targetClear, 1.0, sampler);
+    LineOfSightResult direct2 = ComputeLineOfSight(profile2, 2.0, 2.0, sqrt(4.0 * 4.0 + 2.0 * 2.0));
+
+    Expect(batchResults.size() == 2
+        && batchResults[0].isVisible == direct1.isVisible
+        && std::abs(batchResults[0].clearanceDeficit - direct1.clearanceDeficit) < 0.001
+        && batchResults[1].isVisible == direct2.isVisible,
+        "TestBatchLineOfSightMatchesIndividualCalls");
+}
