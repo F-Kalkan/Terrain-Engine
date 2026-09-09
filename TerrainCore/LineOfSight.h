@@ -126,7 +126,7 @@ struct LineOfSightResult
 // concurrently mutating the same profile buffer.
 inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& profile, DatumHeight observerHeightAgl, DatumHeight targetHeightAgl, VerticalDatum terrainDatum, double k = 4.0 / 3.0)
 {
-    const double R = 6371000.0;
+    const double R = EarthRadiusM;
 
     LineOfSightResult result;
     result.isVisible = true;
@@ -209,7 +209,7 @@ struct FresnelClearanceResult
 // profile buffer.
 inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileSample>& profile, DatumHeight observerHeightAgl, DatumHeight targetHeightAgl, VerticalDatum terrainDatum, double frequencyHz, double k = 4.0 / 3.0)
 {
-    const double R = 6371000.0;
+    const double R = EarthRadiusM;
     const double c = 299792458.0; // speed of light, m/s
     double wavelengthM = c / frequencyHz;
 

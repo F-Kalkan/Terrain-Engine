@@ -66,16 +66,15 @@ only a demo/tooling one.
 
 ## Geometric model and assumptions
 
-- **Horizontal coordinates**: geodetic latitude/longitude in degrees. Distances are
-  computed as a flat-plane (Euclidean) approximation in degree-space, converted to
-  metres with a fixed constant (111,320 m per degree of latitude) and a
-  `cos(latitude)` correction on the longitude component (`GetTerrainProfile`, in
-  `TerrainProfile.h`) — a degree of longitude covers less real ground than a degree
-  of latitude away from the equator, and skipping that correction is a 24% distance
-  error (54% on the curvature term, since it scales with distance squared) at this
-  project's demo latitude. This is accurate enough at the scales tested here (up to
-  50 km) but is **not** a true geodesic calculation and would drift at larger
-  distances or near the poles.
+- **Horizontal coordinates**: geodetic latitude/longitude in degrees. Distance and
+  sample position along a path are computed as a true great-circle (haversine)
+  calculation over a sphere of radius `EarthRadiusM` (`GreatCircleDistanceM`,
+  `GreatCircleInterpolate`, in `TerrainProfile.h`) — the same Earth radius already
+  used for line-of-sight curvature, so both are derived from one shared constant
+  instead of two disagreeing ones. Each sample's position is the true point at its
+  fractional distance along the great-circle arc between the path's endpoints, not
+  a straight line in degree-space, so `distanceFromStartM` is exact by construction
+  rather than re-derived per sample from an approximation.
 - **Viewshed grid shape**: `ComputeViewshedNaive`/`ComputeViewshedFast` take one
   `spacingDeg` value (degrees of latitude per row) and derive the column spacing from
   it via `LongitudeSpacingForLatitude` (`Viewshed.h`), widening it by
@@ -138,18 +137,24 @@ only a demo/tooling one.
 
 - Single SRTM 3-arcsecond tile (1°×1°, ~90 m resolution), addressed by its south-west corner.
   No multi-tile stitching.
-- Distances up to the tested 50 km (profile) / 30 km radius (viewshed); the flat-plane
-  distance approximation is not validated beyond that.
+- Distances up to the tested 50 km (profile) / 30 km radius (viewshed). The
+  great-circle distance calculation itself has no inherent range limit, but the
+  curvature model used for visibility (an effective-Earth-radius approximation,
+  standard for line-of-sight and radio-propagation calculations) is not validated
+  beyond the ranges tested here, and neither model handles a path that crosses the
+  antimeridian (±180° longitude).
 - No threading — determinism across thread counts is satisfied vacuously.
 - **Unvalidated inputs, not exercised by any test or CLI path today:**
-  - `spacing <= 0` passed to `GetTerrainProfile` divides by zero (`sampleCount = totalDistance / spacing`).
-    No CLI argument or test ever passes a non-positive spacing, so this has never been hit in practice.
+  - `spacingDeg <= 0` passed to `GetTerrainProfile` divides by zero
+    (`sampleCount = totalDistanceM / (spacingDeg * metersPerDegree)`). No CLI
+    argument or test ever passes a non-positive spacing, so this has never been
+    hit in practice.
   - `FakeElevationSampler` constructed with an empty grid (`{}`) would index `grid[0]` out of
     bounds in its bilinear path. Every test and demo grid is non-empty; this is a latent
     fragility in test-only code, not a path real data goes through.
   - `LongitudeSpacingForLatitude` divides by `cos(latitude)`, which is zero exactly at the poles
-    (±90°). Consistent with the existing "would drift ... near the poles" caveat above — this
-    is the same known limitation surfacing as a division rather than a gradual drift.
+    (±90°) — a viewshed centred exactly on a pole would divide by zero when laying
+    out its grid columns. No test or CLI path ever places an observer there.
 
 ## What it deliberately does not model
 
@@ -174,8 +179,15 @@ AMD Ryzen 7 3800X (8 cores / 16 threads), 16 GB RAM, Windows 11 Pro x64, Release
 
 | Operation                                   | Wall time | Peak memory |
 |-----------------------------------------------|-----------|--------------|
-| 50 km profile @ 30 m spacing (1,667 samples)     | ~0.12–0.27 ms | ~11.2 MB |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | ~275–282 ms   | ~24.0 MB |
+| 50 km profile @ 30 m spacing (1,667 samples)     | ~0.18–0.43 ms | ~11.2–11.7 MB |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | ~657–672 ms   | ~24.0 MB |
+
+The distance calculation switched from a flat-plane approximation to a true
+great-circle (haversine) one (see "Horizontal coordinates" above), which is
+roughly 2.4x more expensive per sample — trigonometric functions cost more than
+the handful of multiplications the old approximation needed. The viewshed
+figure above reflects that; the profile figure barely moves because it does so
+little work in absolute terms either way.
 
 Each row was measured as its own process (`TerrainEngine.exe benchmark profile ...` /
 `TerrainEngine.exe benchmark viewshed ...`), so the two peak-memory figures are
@@ -191,12 +203,12 @@ adding new information the source data doesn't have.
 ## Fast vs. naive viewshed: accuracy and performance
 
 On a 2 km-radius viewshed over the real SRTM tile (133×133 = 17,689 grid cells total,
-17,687 of them valid in both algorithms and **2 excluded** because at least one
-algorithm wasn't confident there), the fast (boundary-ray-sweep) algorithm disagrees
-with the naive (one-LOS-per-cell) algorithm on **822 cells (4.65%)**, asserted to stay
-under a 5% tolerance (`TestFastViewshedMatchesNaive on real SRTM data within stated
-tolerance` in the CLI's test/benchmark output, which now also prints the
-excluded-cell count directly alongside the ratio).
+all 17,689 of them valid and confident in both algorithms, **0 excluded**), the fast
+(boundary-ray-sweep) algorithm disagrees with the naive (one-LOS-per-cell) algorithm
+on **693 cells (3.92%)**, asserted to stay under a 5% tolerance
+(`TestFastViewshedMatchesNaive on real SRTM data within stated tolerance` in the
+CLI's test/benchmark output, which also prints the excluded-cell count directly
+alongside the ratio).
 
 The disagreement is concentrated on ridgelines. The fast algorithm only casts rays to
 the grid's boundary cells and derives every interior cell's visibility from whichever
@@ -205,20 +217,32 @@ interior cell just off a boundary ray's path is judged by a slightly different s
 than the one a naive per-target LOS would use for it. That difference in the assumed
 sightline only changes the answer where the terrain's slope is changing fast underfoot,
 which is exactly a ridgeline; over flat or smoothly-sloped ground the two sightlines
-agree. Two earlier attempts to shrink this gap (casting more, angularly-denser rays;
-using `ceil` instead of `floor` for the profile's sample count) both made the mismatch
-worse (4.85%, then 4.29%) — see `NOTES.md` for why. The ratio moved again, from 3.58%
-to the current 4.65%, when the "Viewshed grid shape" fix above changed the real-world
-spacing of the fast algorithm's boundary rays; it is still comfortably under the 5%
-tolerance, but closer to it than before, which is worth knowing rather than discovering
-under a slightly different tile or radius.
+agree. This ratio has moved several times as the underlying geometry was refined —
+worse after two early attempts to shrink it (casting more, angularly-denser rays;
+using `ceil` instead of `floor` for the profile's sample count both made it worse,
+4.85% then 4.29% — see `NOTES.md` for why); up to 4.65% when the viewshed grid's
+column spacing was corrected for latitude; and down to the current 3.92% when the
+distance calculation itself switched from a flat-plane approximation to a true
+great-circle calculation — both algorithms now place their samples and measure
+their distances more accurately, which brings their independently-derived
+sightlines into closer agreement, particularly on the ridgelines where the old
+approximation's error was concentrated. It is comfortably under the 5% tolerance,
+which is worth knowing rather than discovering under a slightly different tile or
+radius.
 
 **Performance side of the same comparison** (Release build, same real SRTM tile):
 
 | Radius / grid                        | Naive         | Fast          | Speed-up   |
 |----------------------------------------|---------------|---------------|------------|
-| 2 km / 133×133 (17,687 valid cells)    | ~31–33 ms     | ~1.5–1.8 ms   | ~18–20x    |
-| 30 km / 2000×2000 (the table above)    | ~65–67 s      | ~278–293 ms   | ~220–240x  |
+| 2 km / 133×133 (17,689 valid cells)    | ~77–86 ms     | ~3.3–6.4 ms   | ~12–26x    |
+| 30 km / 2000×2000 (the table above)    | ~199.3 s      | ~657–672 ms   | ~297–303x  |
+
+Both columns grew substantially from the flat-plane-approximation numbers this table
+used to report — the great-circle distance calculation is real trigonometry, not a
+handful of multiplications, and naive pays for it once per cell while fast pays for
+it once per boundary ray, which is also why naive's cost grew by roughly the same
+~2.4–3x factor at both radii while the speed-up ratio itself stayed in the same
+range.
 
 Naive's cost grows faster than fast's as the radius grows: it runs one full profile +
 line-of-sight per cell, so its total work scales with roughly (cell count) ×
@@ -461,12 +485,8 @@ constraints directly.
   allocating a profile per query/cell/ray, meant for a one-off batch or a
   planning-time call, never a per-frame loop.
 
-**One known limitation carries over unchanged from the standalone tool and is worth
-stating plainly here too:** horizontal distance is still a flat-plane approximation
-(`sqrt` of degree deltas, with a `cos(latitude)` correction on longitude) built on a
-constant `111320.0` metres-per-degree-of-latitude, not a true great-circle
-(haversine) formula. It is accurate at the ranges this library is tested at, but
-would drift at longer distances or near the poles. A host application that already
-provides its own great-circle distance primitive should use that instead of this
-library's approximation; adopting a real haversine formula here directly would also
-be a reasonable, self-contained improvement, but has not been done yet.
+A host application that already provides its own great-circle distance primitive
+can still use it in place of this library's — `EarthRadiusM` (`TerrainProfile.h`)
+is exposed precisely so a caller can stay consistent with a different distance
+source without the two disagreeing on which sphere they're measuring over — but
+that is now an optional substitution, not a correctness requirement.

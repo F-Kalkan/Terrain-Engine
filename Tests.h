@@ -73,17 +73,20 @@ void TestFlatPlateauEverythingVisible()
 // TEST 2  
 void TestWallBlocksView()
 {
+    // A single row at the equator: away from the equator, a great-circle path
+    // between two same-latitude points is very slightly shorter than the
+    // naive degree-Euclidean distance (it bulges toward the pole, taking a
+    // shortcut), which can shift GetTerrainProfile's floored sample count by
+    // one and skip a hand-placed peak entirely. At the equator the two
+    // distance models coincide exactly, so this test can rely on landing on
+    // every integer column the way it always has.
     std::vector<std::vector<double>> testGrid = {
-        {10, 10, 10, 10, 10},
-        {10, 20, 30, 20, 10},
-        {10, 30, 50, 30, 10},
-        {10, 20, 30, 20, 10},
-        {10, 10, 10, 10, 10}
+        {10, 30, 50, 30, 10}
     };
     FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
-    GeoPoint a{ 2, 0 };
-    GeoPoint b{ 2, 4 };
+    GeoPoint a{ 0, 0 };
+    GeoPoint b{ 0, 4 };
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
     LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
@@ -267,17 +270,16 @@ void TestSymmetricHillReciprocity()
 //TEST 9    
 void TestObserverBelowRim()
 {
+    // At the equator (see TestWallBlocksView) so GetTerrainProfile's floored
+    // sample count can't drift off the integer columns this test's fixed
+    // crater-rim layout depends on landing on exactly.
     std::vector<std::vector<double>> testGrid = {
-        {5, 5, 5, 5, 5},
-        {5, 30, 30, 30, 5},
-        {5, 30, 5, 30, 5},
-        {5, 30, 30, 30, 5},
-        {5, 5, 5, 5, 5}
+        {5, 30, 5, 30, 5}
     };
     FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
-    GeoPoint a{ 2, 2 };
-    GeoPoint b{ 2, 4 };
+    GeoPoint a{ 0, 2 };
+    GeoPoint b{ 0, 4 };
 
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
@@ -401,18 +403,17 @@ void TestBlockingFeatureIsLocalPeak()
 {
     // Same pyramid shape as the wall test: elevations along the path are
     // 10,30,50,30,10 -- the blocking point (50) is higher than both its
-    // immediate neighbours (30, 30), which is exactly a local peak.
+    // immediate neighbours (30, 30), which is exactly a local peak. At the
+    // equator (see TestWallBlocksView) the great-circle and degree-Euclidean
+    // distance models coincide exactly, so the profile lands on every integer
+    // column the way this test's fixed elevations assume.
     std::vector<std::vector<double>> testGrid = {
-        {10, 10, 10, 10, 10},
-        {10, 20, 30, 20, 10},
-        {10, 30, 50, 30, 10},
-        {10, 20, 30, 20, 10},
-        {10, 10, 10, 10, 10}
+        {10, 30, 50, 30, 10}
     };
     FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
-    GeoPoint a{ 2, 0 };
-    GeoPoint b{ 2, 4 };
+    GeoPoint a{ 0, 0 };
+    GeoPoint b{ 0, 4 };
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
     LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
@@ -423,8 +424,11 @@ void TestBlockingFeatureIsLocalPeak()
 //TEST 15
 void TestFastViewshedVoidDegradesDownstream()
 {
-    // A custom sampler with a single hole at (lat=2, lon=2). A straight ray
-    // due east from the observer at (2,0) crosses that hole before reaching
+    // A custom sampler with a single hole at (lat=0, lon=2) -- the equator, so
+    // GetTerrainProfile's floored sample count lands on every integer column
+    // along this east-pointing ray exactly (see TestWallBlocksView for why
+    // that stops being guaranteed away from the equator). A straight ray due
+    // east from the observer at (0,0) crosses that hole before reaching
     // farther cells at lon=3 and lon=4. Naive would mark every one of those
     // farther cells as degraded too, since their own profile also passes
     // through the same hole -- ComputeViewshedFast must do the same instead
@@ -436,7 +440,7 @@ void TestFastViewshedVoidDegradesDownstream()
         {
             int row = (int)round(latitude);
             int col = (int)round(longitude);
-            if (row == 2 && col == 2) return std::nullopt;
+            if (row == 0 && col == 2) return std::nullopt;
             return 10.0;
         }
 
@@ -444,7 +448,7 @@ void TestFastViewshedVoidDegradesDownstream()
     };
 
     SamplerWithHole sampler;
-    GeoPoint observer{ 2, 0 };
+    GeoPoint observer{ 0, 0 };
 
     ViewshedResult viewshed = ComputeViewshedFast(observer, Agl(2.0), 9, 9, 1.0, sampler);
 
@@ -543,6 +547,15 @@ void TestProfileMatchesFrozenOracle()
     // for this fixed input; this test regenerates the same profile and diffs
     // against it, so any future change to the distance/sampling model that
     // silently shifts these numbers gets caught here.
+    //
+    // The frozen values were regenerated once, deliberately, when
+    // GetTerrainProfile switched from a flat-plane distance approximation to
+    // a true great-circle (haversine) one: at this profile's non-equatorial
+    // latitude, a great-circle path bulges slightly toward the pole and is
+    // marginally shorter than the old flat estimate, which also shifted the
+    // floored sample count from 5 samples to 4. This is exactly the kind of
+    // change this test exists to catch -- caught here, verified, and the
+    // oracle updated on purpose, not silently.
     std::vector<std::vector<double>> testGrid = {
         {10, 10, 10, 10, 10},
         {10, 20, 30, 20, 10},
@@ -754,7 +767,7 @@ void TestViewshedLongitudeSpacingCorrectsForLatitude()
     // query per grid column. LongitudeSpacingForLatitude widens the longitude
     // step by 1/cos(latitude) so a column step covers the same real ground
     // distance as a row step, at any latitude.
-    double spacingDeg = 30.0 / 111320.0;
+    double spacingDeg = 30.0 / (EarthRadiusM * DegToRad);
     double degToRad = 3.14159265358979323846 / 180.0;
 
     double atEquator = LongitudeSpacingForLatitude(spacingDeg, 0.0);

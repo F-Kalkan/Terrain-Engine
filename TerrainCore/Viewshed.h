@@ -32,8 +32,7 @@ inline bool IsConfident(CellVisibility v)
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline double LongitudeSpacingForLatitude(double spacingDeg, double latitudeDeg)
 {
-    const double degToRad = 3.14159265358979323846 / 180.0;
-    return spacingDeg / cos(latitudeDeg * degToRad);
+    return spacingDeg / cos(latitudeDeg * DegToRad);
 }
 
 struct ViewshedResult
@@ -147,7 +146,7 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
         return result;
     }
 
-    const double R = 6371000.0;
+    const double R = EarthRadiusM;
 
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;

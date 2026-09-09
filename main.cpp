@@ -22,7 +22,7 @@ void RunWallTimeBenchmark()
         return;
     }
 
-    double metersPerDegreeLat = 111320.0;
+    double metersPerDegreeLat = EarthRadiusM * DegToRad;
     double spacingInDegrees = 30.0 / metersPerDegreeLat;
     DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
 
@@ -343,7 +343,7 @@ int main(int argc, char* argv[])
                 std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
                 return 1;
             }
-            double metersPerDegreeLat = 111320.0;
+            double metersPerDegreeLat = EarthRadiusM * DegToRad;
             double spacingInDegrees = 30.0 / metersPerDegreeLat;
 
             if (subMode == "profile")
