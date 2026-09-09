@@ -10,10 +10,10 @@
 class RealElevationSampler : public IElevationSampler
 {
 public:
-    RealElevationSampler(std::string filePath, double swLatitude, double swLongitude, InterpolationMode interpolationMode = InterpolationMode::Nearest)
+    RealElevationSampler(std::string filePath, double swLatitudeDeg, double swLongitudeDeg, InterpolationMode interpolationMode = InterpolationMode::Nearest)
     {
-        swLat = swLatitude;
-        swLon = swLongitude;
+        swLat = swLatitudeDeg;
+        swLon = swLongitudeDeg;
         mode = interpolationMode;
 
         std::ifstream file(filePath, std::ios::binary);
@@ -42,13 +42,22 @@ public:
     bool IsLoaded() const
     {
         return loadedSuccessfully;
-    }   
+    }
+    
+    // SRTM .hgt files are EGM96-referenced -- orthometric (mean sea level) heights.
+    VerticalDatum GetDatum() const override
+    {
+        return VerticalDatum::OrthometricMsl;
+    }
 
-    std::optional<double> virtual GetElevation(double latitude, double longitude)
+    // Complexity: O(1) -- a fixed number of array lookups (1 nearest, 4 bilinear).
+    // Thread-safety: never mutates state after construction, so safe for
+    // concurrent calls from multiple threads once the file has finished loading.
+    std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
     {
         double topLat = swLat + 1.0;
-        double rowF = (topLat - latitude) * (size - 1);
-        double colF = (longitude - swLon) * (size - 1);
+        double rowF = (topLat - latitudeDeg) * (size - 1);
+        double colF = (longitudeDeg - swLon) * (size - 1);
 
         if (mode == InterpolationMode::Bilinear)
         {

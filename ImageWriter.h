@@ -5,6 +5,8 @@
 #include "TerrainProfile.h"
 #include "Viewshed.h"
 
+// Complexity: O(rows * cols). Thread-safety: single-thread-only (writes to one
+// std::ofstream); not a per-frame call.
 inline void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePath)
 {
     int rows = (int)viewshed.visible.size();
@@ -35,31 +37,33 @@ inline void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePat
     }
 }
 
+// Complexity: O(profile.size() + width * imageHeight). Thread-safety:
+// single-thread-only (writes to one std::ofstream); not a per-frame call.
 inline void WriteProfilePGM(const std::vector<ProfileSample>& profile, std::string filePath, int imageHeight = 200)
 {
     int width = (int)profile.size();
 
-    double minElev = 1e18;
-    double maxElev = -1e18;
+    double minElevM = 1e18;
+    double maxElevM = -1e18;
     for (const auto& sample : profile)
     {
-        if (sample.elevation.has_value())
+        if (sample.elevationM.has_value())
         {
-            if (*sample.elevation < minElev) minElev = *sample.elevation;
-            if (*sample.elevation > maxElev) maxElev = *sample.elevation;
+            if (*sample.elevationM < minElevM) minElevM = *sample.elevationM;
+            if (*sample.elevationM > maxElevM) maxElevM = *sample.elevationM;
         }
     }
 
-    double range = maxElev - minElev;
-    if (range == 0) range = 1;
+    double rangeM = maxElevM - minElevM;
+    if (rangeM == 0) rangeM = 1;
 
     std::vector<unsigned char> pixels(width * imageHeight, 255);
 
     for (int x = 0; x < width; x++)
     {
-        if (!profile[x].elevation.has_value()) continue;
+        if (!profile[x].elevationM.has_value()) continue;
 
-        double normalized = (*profile[x].elevation - minElev) / range;
+        double normalized = (*profile[x].elevationM - minElevM) / rangeM;
         int y = imageHeight - 1 - (int)(normalized * (imageHeight - 1));
 
         if (y < 0) y = 0;

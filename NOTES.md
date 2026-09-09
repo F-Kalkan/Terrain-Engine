@@ -75,3 +75,17 @@ shift for noise or a regression.
   minimum, ideally a named parameter forcing the caller to state which convention
   their heights use) instead of a README paragraph nobody has to read before calling
   the function.
+
+## Update: the vertical datum regret above is now fixed
+
+The two bullets above turned into an actual change: `hA`/`hB`/`observerHeight` are
+now `DatumHeight` (a value plus a `VerticalDatum`), every `IElevationSampler`
+declares its own datum through `GetDatum()`, and a query is rejected as a value
+(`datumRejected`) rather than silently combined if the heights aren't
+`HeightAboveGround` or the sampler's datum is `Unknown`. Worth naming honestly what
+this did and did not close: the *type* is now unmissable (a caller cannot pass a
+bare `double` and forget which convention it's in), but there is still no real
+geoid-undulation data source behind `ConvertHeightBetweenDatums` -- the function is
+correct and tested, but a caller who actually has an ellipsoidal height still needs
+to get the undulation for their coordinate from somewhere else first. Typing the
+problem away is not the same as solving the data-sourcing half of it.

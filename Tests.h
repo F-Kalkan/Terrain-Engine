@@ -41,6 +41,16 @@ inline void SetLinearDistances(std::vector<ProfileSample>& profile, double stepM
     }
 }
 
+// Shorthand for "this many metres above the local terrain" -- HeightAboveGround
+// is the datum ComputeLineOfSight/ComputeFresnelClearance/the viewsheds accept
+// for observerHeightAgl/targetHeightAgl. Every FakeElevationSampler below also picks an
+// explicit terrain datum, since the default (Unknown) is now correctly
+// rejected rather than silently treated as usable.
+inline DatumHeight Agl(double valueM)
+{
+    return DatumHeight{ valueM, VerticalDatum::HeightAboveGround };
+}
+
 // TEST 1 
 void TestFlatPlateauEverythingVisible()
 {
@@ -49,13 +59,13 @@ void TestFlatPlateauEverythingVisible()
         {10, 10, 10},
         {10, 10, 10}
     };
-    FakeElevationSampler sampler(flatGrid);
+    FakeElevationSampler sampler(flatGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint a{ 0, 0 };
     GeoPoint b{ 0, 2 };
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
     Expect(los.isVisible == true, "TestFlatPlateauEverythingVisible");
 }
@@ -70,15 +80,15 @@ void TestWallBlocksView()
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint a{ 2, 0 };
     GeoPoint b{ 2, 4 };
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
-    Expect(los.isVisible == false && std::abs(los.clearanceDeficit - 38.0) < 0.001, "TestWallBlocksView");
+    Expect(los.isVisible == false && std::abs(los.clearanceDeficitM - 38.0) < 0.001, "TestWallBlocksView");
 }
 
 // TEST 3 
@@ -96,18 +106,18 @@ void TestCurvatureBlocksFlatTerrain()
         double t = (double)i / 10;
         ProfileSample s;
         s.point = GeoPoint{ 0, t * 50000.0 };
-        s.elevation = 0;
+        s.elevationM = 0;
         curvatureProfile.push_back(s);
     }
     SetLinearDistances(curvatureProfile, 5000.0);
 
     // Flat-earth comparison: an enormous k makes the curvature term negligible,
     // So the exact same geometry must report visible when curvature is effectively switched off.
-    LineOfSightResult flatEarth = ComputeLineOfSight(curvatureProfile, 2.0, 2.0, 1e12);
+    LineOfSightResult flatEarth = ComputeLineOfSight(curvatureProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl, 1e12);
 
-    LineOfSightResult curved = ComputeLineOfSight(curvatureProfile, 2.0, 2.0);
+    LineOfSightResult curved = ComputeLineOfSight(curvatureProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl);
 
-    Expect(flatEarth.isVisible == true && curved.isVisible == false && std::abs(curved.clearanceDeficit - 34.79) < 0.1,
+    Expect(flatEarth.isVisible == true && curved.isVisible == false && std::abs(curved.clearanceDeficitM - 34.79) < 0.1,
         "TestCurvatureBlocksFlatTerrain (flat-earth visible vs curved blocked)");
 }
 
@@ -120,22 +130,22 @@ void TestVoidPointIsDegraded()
 
     ProfileSample p0;
     p0.point = GeoPoint{ 0, 0 };
-    p0.elevation = 10;
+    p0.elevationM = 10;
     voidProfile.push_back(p0);
 
     ProfileSample p1;
     p1.point = GeoPoint{ 0, 1 };
-    p1.elevation = std::nullopt;
+    p1.elevationM = std::nullopt;
     voidProfile.push_back(p1);
 
     ProfileSample p2;
     p2.point = GeoPoint{ 0, 2 };
-    p2.elevation = 10;
+    p2.elevationM = 10;
     voidProfile.push_back(p2);
 
-    LineOfSightResult los = ComputeLineOfSight(voidProfile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(voidProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl);
 
-    Expect(los.isDegraded == true, "TestVoidPointIsDegraded");
+    Expect(los.status == ComputationStatus::VoidInProfile, "TestVoidPointIsDegraded");
 }
 
 // TEST 5
@@ -151,10 +161,10 @@ void TestViewshedDetectsVoid()
         {10, 10, 10, 10, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(smallGrid);
+    FakeElevationSampler sampler(smallGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint observerPos{ 2, 2 };
-    ViewshedResult viewshed = ComputeViewshedNaive(observerPos, 2.0, 7, 7, 1.0, sampler);
+    ViewshedResult viewshed = ComputeViewshedNaive(observerPos, Agl(2.0), 7, 7, 1.0, sampler);
 
     bool foundUnknown = false;
     for (int row = 0; row < 7; row++)
@@ -181,20 +191,20 @@ void TestDeterminism()
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint a{ 2, 0 };
     GeoPoint b{ 2, 4 };
 
     std::vector<ProfileSample> profile1 = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile1, 1.0);
-    LineOfSightResult los1 = ComputeLineOfSight(profile1, 2.0, 2.0);
+    LineOfSightResult los1 = ComputeLineOfSight(profile1, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
     std::vector<ProfileSample> profile2 = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile2, 1.0);
-    LineOfSightResult los2 = ComputeLineOfSight(profile2, 2.0, 2.0);
+    LineOfSightResult los2 = ComputeLineOfSight(profile2, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
-    Expect(los1.isVisible == los2.isVisible && los1.clearanceDeficit == los2.clearanceDeficit, "TestDeterminism");
+    Expect(los1.isVisible == los2.isVisible && los1.clearanceDeficitM == los2.clearanceDeficitM, "TestDeterminism");
 }
 
 //Test 7
@@ -207,11 +217,11 @@ void TestFastViewshedMatchesNaive()
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
     GeoPoint observerPos{ 2, 0 };
 
-    ViewshedResult naive = ComputeViewshedNaive(observerPos, 2.0, 5, 5, 1.0, sampler);
-    ViewshedResult fast = ComputeViewshedFast(observerPos, 2.0, 5, 5, 1.0, sampler);
+    ViewshedResult naive = ComputeViewshedNaive(observerPos, Agl(2.0), 5, 5, 1.0, sampler);
+    ViewshedResult fast = ComputeViewshedFast(observerPos, Agl(2.0), 5, 5, 1.0, sampler);
 
     int mismatches = 0;
     for (int row = 0; row < 5; row++)
@@ -238,20 +248,20 @@ void TestSymmetricHillReciprocity()
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint a{ 2, 0 };
     GeoPoint b{ 2, 4 };
 
     std::vector<ProfileSample> profileAB = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profileAB, 1.0);
-    LineOfSightResult losAB = ComputeLineOfSight(profileAB, 2.0, 2.0);
+    LineOfSightResult losAB = ComputeLineOfSight(profileAB, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
     std::vector<ProfileSample> profileBA = GetTerrainProfile(b, a, 1.0, sampler);
     SetLinearDistances(profileBA, 1.0);
-    LineOfSightResult losBA = ComputeLineOfSight(profileBA, 2.0, 2.0);
+    LineOfSightResult losBA = ComputeLineOfSight(profileBA, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
-    Expect(losAB.isVisible == losBA.isVisible && std::abs(losAB.clearanceDeficit - losBA.clearanceDeficit) < 0.001, "TestSymmetricHillReciprocity");
+    Expect(losAB.isVisible == losBA.isVisible && std::abs(losAB.clearanceDeficitM - losBA.clearanceDeficitM) < 0.001, "TestSymmetricHillReciprocity");
 }
 
 //TEST 9    
@@ -264,14 +274,14 @@ void TestObserverBelowRim()
         {5, 30, 30, 30, 5},
         {5, 5, 5, 5, 5}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint a{ 2, 2 };
     GeoPoint b{ 2, 4 };
 
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
     Expect(los.isVisible == false, "TestObserverBelowRim");
 }
@@ -285,12 +295,12 @@ void TestTargetOnFarSlopeVisible()
     {
         ProfileSample s;
         s.point = GeoPoint{ 0, (double)i };
-        s.elevation = elevations[i];
+        s.elevationM = elevations[i];
         slopeProfile.push_back(s);
     }
     SetLinearDistances(slopeProfile, 1.0);
 
-    LineOfSightResult los = ComputeLineOfSight(slopeProfile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(slopeProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl);
 
     Expect(los.isVisible == true, "TestTargetOnFarSlopeVisible");
 }
@@ -308,14 +318,14 @@ void TestFresnelClearancePartialObstruction()
     {
         ProfileSample s;
         s.point = GeoPoint{ 0, (double)i };
-        s.elevation = (i == 5) ? 40.0 : 0.0;
+        s.elevationM = (i == 5) ? 40.0 : 0.0;
         profile.push_back(s);
     }
     SetLinearDistances(profile, 1000.0);
 
-    FresnelClearanceResult result = ComputeFresnelClearance(profile, 50.0, 50.0, 2.4e9);
+    FresnelClearanceResult result = ComputeFresnelClearance(profile, Agl(50.0), Agl(50.0), VerticalDatum::OrthometricMsl, 2.4e9);
 
-    Expect(std::abs(result.minClearanceFraction - 0.4826) < 0.001 && result.worstPoint.has_value() && result.worstPoint->longitude == 5.0,
+    Expect(std::abs(result.minClearanceFraction - 0.4826) < 0.001 && result.worstPoint.has_value() && result.worstPoint->longitudeDeg == 5.0,
         "TestFresnelClearancePartialObstruction");
 }
 
@@ -329,15 +339,15 @@ void TestBatchLineOfSightMatchesIndividualCalls()
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint observer{ 2, 0 };
     GeoPoint targetBlocked{ 2, 4 };
     GeoPoint targetClear{ 0, 4 };
 
     std::vector<BatchLineOfSightQuery> queries = {
-        { observer, 2.0, targetBlocked, 2.0 },
-        { observer, 2.0, targetClear, 2.0 }
+        { observer, Agl(2.0), targetBlocked, Agl(2.0) },
+        { observer, Agl(2.0), targetClear, Agl(2.0) }
     };
 
     std::vector<LineOfSightResult> batchResults = ComputeBatchLineOfSight(queries, 1.0, sampler);
@@ -347,14 +357,14 @@ void TestBatchLineOfSightMatchesIndividualCalls()
     // exact same (real-degree) GetTerrainProfile distance model as production
     // code does -- patching one side would make them diverge instead of match.
     std::vector<ProfileSample> profile1 = GetTerrainProfile(observer, targetBlocked, 1.0, sampler);
-    LineOfSightResult direct1 = ComputeLineOfSight(profile1, 2.0, 2.0);
+    LineOfSightResult direct1 = ComputeLineOfSight(profile1, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
     std::vector<ProfileSample> profile2 = GetTerrainProfile(observer, targetClear, 1.0, sampler);
-    LineOfSightResult direct2 = ComputeLineOfSight(profile2, 2.0, 2.0);
+    LineOfSightResult direct2 = ComputeLineOfSight(profile2, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
     Expect(batchResults.size() == 2
         && batchResults[0].isVisible == direct1.isVisible
-        && std::abs(batchResults[0].clearanceDeficit - direct1.clearanceDeficit) < 0.001
+        && std::abs(batchResults[0].clearanceDeficitM - direct1.clearanceDeficitM) < 0.001
         && batchResults[1].isVisible == direct2.isVisible,
         "TestBatchLineOfSightMatchesIndividualCalls");
 }
@@ -399,16 +409,15 @@ void TestBlockingFeatureIsLocalPeak()
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint a{ 2, 0 };
     GeoPoint b{ 2, 4 };
     std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
     SetLinearDistances(profile, 1.0);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
 
-    Expect(los.isVisible == false && los.blockingFeature == TerrainFeatureType::LocalPeak,
-        "TestBlockingFeatureIsLocalPeak");
+    Expect(los.isVisible == false && los.blockingFeature == TerrainFeatureType::LocalPeak, "TestBlockingFeatureIsLocalPeak");
 }
 
 //TEST 15
@@ -430,12 +439,14 @@ void TestFastViewshedVoidDegradesDownstream()
             if (row == 2 && col == 2) return std::nullopt;
             return 10.0;
         }
+
+        VerticalDatum GetDatum() const override { return VerticalDatum::OrthometricMsl; }
     };
 
     SamplerWithHole sampler;
     GeoPoint observer{ 2, 0 };
 
-    ViewshedResult viewshed = ComputeViewshedFast(observer, 2.0, 9, 9, 1.0, sampler);
+    ViewshedResult viewshed = ComputeViewshedFast(observer, Agl(2.0), 9, 9, 1.0, sampler);
 
     int centerRow = 4;
     int beforeHoleCol = 5; // lon=1, before the hole -- should still resolve normally
@@ -574,10 +585,10 @@ void TestProfileMatchesFrozenOracle()
         double expectedDist = std::stod(distStr);
 
         const ProfileSample& actual = profile[index];
-        double actualElev = actual.elevation.has_value() ? *actual.elevation : -1.0;
+        double actualElev = actual.elevationM.has_value() ? *actual.elevationM : -1.0;
 
-        if (std::abs(actual.point.latitude - expectedLat) > 1e-6
-            || std::abs(actual.point.longitude - expectedLon) > 1e-6
+        if (std::abs(actual.point.latitudeDeg - expectedLat) > 1e-6
+            || std::abs(actual.point.longitudeDeg - expectedLon) > 1e-6
             || std::abs(actualElev - expectedElev) > 1e-6
             || std::abs(actual.distanceFromStartM - expectedDist) > 1e-6)
         {
@@ -614,7 +625,7 @@ void TestNarrowSpikeCanFallBetweenSamples()
     bool spikeSeen = false;
     for (const auto& sample : profile)
     {
-        if (sample.elevation.has_value() && *sample.elevation == 999.0)
+        if (sample.elevationM.has_value() && *sample.elevationM == 999.0)
         {
             spikeSeen = true;
         }
@@ -657,7 +668,7 @@ void TestMultiTileProfileCrossesSeamWithoutGap()
     bool allResolved = profile.size() > 1;
     for (const auto& sample : profile)
     {
-        if (!sample.elevation.has_value())
+        if (!sample.elevationM.has_value())
         {
             allResolved = false;
         }
@@ -678,17 +689,19 @@ void TestEmptyAndSingleSampleProfilesAreDegradedNotUB()
     std::vector<ProfileSample> singleSampleProfile;
     ProfileSample onlySample;
     onlySample.point = GeoPoint{ 0, 0 };
-    onlySample.elevation = 10.0;
+    onlySample.elevationM = 10.0;
     onlySample.distanceFromStartM = 0.0;
     singleSampleProfile.push_back(onlySample);
 
-    LineOfSightResult losEmpty = ComputeLineOfSight(emptyProfile, 2.0, 2.0);
-    LineOfSightResult losSingle = ComputeLineOfSight(singleSampleProfile, 2.0, 2.0);
-    FresnelClearanceResult fresnelEmpty = ComputeFresnelClearance(emptyProfile, 2.0, 2.0, 2.4e9);
-    FresnelClearanceResult fresnelSingle = ComputeFresnelClearance(singleSampleProfile, 2.0, 2.0, 2.4e9);
+    LineOfSightResult losEmpty = ComputeLineOfSight(emptyProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl);
+    LineOfSightResult losSingle = ComputeLineOfSight(singleSampleProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl);
+    FresnelClearanceResult fresnelEmpty = ComputeFresnelClearance(emptyProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl, 2.4e9);
+    FresnelClearanceResult fresnelSingle = ComputeFresnelClearance(singleSampleProfile, Agl(2.0), Agl(2.0), VerticalDatum::OrthometricMsl, 2.4e9);
 
-    Expect(losEmpty.isDegraded && losSingle.isDegraded
-        && fresnelEmpty.isDegraded && fresnelSingle.isDegraded,
+    Expect(losEmpty.status == ComputationStatus::EmptyOrSingleSampleProfile
+        && losSingle.status == ComputationStatus::EmptyOrSingleSampleProfile
+        && fresnelEmpty.status == ComputationStatus::EmptyOrSingleSampleProfile
+        && fresnelSingle.status == ComputationStatus::EmptyOrSingleSampleProfile,
         "TestEmptyAndSingleSampleProfilesAreDegradedNotUB");
 }
 
@@ -708,7 +721,7 @@ void TestBlockingFeatureClassificationIsSpacingInvariant()
     {
         ProfileSample s;
         s.point = GeoPoint{ 0, (double)i };
-        s.elevation = fineElevations[i];
+        s.elevationM = fineElevations[i];
         s.distanceFromStartM = i * 10.0;
         fineProfile.push_back(s);
     }
@@ -719,7 +732,7 @@ void TestBlockingFeatureClassificationIsSpacingInvariant()
     {
         ProfileSample s;
         s.point = GeoPoint{ 0, (double)i };
-        s.elevation = coarseElevations[i];
+        s.elevationM = coarseElevations[i];
         s.distanceFromStartM = i * 100.0;
         coarseProfile.push_back(s);
     }
@@ -751,4 +764,208 @@ void TestViewshedLongitudeSpacingCorrectsForLatitude()
     Expect(std::abs(atEquator - spacingDeg) < 1e-12
         && std::abs(at36_5 / spacingDeg - expectedRatioAt36_5) < 1e-9,
         "TestViewshedLongitudeSpacingCorrectsForLatitude");
+}
+
+//TEST 24
+void TestConvertHeightBetweenDatums()
+{
+    // INTEGRATION-READINESS.md section 2: convert between ellipsoidal (HAE) and
+    // orthometric (MSL) using a REQUIRED undulation argument -- ellipsoidal =
+    // orthometric + undulation. Undulation of +30m here (a plausible real value;
+    // globally it ranges roughly -107m to +85m).
+    auto toEllipsoidal = ConvertHeightBetweenDatums(100.0, VerticalDatum::OrthometricMsl, VerticalDatum::EllipsoidalHae, 30.0);
+    auto backToOrthometric = ConvertHeightBetweenDatums(*toEllipsoidal, VerticalDatum::EllipsoidalHae, VerticalDatum::OrthometricMsl, 30.0);
+
+    // No formula exists for a pair involving PressureAltitude -- must return
+    // nullopt as a value, not silently pick a number.
+    auto unsupported = ConvertHeightBetweenDatums(100.0, VerticalDatum::PressureAltitude, VerticalDatum::OrthometricMsl, 30.0);
+
+    Expect(toEllipsoidal.has_value() && std::abs(*toEllipsoidal - 130.0) < 1e-9
+        && backToOrthometric.has_value() && std::abs(*backToOrthometric - 100.0) < 1e-9
+        && !unsupported.has_value(),
+        "TestConvertHeightBetweenDatums");
+}
+
+//TEST 25
+void TestComputeLineOfSightRejectsWrongHeightDatum()
+{
+    // INTEGRATION-READINESS.md section 2: "reject -- as a value, not an
+    // exception -- a query that mixes datums without a conversion."
+    // observerHeightAgl/targetHeightAgl must be HeightAboveGround; passing an ellipsoidal height by mistake must be
+    // rejected, not silently added to a terrain elevation it isn't compatible with.
+    std::vector<std::vector<double>> flatGrid = {
+        {10, 10, 10},
+        {10, 10, 10},
+        {10, 10, 10}
+    };
+    FakeElevationSampler sampler(flatGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
+
+    GeoPoint a{ 0, 0 };
+    GeoPoint b{ 0, 2 };
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
+    SetLinearDistances(profile, 1.0);
+
+    DatumHeight wrongDatum{ 2.0, VerticalDatum::EllipsoidalHae };
+    LineOfSightResult los = ComputeLineOfSight(profile, wrongDatum, Agl(2.0), sampler.GetDatum());
+
+    Expect(los.status == ComputationStatus::DatumRejected, "TestComputeLineOfSightRejectsWrongHeightDatum");
+}
+
+//TEST 26
+void TestComputeLineOfSightRejectsUnknownTerrainDatum()
+{
+    // A sampler that never declared its datum (left at the default Unknown)
+    // must not have its elevations silently trusted -- the query is rejected
+    // rather than assuming the terrain values mean anything comparable to an
+    // AGL height.
+    std::vector<std::vector<double>> flatGrid = {
+        {10, 10, 10},
+        {10, 10, 10},
+        {10, 10, 10}
+    };
+    FakeElevationSampler sampler(flatGrid); // datum left at the default: Unknown
+
+    GeoPoint a{ 0, 0 };
+    GeoPoint b{ 0, 2 };
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
+    SetLinearDistances(profile, 1.0);
+
+    LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
+
+    Expect(los.status == ComputationStatus::DatumRejected && sampler.GetDatum() == VerticalDatum::Unknown,
+        "TestComputeLineOfSightRejectsUnknownTerrainDatum");
+}
+
+//TEST 27
+void TestRealElevationSamplerDeclaresOrthometricDatum()
+{
+    // INTEGRATION-READINESS.md section 2: "have IElevationSampler declare the
+    // datum of what it returns, per implementation." SRTM .hgt files are
+    // EGM96-referenced -- orthometric (MSL) heights -- regardless of whether
+    // the specific file loads successfully.
+    RealElevationSampler sampler("DATA/does_not_need_to_exist_for_this_check.hgt", 0.0, 0.0);
+    Expect(sampler.GetDatum() == VerticalDatum::OrthometricMsl, "TestRealElevationSamplerDeclaresOrthometricDatum");
+}
+
+//TEST 28
+void TestRasterBlockSamplerPositiveRowStep()
+{
+    // Positive row step: row 0 sits at the origin's own latitude, and
+    // increasing row increases latitude (row 0 = south edge, row 2 = north edge).
+    std::vector<std::vector<std::optional<double>>> block = {
+        { 10.0, 11.0, 12.0 },
+        { 20.0, 21.0, 22.0 },
+        { 30.0, 31.0, 32.0 }
+    };
+    RasterBlockElevationSampler sampler(block, 0.0, 0.0, 1.0, 1.0, VerticalDatum::OrthometricMsl);
+
+    auto origin = sampler.GetElevation(0.0, 0.0);
+    auto farCorner = sampler.GetElevation(2.0, 2.0);
+    auto outOfBounds = sampler.GetElevation(5.0, 5.0);
+
+    Expect(sampler.Rows() == 3 && sampler.Cols() == 3
+        && origin.has_value() && *origin == 10.0
+        && farCorner.has_value() && *farCorner == 32.0
+        && !outOfBounds.has_value()
+        && sampler.GetDatum() == VerticalDatum::OrthometricMsl,
+        "TestRasterBlockSamplerPositiveRowStep");
+}
+
+//TEST 29
+void TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth()
+{
+    // INTEGRATION-READINESS.md: "The host's blocks carry a signed latitude
+    // step, typically negative -- row 0 is the northern edge... make the step
+    // signed and the ambiguity disappears rather than needing a paragraph."
+    // Origin is the north-west corner (latitude 2); a negative row step means
+    // increasing row index moves SOUTH (decreasing latitude).
+    std::vector<std::vector<std::optional<double>>> block = {
+        { 10.0, 11.0, 12.0 }, // row 0: the northernmost row (latitude 2)
+        { 20.0, 21.0, 22.0 },
+        { 30.0, 31.0, 32.0 }  // row 2: the southernmost row (latitude 0)
+    };
+    RasterBlockElevationSampler sampler(block, 2.0, 0.0, -1.0, 1.0, VerticalDatum::OrthometricMsl);
+
+    auto north = sampler.GetElevation(2.0, 0.0); // origin itself, the north edge
+    auto south = sampler.GetElevation(0.0, 0.0); // 2 degrees south of origin
+
+    Expect(north.has_value() && *north == 10.0
+        && south.has_value() && *south == 30.0,
+        "TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth");
+}
+
+//TEST 30
+void TestRasterBlockSamplerVoidCellPassesThrough()
+{
+    // A cell's own std::optional carries validity directly -- no invented
+    // sentinel value, unlike RealElevationSampler's -32768.
+    std::vector<std::vector<std::optional<double>>> block = {
+        { 10.0, std::nullopt },
+        { 20.0, 21.0 }
+    };
+    RasterBlockElevationSampler sampler(block, 0.0, 0.0, 1.0, 1.0, VerticalDatum::OrthometricMsl);
+
+    auto validCell = sampler.GetElevation(0.0, 0.0);
+    auto voidCell = sampler.GetElevation(0.0, 1.0);
+
+    Expect(validCell.has_value() && *validCell == 10.0 && !voidCell.has_value(),
+        "TestRasterBlockSamplerVoidCellPassesThrough");
+}
+
+//TEST 31
+void TestRasterBlockSamplerWorksWithLineOfSight()
+{
+    // "IElevationSampler itself survives" -- GetTerrainProfile/ComputeLineOfSight
+    // need no changes at all to use this sampler instead of a file-backed one.
+    std::vector<std::vector<std::optional<double>>> block = {
+        { 10.0, 10.0, 10.0, 10.0, 10.0 },
+        { 10.0, 10.0, 10.0, 10.0, 10.0 },
+        { 10.0, 10.0, 10.0, 10.0, 10.0 }
+    };
+    RasterBlockElevationSampler sampler(block, 0.0, 0.0, 1.0, 1.0, VerticalDatum::OrthometricMsl);
+
+    GeoPoint a{ 0, 0 };
+    GeoPoint b{ 0, 4 };
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, 1.0, sampler);
+    SetLinearDistances(profile, 1.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), sampler.GetDatum());
+
+    Expect(los.isVisible == true && IsOk(los.status), "TestRasterBlockSamplerWorksWithLineOfSight");
+}
+
+//TEST 32
+void TestScratchBufferProfileAllocatesNothingOnReuse()
+{
+    // INTEGRATION-READINESS.md: a per-frame line-of-sight query should be able to
+    // reuse one caller-owned buffer instead of allocating a new vector every call.
+    // std::vector::clear() keeps its capacity, so a second call that needs no more
+    // elements than the first must not grow capacity -- that is the observable
+    // proof that the buffer was reused rather than replaced.
+    std::vector<std::vector<double>> flatGrid = {
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10},
+        {10, 10, 10, 10, 10}
+    };
+    FakeElevationSampler sampler(flatGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
+
+    GeoPoint a{ 0, 0 };
+    GeoPoint b{ 0, 4 };
+
+    std::vector<ProfileSample> scratch;
+    GetTerrainProfile(a, b, 1.0, sampler, scratch);
+    size_t firstSize = scratch.size();
+    size_t firstCapacity = scratch.capacity();
+
+    GetTerrainProfile(a, b, 1.0, sampler, scratch);
+    size_t secondSize = scratch.size();
+    size_t secondCapacity = scratch.capacity();
+
+    SetLinearDistances(scratch, 1.0);
+    LineOfSightResult los = ComputeLineOfSight(scratch, Agl(2.0), Agl(2.0), sampler.GetDatum());
+
+    Expect(firstSize == secondSize && secondCapacity == firstCapacity
+        && los.isVisible == true && IsOk(los.status),
+        "TestScratchBufferProfileAllocatesNothingOnReuse");
 }

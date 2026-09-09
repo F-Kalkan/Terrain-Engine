@@ -15,9 +15,9 @@ between two points:
 
 1. **Terrain profile** — ground elevation along a path between two geodetic points,
    sampled at a stated spacing.
-2. **Line of sight** — can an observer at point A, `hA` metres above the ground, see a
-   target at point B, `hB` metres above the ground? If blocked, the position, elevation,
-   and clearance deficit of the blocking point.
+2. **Line of sight** — can an observer at point A, `observerHeightAgl` metres above the
+   ground, see a target at point B, `targetHeightAgl` metres above the ground? If
+   blocked, the position, elevation, and clearance deficit of the blocking point.
 3. **Viewshed** — from one observer, which cells within a radius are visible, as a
    raster mask.
 
@@ -25,7 +25,7 @@ between two points:
 
 1. Clone this repository and open `TerrainEngine.sln` in Visual Studio 2022.
 2. Build the solution (`x64`, `Release` recommended for real use).
-3. Run `TerrainEngine.exe` with no arguments — this runs the 22-case test suite and a
+3. Run `TerrainEngine.exe` with no arguments — this runs the 31-case test suite and a
    small demo against the included sample tile (`DATA/N36W112.hgt`, a stretch of the
    Grand Canyon), and writes `profile_output.pgm` / `viewshed_output.pgm` you can open
    in any image viewer that supports PGM (e.g. IrfanView, GIMP).
@@ -49,10 +49,12 @@ independent of any file format:
 | `TerrainReader`  | Static library  | `TerrainCore` (for the sampler interface) + stdlib (`<fstream>`, `<cstdint>`, `<string>`) |
 | `TerrainEngine`  | Console exe/CLI | `TerrainCore`, `TerrainReader`, plus Windows-only `<windows.h>`/`<psapi.h>` for peak-memory reporting |
 
-`TerrainCore` contains the elevation-sampler interface (`IElevationSampler`), the
-in-memory `FakeElevationSampler` used by every test, and the three algorithms
-(`GetTerrainProfile`, `ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`).
-It has no include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
+`TerrainCore` contains the elevation-sampler interface (`IElevationSampler`), three
+in-memory implementations of it (`FakeElevationSampler` used by every test,
+`MultiTileElevationSampler`, and `RasterBlockElevationSampler` — see "Integration
+readiness work" below), and the three algorithms (`GetTerrainProfile`,
+`ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`). It has no
+include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
 
 `TerrainReader` contains `RealElevationSampler`, a reader for SRTM `.hgt` 3-arcsecond
 tiles (1201×1201, ~90 m resolution at the equator, big-endian 16-bit signed elevations,
@@ -75,7 +77,7 @@ only a demo/tooling one.
   50 km) but is **not** a true geodesic calculation and would drift at larger
   distances or near the poles.
 - **Viewshed grid shape**: `ComputeViewshedNaive`/`ComputeViewshedFast` take one
-  `spacing` value (degrees of latitude per row) and derive the column spacing from
+  `spacingDeg` value (degrees of latitude per row) and derive the column spacing from
   it via `LongitudeSpacingForLatitude` (`Viewshed.h`), widening it by
   `1/cos(observer latitude)` so a column step covers the same real ground distance
   as a row step. Without this, a grid built from equal degree-steps on both axes is
@@ -85,11 +87,22 @@ only a demo/tooling one.
   the included tile's latitude (36.5°N) at a "30 km radius": north/south reach
   30,000 m, east/west reach 29,970 m, both real distances measured through
   `GetTerrainProfile`.
-- **Vertical datum**: **not modeled.** Elevation values are taken directly from the
-  SRTM file (heights above the EGM96 geoid) and added straight to `hA`/`hB` without
-  any conversion to/from the WGS84 ellipsoid. This is a known, deliberate gap — the
-  two differ by tens of metres and would need its own conversion function with its
-  own tests to close properly.
+- **Vertical datum**: modeled as an explicit, closed set (`VerticalDatum`, in
+  `VerticalDatum.h`) — `EllipsoidalHae`, `OrthometricMsl`, `PressureAltitude`,
+  `HeightAboveGround`, and `Unknown`. `ComputeLineOfSight`/`ComputeFresnelClearance`/
+  the viewsheds take `observerHeightAgl`/`targetHeightAgl` as `DatumHeight` (a value
+  plus its datum) and require `HeightAboveGround` — the only datum this library's
+  terrain-elevation-plus-relative-offset arithmetic is valid for. Every
+  `IElevationSampler` declares the datum its elevations are in via `GetDatum()`
+  (`RealElevationSampler` → `OrthometricMsl`, since SRTM is EGM96-referenced). A
+  query is **rejected as a value** (`status` set to `ComputationStatus::DatumRejected`,
+  never an exception) if `observerHeightAgl`/`targetHeightAgl` isn't `HeightAboveGround`
+  or the sampler's datum is `Unknown` — never silently combined, never guessed.
+  `ConvertHeightBetweenDatums` converts between `EllipsoidalHae` and
+  `OrthometricMsl` with a **required** undulation argument (no default of zero,
+  because "zero undulation" silently asserts the point sits exactly on the geoid);
+  no other datum pair has a defined conversion, and it returns `nullopt` for those,
+  as a value rather than a guess.
 - **Earth curvature**: `drop = d1*d2 / (2*k*R)`, `R = 6,371,000 m`, `k` defaults to
   `4/3` (standard atmospheric refraction) and is a real parameter — on
   `ComputeLineOfSight`, `ComputeViewshedNaive`, and `ComputeViewshedFast` — settable
@@ -109,16 +122,17 @@ only a demo/tooling one.
   `Bilinear` stays reachable from the CLI for callers who want a smoother profile and
   accept that tradeoff. `TestInterpolationModesDifferOnRidgeline` (`Tests.h`) measures
   the size of the disagreement on a hand-built ridge.
-- **Sampling**: `sampleCount = max(1, floor(totalDistance / spacing))`; the profile
-  always has at least 2 samples (the two endpoints), even if the two points are closer
-  together than one `spacing` unit. Because `sampleCount` is floored, the effective
-  spacing along the path (`totalDistance / sampleCount`) can be slightly larger than
-  the requested `spacing` when the distance isn't an exact multiple of it — a peak
-  narrower than this effective spacing can fall between two samples and be missed.
+- **Sampling**: `sampleCount = max(1, floor(totalDistanceDeg / spacingDeg))`; the
+  profile always has at least 2 samples (the two endpoints), even if the two points
+  are closer together than one `spacingDeg` unit. Because `sampleCount` is floored,
+  the effective spacing along the path (`totalDistanceDeg / sampleCount`) can be
+  slightly larger than the requested `spacingDeg` when the distance isn't an exact
+  multiple of it — a peak narrower than this effective spacing can fall between two
+  samples and be missed.
 - **Voids**: a void (source `-32768`, or a query outside the tile) is never treated as
   zero or sea level. It surfaces as `std::optional` at every layer: `GetElevation`
-  returns `nullopt`, `LineOfSightResult::isDegraded` is set to `true`, and viewshed
-  cells become `std::optional<bool>` with no value — never a silent "visible".
+  returns `nullopt`, `LineOfSightResult::status` becomes `ComputationStatus::VoidInProfile`,
+  and viewshed cells become `std::optional<bool>` with no value — never a silent "visible".
 
 ## Validity envelope
 
@@ -139,7 +153,9 @@ only a demo/tooling one.
 
 ## What it deliberately does not model
 
-- Vertical datum conversion (geoid ↔ ellipsoid).
+- A live geoid-undulation data source. `ConvertHeightBetweenDatums` implements the
+  ellipsoidal↔orthometric formula, but nothing in this project supplies a real
+  undulation value for a given coordinate — a caller needs one from elsewhere.
 
 ## Determinism and floating-point settings
 
@@ -223,13 +239,17 @@ to run rather than silently treating every query as void.
 ## API contract
 
 Every public result type (`ProfileSample`, `LineOfSightResult`, `ViewshedResult`) is a
-plain struct of value types. `ProfileSample::elevation` and `LineOfSightResult`'s
+plain struct of value types. `ProfileSample::elevationM` and `LineOfSightResult`'s
 optional fields use `std::optional` for absence, not a sentinel value.
 `ViewshedResult::visible` instead uses an explicit `CellVisibility` enum
 (`NotCovered` / `Degraded` / `Visible` / `NotVisible`) — a single `optional<bool>`
 cannot distinguish "no ray ever reached this cell" from "a ray reached it but crossed
-a void partway", and a caller needs to tell those two apart. Nothing in `TerrainCore`
-or `TerrainReader` throws across its own boundary.
+a void partway", and a caller needs to tell those two apart. Similarly, a height
+crossing the API boundary (`observerHeightAgl`/`targetHeightAgl`) is never a bare
+`double` — it is a `DatumHeight`, and a query built from the wrong datum is rejected as a value
+(`LineOfSightResult::status == ComputationStatus::DatumRejected`), not silently
+computed or thrown. Nothing in `TerrainCore` or `TerrainReader` throws across its
+own boundary.
 
 ## Building
 
@@ -239,7 +259,7 @@ links both and produces `TerrainEngine.exe`.
 
 ## CLI usage
 ```
-TerrainEngine.exe # run the 22-case test suite + demo
+TerrainEngine.exe # run the 31-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
@@ -251,7 +271,7 @@ Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W11
 
 ## Test suite
 
-22 hand-checkable test functions, plus one real-data tolerance assertion:
+31 hand-checkable test functions, plus one real-data tolerance assertion:
 
 - **Synthetic, in-memory data** (`FakeElevationSampler`, no file on disk): flat
   plateau, wall, curvature, void, viewshed void, determinism, fast-vs-naive on a
@@ -260,11 +280,25 @@ Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W11
   seam (point queries), blocking-feature classification, fast-viewshed void
   propagation, interpolation modes on a ridgeline, a narrow spike falling between
   floored samples, a profile crossing a multi-tile seam, empty/single-sample
-  profile guards, and blocking-feature classification being invariant to sample
-  spacing.
+  profile guards, blocking-feature classification being invariant to sample
+  spacing, the viewshed's longitude spacing correcting for latitude, and a
+  line-of-sight query rejected when the observer/target height or the terrain
+  sampler's datum isn't what the computation requires.
+- **Datum arithmetic, no sampler**: `TestConvertHeightBetweenDatums` round-trips
+  ellipsoidal↔orthometric with a known undulation and confirms an unsupported
+  datum pair returns `nullopt` rather than a guess.
+- **Resident raster block** (`RasterBlockElevationSampler`, no file on disk): a
+  positive row step (origin at the south edge), a negative row step (origin at
+  the north edge, proving the signed step — not an unwritten convention — decides
+  row order), a void cell passed through untouched, and a full
+  `GetTerrainProfile`/`ComputeLineOfSight` run against it with no changes to
+  either function.
 - **Synthetic, file-based**: `TestRealElevationSamplerReadsVoidFromFile` writes a
   2×2 `.hgt`-format tile with a real void sentinel and reads it back through
   `RealElevationSampler` itself.
+- **Datum declaration**: `TestRealElevationSamplerDeclaresOrthometricDatum`
+  confirms `RealElevationSampler::GetDatum()` always reports `OrthometricMsl`,
+  independent of whether the specific file loads.
 - **Frozen golden output**: `TestProfileMatchesFrozenOracle` regenerates a fixed
   profile and diffs it against the checked-in `DATA/oracle_profile.csv`.
 - **Real data**: one tolerance assertion comparing naive and fast viewshed output
@@ -283,8 +317,8 @@ dependency.
 **Orientation note:** in the viewshed PGM/PNG, west is left and east is right (as
 expected), but **north is at the bottom of the image, not the top** — row 0 (written
 first, so the top of the image) corresponds to the observer's south, because
-`ComputeViewshedFast`/`ComputeViewshedNaive` compute `target.latitude = observer.latitude
-+ (row - centerRow) * spacing`, and increasing `row` means increasing latitude (further
+`ComputeViewshedFast`/`ComputeViewshedNaive` compute `target.latitudeDeg = observer.latitudeDeg
++ (row - centerRow) * spacingDeg`, and increasing `row` means increasing latitude (further
 north). This is not a standard north-up map; it's the raw grid orientation exactly as
 computed. Flip the image vertically if you want a conventional north-up view.
 
@@ -334,3 +368,105 @@ computed. Flip the image vertically if you want a conventional north-up view.
   profile-local shape classification, not a named-landmark lookup (that would need an
   external gazetteer, out of scope) — but it turns "blocked" into "blocked by what kind
   of terrain," which is what the geometry itself can honestly answer.
+
+## Adapting toward a real-time host application
+
+Everything above describes the library as a standalone tool. This section covers
+further changes aimed at a different consumer: a real-time simulation or
+visualization runtime that would embed this library rather than call it from the
+command line. That kind of host typically supplies terrain asynchronously in
+batches instead of one point at a time, tracks altitude in a specific vertical
+reference frame, and runs a line-of-sight query many times per second on a budget
+that cannot tolerate a heap allocation per call. The changes below address those
+constraints directly.
+
+- **Vertical datum, as a type** — see "Vertical datum" under "Geometric model and
+  assumptions" above. Heights and terrain elevation now carry an explicit
+  `VerticalDatum`; a query built from the wrong one is rejected as a value, not
+  silently computed.
+- **A raster-block `IElevationSampler`** — `RasterBlockElevationSampler` (in
+  `IElevationSampler.h`) is a view over an already-resident block of elevation data,
+  described by an origin plus **signed** per-row/per-column degree steps — no assumed
+  resolution (unlike `RealElevationSampler`, which infers its size from a `.hgt`
+  file's byte count) and no hardcoded 1°×1° box (unlike `MultiTileElevationSampler`).
+  This is the shape a real host hands back from a raster-window request: the block is
+  already in memory, and answering a query is index arithmetic, not I/O. The row
+  step's **sign** states row order explicitly — negative means row 0 is the northern
+  edge, positive means row 0 is the southern edge — closing the exact ambiguity the
+  "Orientation note" above describes for the file-backed viewshed PGM output.
+  `GetTerrainProfile`/`ComputeLineOfSight` need no changes to use it, proving
+  `IElevationSampler` itself was the right abstraction all along; only its
+  implementations were file-shaped.
+- **A structured `ComputationStatus`, replacing two separate bools** — `isDegraded`
+  and `datumRejected` collapsed several unrelated reasons for "no confident answer"
+  into one flag that could not say which one applied. `LineOfSightResult` and
+  `FresnelClearanceResult` now carry a single `ComputationStatus status`
+  (`Ok`, `EmptyOrSingleSampleProfile`, `EndpointMissing`, `VoidInProfile`,
+  `DatumRejected`, `NothingEvaluated`), with `IsOk(status)` for the common
+  "is this a real answer" check and `ComputationStatusToString(status)` for
+  diagnostics — the CLI's `los`/`fresnel`/`batch` output now names the specific
+  cause instead of a bare `true`/`false`.
+- **A caller-owned scratch buffer for the profile** — `ComputeLineOfSight` and
+  `ComputeFresnelClearance` already took their profile by `const&` (no copy on the
+  hot path); the remaining allocation was `GetTerrainProfile` itself, which built a
+  fresh `std::vector<ProfileSample>` on every call. It now has an in-place overload,
+  `GetTerrainProfile(startPoint, endPoint, spacingDeg, sampler, outProfile)`, that fills a caller-owned
+  `std::vector<ProfileSample>&` via `clear()` (which drops elements but keeps
+  capacity) instead of returning a new one. A caller that keeps one buffer alive
+  across frames and reuses it for each line-of-sight query allocates nothing once
+  that buffer's capacity has grown to the longest profile it will ever need — the
+  exact per-frame query shape a real-time runtime needs. The original by-value
+  overload is now a two-line wrapper over this one, so every existing caller
+  (batch, viewshed, tests) is unchanged.
+- **Physical-quantity-unit identifier names, and Big-O/thread-safety documentation**
+  — every public struct field and function parameter that had lost its unit or frame
+  now states it: `GeoPoint::latitudeDeg`/`longitudeDeg`, `ProfileSample::elevationM`,
+  `LineOfSightResult::blockingElevationM`/`clearanceDeficitM`, `observerHeightAgl`/
+  `targetHeightAgl` (replacing `hA`/`hB`/`observerHeight`), `spacingDeg` (replacing
+  bare `spacing`), and `IElevationSampler::GetElevation(latitudeDeg, longitudeDeg)`
+  across every implementation (`FakeElevationSampler`, `MultiTileElevationSampler`,
+  `RasterBlockElevationSampler`, `RealElevationSampler`). Internal locals carrying
+  the same flagged quantities (`totalDistanceDeg`/`totalDistanceM`, `curvatureDropM`,
+  and the like) were renamed alongside them for consistency within each function.
+  Every public entry point in `TerrainCore`/`TerrainReader` that runs per frame or
+  handles a collection now documents its Big-O and its thread-safety guarantee in a
+  comment directly above it — e.g. `ComputeViewshedNaive` states
+  O(gridRows × gridCols × samples per profile) and single-thread-only, and
+  `GetTerrainProfile`'s scratch-buffer overload states its O(sample count) and the
+  condition under which concurrent callers are safe.
+- **A stated threading position for the viewshed** — `ComputeViewshedFast`'s
+  boundary rays are applied to the grid in a fixed, sequential order, and where
+  two rays visit the same cell, the later one in that order wins. That "last ray
+  wins" reduction is deterministic only because ray order never varies; naively
+  parallelising the ray loop would let completion order decide the result
+  instead. The decision, stated directly above `ComputeViewshedFast` in
+  `Viewshed.h`: **deliberately serial, not order-independent** — there is no
+  per-frame pressure to change it, since a viewshed call is a planning-time cost
+  rather than a per-frame one, and the comment states what would have
+  to change (an order-independent per-cell reduction, e.g. a locked or
+  atomic-compare-and-swap running max of slope) before that loop could safely be
+  threaded. `ComputeViewshedNaive` has no such hazard today — each cell is
+  written exactly once by its own independent call — and the comment above it
+  says so.
+- **A frame-safe line-of-sight path vs. a batch viewshed path, labelled in the
+  headers** — the split already existed structurally (the scratch-buffer overload
+  above is the frame-safe half; the viewsheds and `ComputeBatchLineOfSight` were
+  always the batch half); this makes it explicit where a reader is looking at the code.
+  `TerrainProfile.h`, `LineOfSight.h` and `Viewshed.h` each carry a
+  `=== FRAME-SAFE LINE-OF-SIGHT PATH ===` or `=== BATCH PATH ===` banner comment
+  above every public entry point, cross-referencing its counterpart: pair
+  `GetTerrainProfile`'s in-place overload with `ComputeLineOfSight`/
+  `ComputeFresnelClearance` for a per-frame query that allocates nothing;
+  `ComputeBatchLineOfSight` and both viewsheds are the batch path, each
+  allocating a profile per query/cell/ray, meant for a one-off batch or a
+  planning-time call, never a per-frame loop.
+
+**One known limitation carries over unchanged from the standalone tool and is worth
+stating plainly here too:** horizontal distance is still a flat-plane approximation
+(`sqrt` of degree deltas, with a `cos(latitude)` correction on longitude) built on a
+constant `111320.0` metres-per-degree-of-latitude, not a true great-circle
+(haversine) formula. It is accurate at the ranges this library is tested at, but
+would drift at longer distances or near the poles. A host application that already
+provides its own great-circle distance primitive should use that instead of this
+library's approximation; adopting a real haversine formula here directly would also
+be a reasonable, self-contained improvement, but has not been done yet.

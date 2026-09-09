@@ -24,6 +24,7 @@ void RunWallTimeBenchmark()
 
     double metersPerDegreeLat = 111320.0;
     double spacingInDegrees = 30.0 / metersPerDegreeLat;
+    DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
 
     // Profile Test: 50 km, 30m 
     double latDeltaFor50km = 50000.0 / metersPerDegreeLat;
@@ -32,7 +33,7 @@ void RunWallTimeBenchmark()
 
     auto start1 = std::chrono::high_resolution_clock::now();
     std::vector<ProfileSample> profile = GetTerrainProfile(profileA, profileB, spacingInDegrees, sampler);
-    LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+    LineOfSightResult los = ComputeLineOfSight(profile, agl2m, agl2m, sampler.GetDatum());
     auto end1 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> profileTime = end1 - start1;
     std::cout << "50km profile (" << profile.size() << " samples), Time: " << profileTime.count() << " ms" << std::endl;
@@ -45,7 +46,7 @@ void RunWallTimeBenchmark()
     GeoPoint viewshedObserver{ 36.5, -111.5 };
 
     auto start2 = std::chrono::high_resolution_clock::now();
-    ViewshedResult fastResult = ComputeViewshedFast(viewshedObserver, 2.0, gridSize, gridSize, spacingInDegrees, sampler);
+    ViewshedResult fastResult = ComputeViewshedFast(viewshedObserver, agl2m, gridSize, gridSize, spacingInDegrees, sampler);
     auto end2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> fastTime = end2 - start2;
     std::cout << radiusKm << "km fast viewshed (" << gridSize << "x" << gridSize << "), Time: " << fastTime.count() << " ms" << std::endl;
@@ -62,12 +63,12 @@ void RunWallTimeBenchmark()
     int smallGridSize = (int)(2 * smallRadiusInDegrees / spacingInDegrees);
 
     auto startSmallFast = std::chrono::high_resolution_clock::now();
-    ViewshedResult smallFast = ComputeViewshedFast(viewshedObserver, 2.0, smallGridSize, smallGridSize, spacingInDegrees, sampler);
+    ViewshedResult smallFast = ComputeViewshedFast(viewshedObserver, agl2m, smallGridSize, smallGridSize, spacingInDegrees, sampler);
     auto endSmallFast = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> smallFastTime = endSmallFast - startSmallFast;
 
     auto startSmallNaive = std::chrono::high_resolution_clock::now();
-    ViewshedResult smallNaive = ComputeViewshedNaive(viewshedObserver, 2.0, smallGridSize, smallGridSize, spacingInDegrees, sampler);
+    ViewshedResult smallNaive = ComputeViewshedNaive(viewshedObserver, agl2m, smallGridSize, smallGridSize, spacingInDegrees, sampler);
     auto endSmallNaive = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> smallNaiveTime = endSmallNaive - startSmallNaive;
 
@@ -140,13 +141,13 @@ int main(int argc, char* argv[])
 
             for (const auto& sample : profile)
             {
-                if (sample.elevation.has_value())
+                if (sample.elevationM.has_value())
                 {
-                    std::cout << sample.point.latitude << ", " << sample.point.longitude << ", " << *sample.elevation << std::endl;
+                    std::cout << sample.point.latitudeDeg << ", " << sample.point.longitudeDeg << ", " << *sample.elevationM << std::endl;
                 }
                 else
                 {
-                    std::cout << sample.point.latitude << ", " << sample.point.longitude << ", NODATA" << std::endl;
+                    std::cout << sample.point.latitudeDeg << ", " << sample.point.longitudeDeg << ", NODATA" << std::endl;
                 }
             }
             return 0;
@@ -178,17 +179,19 @@ int main(int argc, char* argv[])
             GeoPoint b{ bLat, bLon };
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            LineOfSightResult los = ComputeLineOfSight(profile, hA, hB, k);
+            DatumHeight hADatum{ hA, VerticalDatum::HeightAboveGround };
+            DatumHeight hBDatum{ hB, VerticalDatum::HeightAboveGround };
+            LineOfSightResult los = ComputeLineOfSight(profile, hADatum, hBDatum, sampler.GetDatum(), k);
 
             std::cout << "Visible: " << (los.isVisible ? "YES" : "NO") << std::endl;
             if (los.blockingPoint.has_value())
             {
-                std::cout << "Blocking point: " << los.blockingPoint->latitude << ", " << los.blockingPoint->longitude << std::endl;
-                std::cout << "Blocking elevation: " << *los.blockingElevation << std::endl;
+                std::cout << "Blocking point: " << los.blockingPoint->latitudeDeg << ", " << los.blockingPoint->longitudeDeg << std::endl;
+                std::cout << "Blocking elevation: " << *los.blockingElevationM << std::endl;
                 std::cout << "Blocking feature: " << TerrainFeatureTypeToString(los.blockingFeature) << std::endl;
             }
-            std::cout << "Clearance deficit: " << los.clearanceDeficit << std::endl;
-            std::cout << "Degraded: " << (los.isDegraded ? "YES" : "NO") << std::endl;
+            std::cout << "Clearance deficit: " << los.clearanceDeficitM << std::endl;
+            std::cout << "Status: " << ComputationStatusToString(los.status) << std::endl;
             return 0;
         }
 
@@ -212,9 +215,11 @@ int main(int argc, char* argv[])
                 std::cout << "Error: could not load elevation data file: " << hgtFile << std::endl;
                 return 1;
             }
+            
             GeoPoint observer{ obsLat, obsLon };
+            DatumHeight heightDatum{ height, VerticalDatum::HeightAboveGround };
 
-            ViewshedResult result = ComputeViewshedFast(observer, height, gridSize, gridSize, spacing, sampler, k);
+            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k);
             WriteViewshedPGM(result, "cli_viewshed_output.pgm");
 
             std::cout << "Viewshed written to cli_viewshed_output.pgm" << std::endl;
@@ -246,33 +251,35 @@ int main(int argc, char* argv[])
             GeoPoint b{ bLat, bLon };
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            FresnelClearanceResult result = ComputeFresnelClearance(profile, hA, hB, frequencyMHz * 1e6, k);
+            DatumHeight hADatum{ hA, VerticalDatum::HeightAboveGround };
+            DatumHeight hBDatum{ hB, VerticalDatum::HeightAboveGround };
+            FresnelClearanceResult result = ComputeFresnelClearance(profile, hADatum, hBDatum, sampler.GetDatum(), frequencyMHz * 1e6, k);
 
-            if (result.isDegraded)
+            if (!IsOk(result.status))
             {
-                std::cout << "Status: UNKNOWN (degraded -- no interior sample between the two points, or a void was hit)" << std::endl;
+                std::cout << "Fresnel status: UNKNOWN (" << ComputationStatusToString(result.status) << ")" << std::endl;
             }
             else
             {
                 std::cout << "Min Fresnel clearance fraction: " << result.minClearanceFraction << std::endl;
                 if (result.worstPoint.has_value())
                 {
-                    std::cout << "Worst point: " << result.worstPoint->latitude << ", " << result.worstPoint->longitude << std::endl;
+                    std::cout << "Worst point: " << result.worstPoint->latitudeDeg << ", " << result.worstPoint->longitudeDeg << std::endl;
                 }
                 if (result.minClearanceFraction >= 1.0)
                 {
-                    std::cout << "Status: CLEAR (full first Fresnel zone unobstructed)" << std::endl;
+                    std::cout << "Fresnel status: CLEAR (full first Fresnel zone unobstructed)" << std::endl;
                 }
                 else if (result.minClearanceFraction >= 0.0)
                 {
-                    std::cout << "Status: PARTIALLY OBSTRUCTED" << std::endl;
+                    std::cout << "Fresnel status: PARTIALLY OBSTRUCTED" << std::endl;
                 }
                 else
                 {
-                    std::cout << "Status: BLOCKED (line of sight itself obstructed)" << std::endl;
+                    std::cout << "Fresnel status: BLOCKED (line of sight itself obstructed)" << std::endl;
                 }
             }
-            std::cout << "Degraded: " << (result.isDegraded ? "YES" : "NO") << std::endl;
+            std::cout << "Status: " << ComputationStatusToString(result.status) << std::endl;
             return 0;
         }
 
@@ -305,9 +312,9 @@ int main(int argc, char* argv[])
             {
                 BatchLineOfSightQuery q;
                 q.observer = GeoPoint{ aLat, aLon };
-                q.observerHeight = hA;
+                q.observerHeightAgl = DatumHeight{ hA, VerticalDatum::HeightAboveGround };
                 q.target = GeoPoint{ bLat, bLon };
-                q.targetHeight = hB;
+                q.targetHeightAgl = DatumHeight{ hB, VerticalDatum::HeightAboveGround };
                 queries.push_back(q);
             }
 
@@ -316,8 +323,8 @@ int main(int argc, char* argv[])
             for (size_t i = 0; i < results.size(); i++)
             {
                 std::cout << "Query " << i << ": Visible=" << (results[i].isVisible ? "YES" : "NO")
-                    << ", ClearanceDeficit=" << results[i].clearanceDeficit
-                    << ", Degraded=" << (results[i].isDegraded ? "YES" : "NO") << std::endl;
+                    << ", ClearanceDeficit=" << results[i].clearanceDeficitM
+                    << ", Status=" << ComputationStatusToString(results[i].status) << std::endl;
             }
             return 0;
         }
@@ -343,11 +350,12 @@ int main(int argc, char* argv[])
             {
                 double latDeltaFor50km = 50000.0 / metersPerDegreeLat;
                 GeoPoint a{ swLat + 0.3, swLon + 0.5 };
-                GeoPoint b{ a.latitude + latDeltaFor50km, a.longitude };
+                GeoPoint b{ a.latitudeDeg + latDeltaFor50km, a.longitudeDeg };
 
                 auto start = std::chrono::high_resolution_clock::now();
                 std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacingInDegrees, sampler);
-                LineOfSightResult los = ComputeLineOfSight(profile, 2.0, 2.0);
+                DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
+                LineOfSightResult los = ComputeLineOfSight(profile, agl2m, agl2m, sampler.GetDatum());
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double, std::milli> elapsed = end - start;
 
@@ -369,7 +377,8 @@ int main(int argc, char* argv[])
                 GeoPoint observer{ swLat + 0.5, swLon + 0.5 };
 
                 auto start = std::chrono::high_resolution_clock::now();
-                ViewshedResult result = ComputeViewshedFast(observer, 2.0, gridSize, gridSize, spacingInDegrees, sampler);
+                DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
+                ViewshedResult result = ComputeViewshedFast(observer, agl2m, gridSize, gridSize, spacingInDegrees, sampler);
                 auto end = std::chrono::high_resolution_clock::now();
                 std::chrono::duration<double, std::milli> elapsed = end - start;
 
@@ -422,6 +431,15 @@ int main(int argc, char* argv[])
     TestEmptyAndSingleSampleProfilesAreDegradedNotUB();
     TestBlockingFeatureClassificationIsSpacingInvariant();
     TestViewshedLongitudeSpacingCorrectsForLatitude();
+    TestConvertHeightBetweenDatums();
+    TestComputeLineOfSightRejectsWrongHeightDatum();
+    TestComputeLineOfSightRejectsUnknownTerrainDatum();
+    TestRealElevationSamplerDeclaresOrthometricDatum();
+    TestRasterBlockSamplerPositiveRowStep();
+    TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth();
+    TestRasterBlockSamplerVoidCellPassesThrough();
+    TestRasterBlockSamplerWorksWithLineOfSight();
+    TestScratchBufferProfileAllocatesNothingOnReuse();
 
     std::cout << "-------------------------" << std::endl;
 
@@ -433,10 +451,11 @@ int main(int argc, char* argv[])
         {10, 20, 30, 20, 10},
         {10, 10, 10, 10, 10}
     };
-    FakeElevationSampler sampler(testGrid);
+    FakeElevationSampler sampler(testGrid, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
 
     GeoPoint observerPos{ 2, 2 };
-    ViewshedResult viewshed = ComputeViewshedNaive(observerPos, 2.0, 5, 5, 1.0, sampler);
+    DatumHeight demoAgl2m{ 2.0, VerticalDatum::HeightAboveGround };
+    ViewshedResult viewshed = ComputeViewshedNaive(observerPos, demoAgl2m, 5, 5, 1.0, sampler);
 
     std::cout << "Naive Viewshed: " << std::endl;
     for (int row = 0; row < 5; row++)
@@ -475,7 +494,7 @@ int main(int argc, char* argv[])
     std::cout << "-------------------------" << std::endl;
 
     //Fast Viewshed
-    ViewshedResult fastViewshed = ComputeViewshedFast(observerPos, 2.0, 5, 5, 1.0, sampler);
+    ViewshedResult fastViewshed = ComputeViewshedFast(observerPos, demoAgl2m, 5, 5, 1.0, sampler);
     std::cout << "Fast Viewshed: " << std::endl;
     for (int row = 0; row < 5; row++)
     {
