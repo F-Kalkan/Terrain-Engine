@@ -25,7 +25,7 @@ between two points:
 
 1. Clone this repository and open `TerrainEngine.sln` in Visual Studio 2022.
 2. Build the solution (`x64`, `Release` recommended for real use).
-3. Run `TerrainEngine.exe` with no arguments — this runs the 31-case test suite and a
+3. Run `TerrainEngine.exe` with no arguments — this runs the 32-case test suite and a
    small demo against the included sample tile (`DATA/N36W112.hgt`, a stretch of the
    Grand Canyon), and writes `profile_output.pgm` / `viewshed_output.pgm` you can open
    in any image viewer that supports PGM (e.g. IrfanView, GIMP).
@@ -51,8 +51,8 @@ independent of any file format:
 
 `TerrainCore` contains the elevation-sampler interface (`IElevationSampler`), three
 in-memory implementations of it (`FakeElevationSampler` used by every test,
-`MultiTileElevationSampler`, and `RasterBlockElevationSampler` — see "Integration
-readiness work" below), and the three algorithms (`GetTerrainProfile`,
+`MultiTileElevationSampler`, and `RasterBlockElevationSampler` — see "Adapting
+toward a real-time host application" below), and the three algorithms (`GetTerrainProfile`,
 `ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`). It has no
 include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
 
@@ -83,9 +83,15 @@ only a demo/tooling one.
   an ellipse in real-world terms — narrower east-west — even though every individual
   cell's line-of-sight answer (which depends on `GetTerrainProfile`'s distance, not
   on which cells get queried in the first place) is already correct; verified for
-  the included tile's latitude (36.5°N) at a "30 km radius": north/south reach
-  30,000 m, east/west reach 29,970 m, both real distances measured through
-  `GetTerrainProfile`.
+  the included tile's latitude (36.5°N) at a "30 km radius", measuring the real
+  distance from observer to each grid edge through `GetTerrainProfile`: south and
+  west reach exactly 30,000 m, north and east reach 29,970 m. That 30 m asymmetry
+  is the same on both axes — an off-by-one from the grid's `gridSize / 2` integer
+  division giving one more step on the south/west side than the north/east side —
+  and is unrelated to the latitude correction; the point this verifies is that
+  north/south and east/west reach the *same* pair of distances (30,000 m and
+  29,970 m on both axes) rather than the ~24 km an uncorrected ellipse would give
+  on the east/west axis.
 - **Vertical datum**: modeled as an explicit, closed set (`VerticalDatum`, in
   `VerticalDatum.h`) — `EllipsoidalHae`, `OrthometricMsl`, `PressureAltitude`,
   `HeightAboveGround`, and `Unknown`. `ComputeLineOfSight`/`ComputeFresnelClearance`/
@@ -283,7 +289,7 @@ links both and produces `TerrainEngine.exe`.
 
 ## CLI usage
 ```
-TerrainEngine.exe # run the 31-case test suite + demo
+TerrainEngine.exe # run the 32-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
@@ -295,7 +301,7 @@ Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W11
 
 ## Test suite
 
-31 hand-checkable test functions, plus one real-data tolerance assertion:
+32 hand-checkable test functions, plus one real-data tolerance assertion:
 
 - **Synthetic, in-memory data** (`FakeElevationSampler`, no file on disk): flat
   plateau, wall, curvature, void, viewshed void, determinism, fast-vs-naive on a
@@ -317,6 +323,10 @@ Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W11
   row order), a void cell passed through untouched, and a full
   `GetTerrainProfile`/`ComputeLineOfSight` run against it with no changes to
   either function.
+- **Buffer reuse**: `TestScratchBufferProfileAllocatesNothingOnReuse` calls
+  `GetTerrainProfile`'s in-place overload twice with the same caller-owned
+  buffer and confirms its capacity does not grow on the second call — the
+  observable proof it was reused rather than replaced.
 - **Synthetic, file-based**: `TestRealElevationSamplerReadsVoidFromFile` writes a
   2×2 `.hgt`-format tile with a real void sentinel and reads it back through
   `RealElevationSampler` itself.
@@ -359,8 +369,9 @@ computed. Flip the image vertically if you want a conventional north-up view.
   the result is reported as degraded rather than a false "fully clear".
 
 - **Batch line of sight** — `ComputeBatchLineOfSight` (in `LineOfSight.h`) takes a list
-  of `BatchLineOfSightQuery` entries (observer, target, heights, distance) and a single
-  shared `IElevationSampler`, returning one `LineOfSightResult` per query. The shared
+  of `BatchLineOfSightQuery` entries (`observer`, `observerHeightAgl`, `target`,
+  `targetHeightAgl`), a single shared spacing and `IElevationSampler`, returning one
+  `LineOfSightResult` per query. The shared
   work is the sampler itself: one file load serves the whole batch, instead of N*M
   separate CLI invocations each reconstructing a `RealElevationSampler` (and re-reading
   the whole `.hgt` file) from scratch. Exposed via `TerrainEngine.exe batch <hgtFile>
