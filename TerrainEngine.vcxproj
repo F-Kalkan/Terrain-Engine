@@ -132,6 +132,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ImageWriter.h" />
+    <ClInclude Include="CliArguments.h" />
     <ClInclude Include="Tests.h" />
   </ItemGroup>
   <ItemGroup>

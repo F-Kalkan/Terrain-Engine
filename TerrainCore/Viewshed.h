@@ -40,7 +40,7 @@ struct ViewshedResult
     std::vector<std::vector<CellVisibility>> visible;
 };
 
-// === BATCH VIEWSHED PATH (INTEGRATION-READINESS.md section 7/10) ===
+// === BATCH VIEWSHED PATH ===
 // Both viewsheds below are the batch path, not the frame-safe one: they own
 // the BATCH PATH overload of GetTerrainProfile (TerrainProfile.h), allocating a
 // fresh profile per cell (Naive) or per ray (Fast). That is the correct budget
@@ -53,22 +53,33 @@ struct ViewshedResult
 //
 // Complexity: O(gridRows * gridCols * samples per profile) -- one full
 // GetTerrainProfile + ComputeLineOfSight per cell. This is the exact-per-cell
-// oracle Viewshed's fast path is checked against, not the frame-path algorithm;
-// see INTEGRATION-READINESS.md section 7 ("viewshed is a planning product").
+// oracle the fast viewshed is checked against, not a per-frame algorithm.
 // Thread-safety: single-thread-only, as written -- but unlike ComputeViewshedFast
 // below, it has no ordering hazard to fix first: each cell is written exactly
 // once, by its own independent GetTerrainProfile/ComputeLineOfSight call, so no
 // cell's result depends on any other cell's, or on visit order. It could be
 // parallelised across rows or cells with no change to its reduction; it simply
 // never has been, since nothing in this project calls it per frame either.
-inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeightAgl, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0)
+inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0)
 {
     ViewshedResult result;
+
+    // A grid with no rows or no columns has no cells to answer for, not even the
+    // observer's own: return it empty rather than writing into it.
+    if (gridRows <= 0 || gridCols <= 0) return result;
+
     result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
     double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
+
+    // The observer's own cell is only Visible if something is known about the
+    // observer: ground under it that isn't void, and a height that can be put on
+    // the terrain's datum. Otherwise it is Degraded like every other cell --
+    // the same answer ComputeViewshedFast gives.
+    bool observerKnown = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg).has_value()
+        && CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
 
     for (int row = 0; row < gridRows; row++)
     {
@@ -76,14 +87,14 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
         {
             if (row == centerRow && col == centerCol)
             {
-                result.visible[row][col] = CellVisibility::Visible;
+                result.visible[row][col] = observerKnown ? CellVisibility::Visible : CellVisibility::Degraded;
                 continue;
             }
 
             GeoPoint target{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (col - centerCol) * lonSpacingDeg };
 
             std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacingDeg, sampler);
-            LineOfSightResult los = ComputeLineOfSight(profile, observerHeightAgl, DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, sampler.GetDatum(), k);
+            LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, k);
 
             if (!IsOk(los.status))
             {
@@ -105,9 +116,8 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 // at the cost of being an approximation (see README's stated fast/naive
 // tolerance) rather than an exact per-cell answer.
 //
-// Threading position (INTEGRATION-READINESS.md section 6): deliberately
-// serial, not order-independent -- and this is a stated decision, not an
-// oversight. The boundary rays below are cast and applied to the grid in a
+// Threading position: deliberately serial, not order-independent -- and this is a
+// stated decision, not an oversight. The boundary rays below are cast and applied to the grid in a
 // fixed, sequential order; where two rays visit the same cell (which happens
 // near the observer, where rays converge), the later ray in that fixed order
 // overwrites the earlier one ("last ray wins"). That rule is deterministic
@@ -117,9 +127,8 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 // same state, same ordering => same output, every run, every machine).
 //
 // There is no per-frame pressure to change this: a viewshed call is a
-// planning-time cost, computed at load time or on request (see
-// INTEGRATION-READINESS.md section 7), so keeping the loop serial costs
-// nothing today. If that changes, the reduction must become
+// planning-time cost, computed at load time or on request, so keeping the loop
+// serial costs nothing today. If that changes, the reduction must become
 // order-independent before the loop is threaded -- e.g. track the best
 // (highest) slope seen per cell explicitly, applied under a lock or via
 // atomic compare-and-swap, instead of "whichever ray touched this cell last,
@@ -127,24 +136,27 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 //
 // Thread-safety: single-thread-only. Builds one profile at a time in a local,
 // per-ray vector and calls the non-thread-affine sampler sequentially.
-inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeightAgl, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0)
+inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0)
 {
     ViewshedResult result;
-    result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
-    // Naive delegates this same check to ComputeLineOfSight per cell; fast does
-    // its own curvature math and never calls it, so it must check itself.
-    if (observerHeightAgl.datum != VerticalDatum::HeightAboveGround || sampler.GetDatum() == VerticalDatum::Unknown)
+    // Same as naive: a grid with no rows or no columns comes back empty.
+    if (gridRows <= 0 || gridCols <= 0) return result;
+
+    // Naive delegates these checks to ComputeLineOfSight per cell; fast does its
+    // own curvature math and never calls it, so it checks here. An observer whose
+    // height can't be put on the terrain's datum, or who stands on a void, leaves
+    // nothing known about any cell: every cell is Degraded, the observer's own
+    // included -- exactly what naive reports for the same case.
+    VerticalDatum terrainDatum = sampler.GetDatum();
+    auto observerElevationM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
+    if (!observerElevationM.has_value() || !CanExpressInTerrainDatum(observerHeight, terrainDatum))
     {
-        for (int row = 0; row < gridRows; row++)
-        {
-            for (int col = 0; col < gridCols; col++)
-            {
-                result.visible[row][col] = CellVisibility::Degraded;
-            }
-        }
+        result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::Degraded));
         return result;
     }
+
+    result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
     const double R = EarthRadiusM;
 
@@ -152,13 +164,7 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
     int centerCol = gridCols / 2;
     double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
 
-    auto observerElevationM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
-
-    if (!observerElevationM.has_value())
-    {
-        return result;
-    }
-    double observerEyeHeightM = *observerElevationM + observerHeightAgl.valueM;
+    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *observerElevationM, terrainDatum);
 
     std::vector<GeoPoint> boundaryCells;
 
@@ -193,7 +199,13 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
             int col = (int)round((profile[i].point.longitudeDeg - observer.longitudeDeg) / lonSpacingDeg) + centerCol;
             if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) continue;
 
-            if (row == lastRow && col == lastCol) continue;
+            // Consecutive samples often round into the same cell -- on a diagonal
+            // ray, roughly a quarter of them do. Only the cell's *verdict* may be
+            // skipped for those; everything that accumulates along the ray must
+            // still run, or the ray silently loses information. Skipping the whole
+            // iteration (as this once did) meant a void landing on such a sample
+            // was never noticed and its terrain never entered the horizon.
+            bool sameCellAsPrevious = (row == lastRow && col == lastCol);
 
             lastRow = row;
             lastCol = col;
@@ -223,6 +235,10 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
             {
                 maxSlope = slope;
             }
+
+            // The first sample to land in a cell decides it; later samples in the
+            // same cell have already had their say through maxSlope above.
+            if (sameCellAsPrevious) continue;
 
             result.visible[row][col] = isVisible ? CellVisibility::Visible : CellVisibility::NotVisible;
         }

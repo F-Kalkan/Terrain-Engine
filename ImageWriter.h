@@ -10,7 +10,7 @@
 inline void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePath)
 {
     int rows = (int)viewshed.visible.size();
-    int cols = (int)viewshed.visible[0].size();
+    int cols = rows > 0 ? (int)viewshed.visible[0].size() : 0;
 
     std::ofstream file(filePath, std::ios::binary);
     file << "P5\n" << cols << " " << rows << "\n255\n";

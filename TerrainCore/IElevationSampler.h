@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <vector>
 #include <optional>
 #include <cmath>
@@ -140,69 +141,143 @@ public:
     }
 };
 
-// A view over an already-resident raster block, described by its own affine
-// geometry (an origin corner plus SIGNED per-row/per-column degree steps) --
-// never an assumed resolution, never a hardcoded 1x1 degree tile size. This
-// is the shape a real host hands back from a raster-window request: the
-// block is already in memory, and mapping (lat, lon) to a cell is index
-// arithmetic, not a file read.
+// Affine geometry of a raster block, as a raster-window reply describes it: the
+// CENTRE of cell (0, 0) as origin, plus SIGNED per-row/per-column degree steps --
+// never an assumed resolution, never a hardcoded 1x1 degree tile size. Cells are
+// row-major. The row step's sign states row order explicitly: negative means row 0
+// is the northern edge (the usual convention for real raster sources), positive
+// means row 0 is the southern edge -- stated by the step itself, not left as an
+// unwritten assumption the way MultiTileElevationSampler's 1 degree tile or
+// RealElevationSampler's file-size-inferred square grid are.
+struct RasterBlockGeometry
+{
+    double originCellCentreLatitudeDeg = 0.0;
+    double originCellCentreLongitudeDeg = 0.0;
+    double rowStepDeg = 0.0;
+    double colStepDeg = 0.0;
+    int rows = 0;
+    int cols = 0;
+};
+
+// Maps (lat, lon) to the row-major index of the nearest cell centre, or nullopt
+// outside the block. Rounding to the nearest centre is what a raster reply means by
+// its origin; reading the origin as a cell's corner instead would shift every lookup
+// by half a cell. Both raster-block samplers below use this one implementation, so
+// they cannot disagree about which cell a coordinate falls in.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline std::optional<size_t> RasterBlockCellIndex(const RasterBlockGeometry& geometry, double latitudeDeg, double longitudeDeg)
+{
+    if (geometry.rowStepDeg == 0.0 || geometry.colStepDeg == 0.0) return std::nullopt;
+
+    int row = (int)round((latitudeDeg - geometry.originCellCentreLatitudeDeg) / geometry.rowStepDeg);
+    int col = (int)round((longitudeDeg - geometry.originCellCentreLongitudeDeg) / geometry.colStepDeg);
+
+    if (row < 0 || row >= geometry.rows || col < 0 || col >= geometry.cols) return std::nullopt;
+
+    return (size_t)row * (size_t)geometry.cols + (size_t)col;
+}
+
+// A view over a raster block someone else already holds -- one flat row-major
+// elevation array plus a parallel per-cell validity array, the shape a raster reply
+// arrives in -- read in place, with nothing copied. A validity flag of 0 is a void:
+// the elevation stored beside it is never read, so no sentinel value is invented or
+// trusted, and the per-cell validity is carried through rather than flattened away.
 //
-// The row step's sign states row order explicitly -- negative means row 0 is
-// the northern edge (the usual convention for real raster sources), positive
-// means row 0 is the southern edge. Either way it is stated by the step
-// itself, not left as an unwritten assumption the way MultiTileElevationSampler's
-// 1 degree tile or RealElevationSampler's file-size-inferred square grid were.
+// Non-owning: both arrays must hold at least rows * cols elements and stay alive for
+// as long as the sampler is used, and must not be modified while a query (or a
+// viewshed built on this sampler) is running.
 //
-// A cell's std::optional<double> carries validity directly -- no invented
-// sentinel value -- because a real host reply already distinguishes valid
-// from void per sample rather than encoding it into the number itself.
-class RasterBlockElevationSampler : public IElevationSampler
+// Elevations are read as double and validity flags as bytes. A buffer of another
+// element type (float elevations, say) would need this class templated on it, or one
+// conversion at this boundary; it isn't templated because nothing here supplies one.
+class RasterBlockViewElevationSampler : public IElevationSampler
 {
 public:
-    RasterBlockElevationSampler(std::vector<std::vector<std::optional<double>>> blockIn, double originLatitudeDeg, double originLongitudeDeg, double rowStepDeg, double colStepDeg, VerticalDatum datumIn)
+    RasterBlockViewElevationSampler(const double* elevationsM, const uint8_t* validity, RasterBlockGeometry geometryIn, VerticalDatum datumIn)
+        : elevations(elevationsM), valid(validity), geometry(geometryIn), datum(datumIn)
     {
-        block = std::move(blockIn);
-        originLat = originLatitudeDeg;
-        originLon = originLongitudeDeg;
-        rowStep = rowStepDeg;
-        colStep = colStepDeg;
-        datum = datumIn;
-        rows = (int)block.size();
-        cols = rows > 0 ? (int)block[0].size() : 0;
     }
 
-    virtual ~RasterBlockElevationSampler() = default;
+    virtual ~RasterBlockViewElevationSampler() = default;
 
-    // Complexity: O(1) -- affine coordinate-to-index math plus one vector lookup.
-    // Thread-safety: never mutates state, so safe for concurrent calls from
-    // multiple threads once construction has completed.
+    // Complexity: O(1) -- affine coordinate-to-index math plus two array reads.
+    // Thread-safety: never mutates state, so safe for concurrent calls from multiple
+    // threads, provided nothing modifies the viewed arrays meanwhile.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
     {
-        if (rowStep == 0.0 || colStep == 0.0) return std::nullopt;
+        if (elevations == nullptr || valid == nullptr) return std::nullopt;
 
-        double rowF = (latitudeDeg - originLat) / rowStep;
-        double colF = (longitudeDeg - originLon) / colStep;
+        std::optional<size_t> index = RasterBlockCellIndex(geometry, latitudeDeg, longitudeDeg);
+        if (!index.has_value() || valid[*index] == 0) return std::nullopt;
 
-        int row = (int)round(rowF);
-        int col = (int)round(colF);
-
-        if (row < 0 || row >= rows || col < 0 || col >= cols) return std::nullopt;
-
-        return block[row][col];
+        return elevations[*index];
     }
 
     VerticalDatum GetDatum() const override { return datum; }
 
-    int Rows() const { return rows; }
-    int Cols() const { return cols; }
+    const RasterBlockGeometry& Geometry() const { return geometry; }
 
 private:
-    std::vector<std::vector<std::optional<double>>> block;
-    double originLat = 0.0;
-    double originLon = 0.0;
-    double rowStep = 0.0;
-    double colStep = 0.0;
+    const double* elevations = nullptr;
+    const uint8_t* valid = nullptr;
+    RasterBlockGeometry geometry;
     VerticalDatum datum = VerticalDatum::Unknown;
-    int rows = 0;
-    int cols = 0;
+};
+
+// The same raster block, owned -- for a caller that doesn't already hold one (tests,
+// or data assembled cell by cell). It keeps the block in the view's flat row-major
+// layout and answers through the same RasterBlockCellIndex. Built from per-row
+// std::optional cells for convenience, copied once at construction; a row shorter
+// than the first is treated as void past its end.
+class RasterBlockElevationSampler : public IElevationSampler
+{
+public:
+    RasterBlockElevationSampler(const std::vector<std::vector<std::optional<double>>>& block, double originCellCentreLatitudeDeg, double originCellCentreLongitudeDeg, double rowStepDeg, double colStepDeg, VerticalDatum datumIn)
+    {
+        geometry.originCellCentreLatitudeDeg = originCellCentreLatitudeDeg;
+        geometry.originCellCentreLongitudeDeg = originCellCentreLongitudeDeg;
+        geometry.rowStepDeg = rowStepDeg;
+        geometry.colStepDeg = colStepDeg;
+        geometry.rows = (int)block.size();
+        geometry.cols = geometry.rows > 0 ? (int)block[0].size() : 0;
+        datum = datumIn;
+
+        size_t cellCount = (size_t)geometry.rows * (size_t)geometry.cols;
+        elevations.assign(cellCount, 0.0);
+        valid.assign(cellCount, 0);
+        for (int row = 0; row < geometry.rows; row++)
+        {
+            for (int col = 0; col < geometry.cols && col < (int)block[row].size(); col++)
+            {
+                if (!block[row][col].has_value()) continue;
+                size_t index = (size_t)row * (size_t)geometry.cols + (size_t)col;
+                elevations[index] = *block[row][col];
+                valid[index] = 1;
+            }
+        }
+    }
+
+    virtual ~RasterBlockElevationSampler() = default;
+
+    // Complexity: O(1) -- affine coordinate-to-index math plus two vector reads.
+    // Thread-safety: never mutates state, so safe for concurrent calls from
+    // multiple threads once construction has completed.
+    std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
+    {
+        std::optional<size_t> index = RasterBlockCellIndex(geometry, latitudeDeg, longitudeDeg);
+        if (!index.has_value() || valid[*index] == 0) return std::nullopt;
+
+        return elevations[*index];
+    }
+
+    VerticalDatum GetDatum() const override { return datum; }
+
+    int Rows() const { return geometry.rows; }
+    int Cols() const { return geometry.cols; }
+
+private:
+    std::vector<double> elevations;
+    std::vector<uint8_t> valid;
+    RasterBlockGeometry geometry;
+    VerticalDatum datum = VerticalDatum::Unknown;
 };

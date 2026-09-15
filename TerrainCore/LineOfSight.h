@@ -71,9 +71,24 @@ enum class ComputationStatus
     EmptyOrSingleSampleProfile, // profile.size() < 2 -- nothing to walk
     EndpointMissing,            // the observer's or target's own elevation is void
     VoidInProfile,              // some interior sample along the path is void
-    DatumRejected,              // observerHeightAgl/targetHeightAgl isn't HeightAboveGround, or the terrain's datum is Unknown
+    DatumRejected,              // a height and the terrain can't be put on one common datum -- see EyeHeightInTerrainDatum
     NothingEvaluated            // Fresnel only: no interior sample existed to test at all
 };
+
+// The one datum every sample's elevation is expressed in, if there is exactly
+// one and terrain can be described in it; nullopt for a mixed profile, or one
+// whose samples carry Unknown or a non-elevation datum.
+//
+// Complexity: O(profile.size()). Thread-safety: pure function, safe to call concurrently.
+inline std::optional<VerticalDatum> ProfileElevationDatum(const std::vector<ProfileSample>& profile)
+{
+    if (profile.empty() || !IsTerrainElevationDatum(profile.front().elevationDatum)) return std::nullopt;
+    for (const auto& sample : profile)
+    {
+        if (sample.elevationDatum != profile.front().elevationDatum) return std::nullopt;
+    }
+    return profile.front().elevationDatum;
+}
 
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline bool IsOk(ComputationStatus status)
@@ -106,25 +121,28 @@ struct LineOfSightResult
     TerrainFeatureType blockingFeature = TerrainFeatureType::Unknown;
 };
 
-// === FRAME-SAFE LINE-OF-SIGHT PATH (INTEGRATION-READINESS.md section 7/10) ===
+// === FRAME-SAFE LINE-OF-SIGHT PATH ===
 // Pair with GetTerrainProfile's in-place overload (TerrainProfile.h): fill a
 // caller-owned buffer there, pass it here by const&. Neither step allocates,
 // so a per-frame query (one sensor, one target, one frame) costs one O(samples)
 // pass and nothing else -- the shape a real-time host needs.
 //
-// observerHeightAgl/targetHeightAgl must be tagged HeightAboveGround -- that is
-// the only datum this function's arithmetic (terrain elevation + a relative
-// offset) is valid for. terrainDatum is the sampler's own declared datum
-// (IElevationSampler::GetDatum()); Unknown means the terrain values themselves
-// can't be trusted, so the query is rejected as a value (status = DatumRejected),
-// never silently guessed.
+// observerHeight and targetHeight may be given in any datum the terrain can be
+// compared against: HeightAboveGround (added to the ground under that end of the
+// profile), or OrthometricMsl / EllipsoidalHae as absolute heights. An absolute
+// height in a different datum from the terrain needs its local geoid undulation
+// carried on the DatumHeight -- it is never assumed to be zero. The terrain's
+// datum is read from the profile's own samples rather than passed separately,
+// so a profile and the datum describing it cannot drift apart. Anything that
+// can't be put on one common datum is rejected as a value (status =
+// DatumRejected), never silently guessed.
 //
 // Complexity: O(profile.size()) -- one pass over the samples, no allocation of
 // its own (the caller-owned profile is taken by const&).
 // Thread-safety: pure function over its inputs (reads profile, never mutates
 // it), safe to call concurrently from multiple threads as long as no thread is
 // concurrently mutating the same profile buffer.
-inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& profile, DatumHeight observerHeightAgl, DatumHeight targetHeightAgl, VerticalDatum terrainDatum, double k = 4.0 / 3.0)
+inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& profile, DatumHeight observerHeight, DatumHeight targetHeight, double k = 4.0 / 3.0)
 {
     const double R = EarthRadiusM;
 
@@ -133,15 +151,18 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
     result.clearanceDeficitM = 0;
     double worstDeficitM = -999999;
 
-    if (observerHeightAgl.datum != VerticalDatum::HeightAboveGround || targetHeightAgl.datum != VerticalDatum::HeightAboveGround || terrainDatum == VerticalDatum::Unknown)
-    {
-        result.status = ComputationStatus::DatumRejected;
-        return result;
-    }
-
     if (profile.size() < 2)
     {
         result.status = ComputationStatus::EmptyOrSingleSampleProfile;
+        return result;
+    }
+
+    std::optional<VerticalDatum> terrainDatum = ProfileElevationDatum(profile);
+    if (!terrainDatum.has_value()
+        || !CanExpressInTerrainDatum(observerHeight, *terrainDatum)
+        || !CanExpressInTerrainDatum(targetHeight, *terrainDatum))
+    {
+        result.status = ComputationStatus::DatumRejected;
         return result;
     }
 
@@ -153,8 +174,8 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
 
     double totalDistanceM = profile.back().distanceFromStartM;
 
-    double observerEyeHeightM = *profile.front().elevationM + observerHeightAgl.valueM;
-    double targetEyeHeightM = *profile.back().elevationM + targetHeightAgl.valueM;
+    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *profile.front().elevationM, *terrainDatum);
+    double targetEyeHeightM = *EyeHeightInTerrainDatum(targetHeight, *profile.back().elevationM, *terrainDatum);
 
     for (size_t i = 0; i < profile.size(); i++)
     {
@@ -164,11 +185,13 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
             continue;
         }
 
-        double t = (double)i / (profile.size() - 1);
-        double lineHeightM = observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
-
+        // The sight line is interpolated by distance, the same quantity the
+        // curvature term uses -- not by sample index, which only agrees with
+        // distance when the profile happens to be evenly spaced.
         double d1M = profile[i].distanceFromStartM;
         double d2M = totalDistanceM - d1M;
+        double t = totalDistanceM > 0 ? d1M / totalDistanceM : 0.0;
+        double lineHeightM = observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
         double curvatureDropM = (d1M * d2M) / (2 * k * R);
 
         double correctedElevationM = *profile[i].elevationM + curvatureDropM;
@@ -198,7 +221,7 @@ struct FresnelClearanceResult
     ComputationStatus status = ComputationStatus::Ok;
 };
 
-// === FRAME-SAFE LINE-OF-SIGHT PATH (INTEGRATION-READINESS.md section 7/10) ===
+// === FRAME-SAFE LINE-OF-SIGHT PATH ===
 // Same shape and same guarantee as ComputeLineOfSight above: pair with
 // GetTerrainProfile's in-place overload and this allocates nothing per call.
 //
@@ -207,7 +230,7 @@ struct FresnelClearanceResult
 // Thread-safety: pure function over its inputs, safe to call concurrently from
 // multiple threads as long as no thread is concurrently mutating the same
 // profile buffer.
-inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileSample>& profile, DatumHeight observerHeightAgl, DatumHeight targetHeightAgl, VerticalDatum terrainDatum, double frequencyHz, double k = 4.0 / 3.0)
+inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileSample>& profile, DatumHeight observerHeight, DatumHeight targetHeight, double frequencyHz, double k = 4.0 / 3.0)
 {
     const double R = EarthRadiusM;
     const double c = 299792458.0; // speed of light, m/s
@@ -216,15 +239,19 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
     FresnelClearanceResult result;
     double bestKnownFraction = 1e18;
 
-    if (observerHeightAgl.datum != VerticalDatum::HeightAboveGround || targetHeightAgl.datum != VerticalDatum::HeightAboveGround || terrainDatum == VerticalDatum::Unknown)
-    {
-        result.status = ComputationStatus::DatumRejected;
-        return result;
-    }
-
     if (profile.size() < 2)
     {
         result.status = ComputationStatus::EmptyOrSingleSampleProfile;
+        return result;
+    }
+
+    // Same datum rules as ComputeLineOfSight.
+    std::optional<VerticalDatum> terrainDatum = ProfileElevationDatum(profile);
+    if (!terrainDatum.has_value()
+        || !CanExpressInTerrainDatum(observerHeight, *terrainDatum)
+        || !CanExpressInTerrainDatum(targetHeight, *terrainDatum))
+    {
+        result.status = ComputationStatus::DatumRejected;
         return result;
     }
 
@@ -236,8 +263,8 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
 
     double totalDistanceM = profile.back().distanceFromStartM;
 
-    double observerEyeHeightM = *profile.front().elevationM + observerHeightAgl.valueM;
-    double targetEyeHeightM = *profile.back().elevationM + targetHeightAgl.valueM;
+    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *profile.front().elevationM, *terrainDatum);
+    double targetEyeHeightM = *EyeHeightInTerrainDatum(targetHeight, *profile.back().elevationM, *terrainDatum);
 
     for (size_t i = 0; i < profile.size(); i++)
     {
@@ -247,12 +274,12 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
             continue;
         }
 
-        double t = (double)i / (profile.size() - 1);
         double d1M = profile[i].distanceFromStartM;
         double d2M = totalDistanceM - d1M;
 
         if (d1M <= 0 || d2M <= 0) continue; // Fresnel radius is 0 at the antennas themselves
 
+        double t = d1M / totalDistanceM; // by distance, as in ComputeLineOfSight; d2M > 0 so totalDistanceM > 0
         double lineHeightM = observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
         double curvatureDropM = (d1M * d2M) / (2 * k * R);
         double correctedElevationM = *profile[i].elevationM + curvatureDropM;
@@ -289,9 +316,9 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
 struct BatchLineOfSightQuery
 {
     GeoPoint observer;
-    DatumHeight observerHeightAgl;
+    DatumHeight observerHeight;
     GeoPoint target;
-    DatumHeight targetHeightAgl;
+    DatumHeight targetHeight;
 };
 
 // === BATCH PATH ===
@@ -311,11 +338,10 @@ inline std::vector<LineOfSightResult> ComputeBatchLineOfSight(const std::vector<
 {
     std::vector<LineOfSightResult> results;
     results.reserve(queries.size());
-    VerticalDatum terrainDatum = sampler.GetDatum();
     for (const auto& q : queries)
     {
         std::vector<ProfileSample> profile = GetTerrainProfile(q.observer, q.target, spacingDeg, sampler);
-        results.push_back(ComputeLineOfSight(profile, q.observerHeightAgl, q.targetHeightAgl, terrainDatum, k));
+        results.push_back(ComputeLineOfSight(profile, q.observerHeight, q.targetHeight, k));
     }
     return results;
 }

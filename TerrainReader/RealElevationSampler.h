@@ -17,18 +17,24 @@ public:
         mode = interpolationMode;
 
         std::ifstream file(filePath, std::ios::binary);
-        loadedSuccessfully = file.is_open();
         std::vector<char> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-        long totalSamples = buffer.size() / 2;
-        if (totalSamples == 0)
+        // A tile is a square of big-endian 16-bit posts, so its byte count must be
+        // twice a perfect square, at least 2x2. Anything else -- most often a
+        // download cut short -- is rejected rather than rounded to the nearest
+        // square: rounding up would place the last posts past the end of the data.
+        size_t totalSamples = buffer.size() / 2;
+        size_t side = (size_t)std::llround(std::sqrt((double)totalSamples));
+        loadedSuccessfully = file.is_open() && buffer.size() % 2 == 0 && side >= 2 && side * side == totalSamples;
+        if (!loadedSuccessfully)
         {
-            loadedSuccessfully = false;
+            size = 0;
+            return;
         }
-        size = (int)round(sqrt((double)totalSamples));
+        size = (int)side;
 
         data.resize(totalSamples);
-        for (long i = 0; i < totalSamples; i++)
+        for (size_t i = 0; i < totalSamples; i++)
         {
             unsigned char highByte = (unsigned char)buffer[i * 2];
             unsigned char lowByte = (unsigned char)buffer[i * 2 + 1];
@@ -55,6 +61,8 @@ public:
     // concurrent calls from multiple threads once the file has finished loading.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
     {
+        if (!loadedSuccessfully) return std::nullopt;
+
         double topLat = swLat + 1.0;
         double rowF = (topLat - latitudeDeg) * (size - 1);
         double colF = (longitudeDeg - swLon) * (size - 1);
@@ -110,7 +118,7 @@ public:
 private:
     double swLat;
     double swLon;
-    int size;
+    int size = 0;
     std::vector<int16_t> data;
     InterpolationMode mode = InterpolationMode::Nearest;
     bool loadedSuccessfully = false;

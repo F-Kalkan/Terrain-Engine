@@ -16,6 +16,7 @@ struct ProfileSample
     GeoPoint point;
     std::optional<double> elevationM;
     double distanceFromStartM = 0.0;
+    VerticalDatum elevationDatum = VerticalDatum::Unknown; // the datum elevationM is expressed in
 };
 
 // Mean Earth radius, in metres, modelled as a sphere. Declared once here --
@@ -80,13 +81,13 @@ inline GeoPoint GreatCircleInterpolate(GeoPoint a, GeoPoint b, double t, double 
     return result;
 }
 
-// === FRAME-SAFE LINE-OF-SIGHT PATH (INTEGRATION-READINESS.md section 7/10) ===
+// === FRAME-SAFE LINE-OF-SIGHT PATH ===
 // Fills outProfile in place instead of returning a freshly allocated vector.
 // outProfile.clear() drops its elements but keeps its underlying storage, so a
 // caller that owns one buffer and reuses it every frame allocates nothing here
-// past the first call whose profile is the longest it will ever need -- exactly
-// the per-frame line-of-sight query INTEGRATION-READINESS.md asks for. This is
-// the profile-building half of the frame-safe path; pair it with
+// past the first call whose profile is the longest it will ever need -- the
+// shape a per-frame line-of-sight query needs. This is the profile-building half
+// of the frame-safe path; pair it with
 // ComputeLineOfSight/ComputeFresnelClearance (LineOfSight.h), which are the
 // other half. The by-value overload below is the BATCH PATH equivalent, used
 // where a per-call allocation is acceptable (batch, viewshed, tests).
@@ -118,7 +119,14 @@ inline void GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spa
     double centralAngleRad = totalDistanceM / EarthRadiusM;
     double metersPerDegree = EarthRadiusM * DegToRad;
 
-    int sampleCount = (int)(totalDistanceM / (spacingDeg * metersPerDegree));
+    // Round the interval count UP so effective spacing never exceeds the request.
+    // Floor used to drop a sample whenever the count came out as 999.9999...,
+    // which a viewshed's axis rays hit by construction (floating-point noise, and
+    // a great circle a few mm shorter than the parallel) -- leaving a cell on the
+    // ray unvisited. The (1 - 1e-9) factor stops that noise adding a spurious
+    // extra sample instead.
+    double intervalsNeeded = totalDistanceM / (spacingDeg * metersPerDegree);
+    int sampleCount = (int)ceil(intervalsNeeded * (1.0 - 1e-9));
     if (sampleCount < 1) sampleCount = 1;
 
     for (int i = 0; i <= sampleCount; i++)
@@ -130,6 +138,7 @@ inline void GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spa
         sample.point = current;
         sample.elevationM = sampler.GetElevation(current.latitudeDeg, current.longitudeDeg);
         sample.distanceFromStartM = t * totalDistanceM;
+        sample.elevationDatum = sampler.GetDatum();
 
         outProfile.push_back(sample);
     }
