@@ -111,6 +111,44 @@ inline std::string ComputationStatusToString(ComputationStatus status)
     }
 }
 
+// The path geometry below is written once and shared by ComputeLineOfSight,
+// ComputeFresnelClearance, ComputeViewshedFast and anything that draws their results,
+// so a chart of a path and the verdict on it can never disagree.
+
+// How far the Earth's curvature raises the terrain relative to a straight sight line,
+// at a point d1M from one end of a path and d2M from the other, under the
+// effective-Earth-radius model with refraction factor k.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double CurvatureDropM(double d1M, double d2M, double k)
+{
+    return (d1M * d2M) / (2 * k * EarthRadiusM);
+}
+
+// Height of the straight sight line between two eyes, d1M along a path of
+// totalDistanceM, interpolated by distance. A path of no length stays at the first eye.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double SightLineHeightM(double observerEyeHeightM, double targetEyeHeightM, double d1M, double totalDistanceM)
+{
+    double t = totalDistanceM > 0 ? d1M / totalDistanceM : 0.0;
+    return observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
+}
+
+// Free-space wavelength of a radio frequency.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double WavelengthM(double frequencyHz)
+{
+    const double speedOfLightMps = 299792458.0;
+    return speedOfLightMps / frequencyHz;
+}
+
+// Radius of the first Fresnel zone at a point d1M and d2M from the two ends of a path
+// of totalDistanceM.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double FirstFresnelRadiusM(double wavelengthM, double d1M, double d2M, double totalDistanceM)
+{
+    return sqrt(wavelengthM * d1M * d2M / totalDistanceM);
+}
+
 struct LineOfSightResult
 {
     bool isVisible = false;
@@ -144,8 +182,6 @@ struct LineOfSightResult
 // concurrently mutating the same profile buffer.
 inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& profile, DatumHeight observerHeight, DatumHeight targetHeight, double k = 4.0 / 3.0)
 {
-    const double R = EarthRadiusM;
-
     LineOfSightResult result;
     result.isVisible = true;
     result.clearanceDeficitM = 0;
@@ -190,9 +226,8 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
         // distance when the profile happens to be evenly spaced.
         double d1M = profile[i].distanceFromStartM;
         double d2M = totalDistanceM - d1M;
-        double t = totalDistanceM > 0 ? d1M / totalDistanceM : 0.0;
-        double lineHeightM = observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
-        double curvatureDropM = (d1M * d2M) / (2 * k * R);
+        double lineHeightM = SightLineHeightM(observerEyeHeightM, targetEyeHeightM, d1M, totalDistanceM);
+        double curvatureDropM = CurvatureDropM(d1M, d2M, k);
 
         double correctedElevationM = *profile[i].elevationM + curvatureDropM;
         double deficitM = correctedElevationM - lineHeightM;
@@ -232,9 +267,7 @@ struct FresnelClearanceResult
 // profile buffer.
 inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileSample>& profile, DatumHeight observerHeight, DatumHeight targetHeight, double frequencyHz, double k = 4.0 / 3.0)
 {
-    const double R = EarthRadiusM;
-    const double c = 299792458.0; // speed of light, m/s
-    double wavelengthM = c / frequencyHz;
+    double wavelengthM = WavelengthM(frequencyHz);
 
     FresnelClearanceResult result;
     double bestKnownFraction = 1e18;
@@ -279,13 +312,12 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
 
         if (d1M <= 0 || d2M <= 0) continue; // Fresnel radius is 0 at the antennas themselves
 
-        double t = d1M / totalDistanceM; // by distance, as in ComputeLineOfSight; d2M > 0 so totalDistanceM > 0
-        double lineHeightM = observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
-        double curvatureDropM = (d1M * d2M) / (2 * k * R);
+        double lineHeightM = SightLineHeightM(observerEyeHeightM, targetEyeHeightM, d1M, totalDistanceM);
+        double curvatureDropM = CurvatureDropM(d1M, d2M, k);
         double correctedElevationM = *profile[i].elevationM + curvatureDropM;
 
         double clearanceM = lineHeightM - correctedElevationM; // positive = clear of terrain
-        double fresnelRadiusM = sqrt(wavelengthM * d1M * d2M / totalDistanceM);
+        double fresnelRadiusM = FirstFresnelRadiusM(wavelengthM, d1M, d2M, totalDistanceM);
         double fraction = clearanceM / fresnelRadiusM;
 
         if (fraction < bestKnownFraction)

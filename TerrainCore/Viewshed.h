@@ -2,6 +2,7 @@
 #include <vector>
 #include "LineOfSight.h"
 #include <cmath>
+#include <functional>
 #include <optional>
 
 // A single optional<bool> cannot say why a cell has no confident answer -- "no ray
@@ -38,7 +39,18 @@ inline double LongitudeSpacingForLatitude(double spacingDeg, double latitudeDeg)
 struct ViewshedResult
 {
     std::vector<std::vector<CellVisibility>> visible;
+
+    // True when a progress callback asked the computation to stop. The cells are then
+    // only partly computed and must not be read as an answer.
+    bool cancelled = false;
 };
+
+// Optional progress reporting for a long viewshed. Called with the fraction of the
+// work done so far -- 0 before the first unit of work, 1 once all of it is done.
+// Returning false stops the computation and marks the result cancelled; the final
+// report of 1 comes after the work is finished, so its return value is ignored.
+// Reporting never changes a computed cell.
+using ViewshedProgress = std::function<bool(double fractionDone)>;
 
 // === BATCH VIEWSHED PATH ===
 // Both viewsheds below are the batch path, not the frame-safe one: they own
@@ -60,7 +72,8 @@ struct ViewshedResult
 // cell's result depends on any other cell's, or on visit order. It could be
 // parallelised across rows or cells with no change to its reduction; it simply
 // never has been, since nothing in this project calls it per frame either.
-inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0)
+// Progress (optional): reported before each grid row, then once at the end.
+inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr)
 {
     ViewshedResult result;
 
@@ -83,6 +96,12 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 
     for (int row = 0; row < gridRows; row++)
     {
+        if (progress && !progress((double)row / gridRows))
+        {
+            result.cancelled = true;
+            return result;
+        }
+
         for (int col = 0; col < gridCols; col++)
         {
             if (row == centerRow && col == centerCol)
@@ -108,6 +127,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
         }
     }
 
+    if (progress) progress(1.0);
     return result;
 }
 
@@ -136,7 +156,8 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 //
 // Thread-safety: single-thread-only. Builds one profile at a time in a local,
 // per-ray vector and calls the non-thread-affine sampler sequentially.
-inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0)
+// Progress (optional): reported before every 16th boundary ray, then once at the end.
+inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr)
 {
     ViewshedResult result;
 
@@ -153,12 +174,11 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
     if (!observerElevationM.has_value() || !CanExpressInTerrainDatum(observerHeight, terrainDatum))
     {
         result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::Degraded));
+        if (progress) progress(1.0);
         return result;
     }
 
     result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
-
-    const double R = EarthRadiusM;
 
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
@@ -180,8 +200,16 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
         boundaryCells.push_back(GeoPoint{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (gridCols - 1 - centerCol) * lonSpacingDeg });
     }
 
-    for (const auto& target : boundaryCells)
+    const size_t rayCount = boundaryCells.size();
+    for (size_t ray = 0; ray < rayCount; ray++)
     {
+        if (progress && ray % 16 == 0 && !progress((double)ray / rayCount))
+        {
+            result.cancelled = true;
+            return result;
+        }
+
+        const GeoPoint& target = boundaryCells[ray];
         std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacingDeg, sampler);
 
         double totalDistanceM = profile.back().distanceFromStartM;
@@ -224,7 +252,7 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
             double dM = profile[i].distanceFromStartM;
 
             double dRemainM = totalDistanceM - dM;
-            double curvatureDropM = (dM * dRemainM) / (2 * k * R);
+            double curvatureDropM = CurvatureDropM(dM, dRemainM, k);
             double pointHeightM = *profile[i].elevationM + curvatureDropM;
 
             double slope = (pointHeightM - observerEyeHeightM) / dM;
@@ -246,5 +274,6 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
 
     result.visible[centerRow][centerCol] = CellVisibility::Visible;
 
+    if (progress) progress(1.0);
     return result;
 }

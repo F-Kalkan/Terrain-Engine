@@ -6,11 +6,12 @@
 #include <optional>
 #include <string>
 #include "IElevationSampler.h"
+#include <filesystem>
 
 class RealElevationSampler : public IElevationSampler
 {
 public:
-    RealElevationSampler(std::string filePath, double swLatitudeDeg, double swLongitudeDeg, InterpolationMode interpolationMode = InterpolationMode::Nearest)
+    RealElevationSampler(const std::filesystem::path& filePath, double swLatitudeDeg, double swLongitudeDeg, InterpolationMode interpolationMode = InterpolationMode::Nearest)
     {
         swLat = swLatitudeDeg;
         swLon = swLongitudeDeg;
@@ -40,6 +41,7 @@ public:
             unsigned char lowByte = (unsigned char)buffer[i * 2 + 1];
             int16_t value = (int16_t)((highByte << 8) | lowByte);
             data[i] = value;
+            if (value == -32768) voidCount++;
         }
     }
 
@@ -49,6 +51,41 @@ public:
     {
         return loadedSuccessfully;
     }
+
+    // Posts along one side of the tile: 1201 for a 3-arcsecond tile, 3601 for a
+    // 1-arcsecond one, 0 when the tile didn't load.
+    // Complexity: O(1). Thread-safety: never mutates state; safe to call concurrently.
+    int PostsPerSide() const { return size; }
+
+    // Posts holding the -32768 void sentinel, counted once while loading; 0 when the
+    // tile didn't load. Complexity and thread-safety: as PostsPerSide.
+    int VoidCount() const { return voidCount; }
+
+    // The tile's south-west corner, as given to the constructor.
+    // Complexity and thread-safety: as PostsPerSide.
+    double SouthWestLatitudeDeg() const { return swLat; }
+    double SouthWestLongitudeDeg() const { return swLon; }
+
+    // The interpolation mode GetElevation answers with.
+    // Complexity and thread-safety: as PostsPerSide.
+    InterpolationMode Interpolation() const { return mode; }
+
+    // The same loaded tile answering in another interpolation mode, without reading the
+    // file again. The copy owns its own posts, so either sampler can outlive the other.
+    // Complexity: O(posts) -- one copy of the tile in memory.
+    // Thread-safety: never mutates this sampler; safe to call concurrently.
+    RealElevationSampler WithInterpolationMode(InterpolationMode interpolationMode) const
+    {
+        RealElevationSampler copy = *this;
+        copy.mode = interpolationMode;
+        return copy;
+    }
+
+    // Every post as read from the file: row-major, row 0 the northern edge, column 0
+    // the western edge, -32768 marking a void. Empty when the tile didn't load.
+    // Complexity: O(1). Thread-safety: as PostsPerSide; the reference stays valid for
+    // the sampler's lifetime.
+    const std::vector<int16_t>& Posts() const { return data; }
     
     // SRTM .hgt files are EGM96-referenced -- orthometric (mean sea level) heights.
     VerticalDatum GetDatum() const override
@@ -122,4 +159,5 @@ private:
     std::vector<int16_t> data;
     InterpolationMode mode = InterpolationMode::Nearest;
     bool loadedSuccessfully = false;
+    int voidCount = 0;
 };

@@ -548,6 +548,10 @@ int main(int argc, char* argv[])
     TestRealElevationSamplerRejectsMalformedTile();
     TestViewshedsReturnEmptyForGridWithoutCells();
     TestCliNumberParsingRejectsWhatIsNotANumber();
+    TestRealElevationSamplerReportsTileFacts();
+    TestViewshedProgressIsReportedAndCanCancel();
+    TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad();
+    TestSharedPathGeometryMatchesHandCalculation();
 
     std::cout << "-------------------------" << std::endl;
 

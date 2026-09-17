@@ -1582,3 +1582,152 @@ void TestCliNumberParsingRejectsWhatIsNotANumber()
     Expect(doublesAccepted && doublesRejected && intsAccepted && intsRejected,
         "TestCliNumberParsingRejectsWhatIsNotANumber");
 }
+
+//TEST 47   
+void TestRealElevationSamplerReportsTileFacts()
+{
+    // A 2x2 tile with one void post, written to a file whose name holds a
+    // non-ASCII character, as a Turkish user's folder names often do.
+    std::filesystem::path path = std::filesystem::u8path("facts_test_\xC5\x9F.hgt"); // "facts_test_�.hgt"
+
+    // 2x2 tile, row-major north-to-south / west-to-east, big-endian int16:
+    // NW=100, NE=void, SW=200, SE=300.
+    int16_t samples[4] = { 100, -32768, 200, 300 };
+    {
+        std::ofstream file(path, std::ios::binary);
+        for (int i = 0; i < 4; i++)
+        {
+            unsigned char highByte = (unsigned char)((samples[i] >> 8) & 0xFF);
+            unsigned char lowByte = (unsigned char)(samples[i] & 0xFF);
+            file.write((char*)&highByte, 1);
+            file.write((char*)&lowByte, 1);
+        }
+    }
+
+    RealElevationSampler loaded(path, 36.0, -112.0);
+    bool loadedFactsRight = loaded.IsLoaded()
+        && loaded.PostsPerSide() == 2
+        && loaded.VoidCount() == 1
+        && loaded.SouthWestLatitudeDeg() == 36.0
+        && loaded.SouthWestLongitudeDeg() == -112.0;
+
+    RealElevationSampler missing("no_such_tile.hgt", 36.0, -112.0);
+    bool failedFactsRight = missing.PostsPerSide() == 0
+        && missing.VoidCount() == 0;
+
+    std::filesystem::remove(path);
+
+    Expect(loadedFactsRight && failedFactsRight, "TestRealElevationSamplerReportsTileFacts");
+}
+
+//TEST 48
+void TestViewshedProgressIsReportedAndCanCancel()
+{
+    // A long viewshed must be able to say how far it has got and stop when asked,
+    // without the reporting changing a single cell. For both algorithms over a 21x21
+    // grid with a wall in it: a run that reports must match a run that doesn't, cell
+    // for cell; its reported fractions must start at 0, never go backwards and end at
+    // 1; and a run whose first report says stop must come back cancelled after exactly
+    // that one report.
+    const int size = 21;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    ElevationCells cells = MakeFlatCells(size, 0.0);
+    for (int row = 0; row < size; row++)
+    {
+        cells[row][size / 2 + 3] = 50.0;
+    }
+    RasterBlockElevationSampler sampler = MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+
+    auto holdsFor = [&](bool naive) {
+        auto run = [&](const ViewshedProgress& progress) {
+            return naive ? ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, progress)
+                         : ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, progress);
+        };
+
+        ViewshedResult silent = run(nullptr);
+
+        std::vector<double> fractions;
+        ViewshedResult reported = run([&](double fraction) { fractions.push_back(fraction); return true; });
+        bool inOrder = fractions.size() > 2 && fractions.front() == 0.0 && fractions.back() == 1.0;
+        for (size_t i = 1; i < fractions.size(); i++)
+        {
+            if (fractions[i] < fractions[i - 1]) inOrder = false;
+        }
+
+        int reportsBeforeStopping = 0;
+        ViewshedResult stopped = run([&](double) { reportsBeforeStopping++; return false; });
+
+        return !silent.cancelled && !reported.cancelled && reported.visible == silent.visible && inOrder
+            && stopped.cancelled && reportsBeforeStopping == 1;
+    };
+
+    Expect(holdsFor(true) && holdsFor(false), "TestViewshedProgressIsReportedAndCanCancel");
+}
+
+//TEST 49
+void TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad()
+{
+    // One loaded tile answering in either interpolation mode without reopening the
+    // file: WithInterpolationMode must answer exactly as a sampler opened fresh in that
+    // mode, leave the original's mode alone, and Posts() must hold the file's values in
+    // file order (row-major, north row first). A 3x3 tile over one degree, so posts
+    // sit half a degree apart and (0.75, 0.25) lies midway between four of them:
+    // bilinear reads (10 + 20 + 40 + 50) / 4 = 30 there, nearest rounds to the 50 post.
+    const std::string path = "interpolation_test_tile.hgt";
+    const int16_t posts[9] = { 10, 20, 30, 40, 50, 60, 70, 80, 90 };
+    {
+        std::ofstream file(path, std::ios::binary);
+        for (int16_t value : posts)
+        {
+            char bytes[2] = { (char)((value >> 8) & 0xFF), (char)(value & 0xFF) };
+            file.write(bytes, 2);
+        }
+    }
+
+    RealElevationSampler nearest(path, 0.0, 0.0, InterpolationMode::Nearest);
+    RealElevationSampler freshBilinear(path, 0.0, 0.0, InterpolationMode::Bilinear);
+    RealElevationSampler copiedBilinear = nearest.WithInterpolationMode(InterpolationMode::Bilinear);
+    std::remove(path.c_str());
+
+    bool postsInFileOrder = nearest.Posts().size() == 9;
+    for (size_t i = 0; postsInFileOrder && i < 9; i++)
+    {
+        postsInFileOrder = nearest.Posts()[i] == posts[i];
+    }
+
+    bool agreesWithFreshLoad = true;
+    for (double lat : { 0.1, 0.25, 0.75, 0.9 })
+    {
+        for (double lon : { 0.1, 0.25, 0.6, 0.95 })
+        {
+            if (copiedBilinear.GetElevation(lat, lon) != freshBilinear.GetElevation(lat, lon)) agreesWithFreshLoad = false;
+        }
+    }
+
+    Expect(postsInFileOrder && agreesWithFreshLoad
+        && copiedBilinear.GetElevation(0.75, 0.25) == 30.0
+        && nearest.GetElevation(0.75, 0.25) == 50.0
+        && nearest.Interpolation() == InterpolationMode::Nearest
+        && copiedBilinear.Interpolation() == InterpolationMode::Bilinear
+        && copiedBilinear.PostsPerSide() == 3,
+        "TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad");
+}
+
+//TEST 50
+void TestSharedPathGeometryMatchesHandCalculation()
+{
+    // The curvature drop, the sight line and the Fresnel radius are each written once,
+    // shared by line of sight, Fresnel clearance, the fast viewshed and anything that
+    // charts their results. Pinned here against numbers worked out by hand:
+    // - curvature midway along 50 km with k = 4/3: 25000^2 / (2 * 4/3 * 6371000) = 36.7878 m;
+    // - the sight line from 0 m to 100 m, 900 m along a 1000 m path: 90 m, and on a path
+    //   of no length it stays at the observer's eye;
+    // - 2.4 GHz: wavelength 0.124914 m, first Fresnel radius midway along 10 km 17.6716 m.
+    Expect(std::abs(CurvatureDropM(25000.0, 25000.0, 4.0 / 3.0) - 36.7878) < 1e-3
+        && std::abs(SightLineHeightM(0.0, 100.0, 900.0, 1000.0) - 90.0) < 1e-9
+        && SightLineHeightM(12.0, 50.0, 0.0, 0.0) == 12.0
+        && std::abs(WavelengthM(2.4e9) - 0.124914) < 1e-6
+        && std::abs(FirstFresnelRadiusM(WavelengthM(2.4e9), 5000.0, 5000.0, 10000.0) - 17.6716) < 1e-3,
+        "TestSharedPathGeometryMatchesHandCalculation");
+}
