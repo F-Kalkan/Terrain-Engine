@@ -273,6 +273,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         else LineOfSight.PlaceObserver(latitudeDeg, longitudeDeg);
     }
 
+    /// <summary>Puts the full engine commit on the clipboard, from the About panel.</summary>
+    [RelayCommand]
+    public async Task CopyCommitAsync()
+    {
+        await _clipboard.SetTextAsync(About.EngineCommit);
+        Status("Engine commit copied to the clipboard.");
+    }
+
     public bool CanCopyResults => true;
 
     [RelayCommand]

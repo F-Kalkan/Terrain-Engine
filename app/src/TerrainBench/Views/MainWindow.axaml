@@ -465,20 +465,159 @@
 
             <!-- About -->
             <ScrollViewer Name="AboutPanel" IsVisible="{Binding IsAboutTab}">
-              <StackPanel Margin="18,4,18,18" Spacing="4">
+              <StackPanel Margin="18,4,18,18">
                 <TextBlock Classes="heading" Text="TerrainBench" />
-                <TextBlock Classes="muted" Text="App Version" />
-                <TextBlock Name="AboutAppVersion" Text="{Binding About.AppVersion}" Margin="0,0,0,6" />
-                <TextBlock Classes="muted" Text="Engine Version" />
-                <TextBlock Text="{Binding About.EngineVersion}" Margin="0,0,0,6" />
-                <TextBlock Classes="muted" Text="Engine Commit" />
-                <SelectableTextBlock Name="AboutCommit" Text="{Binding About.EngineCommit}" Margin="0,0,0,6" />
-                <TextBlock TextWrapping="Wrap" Margin="0,8,0,0"
-                           Text="Every elevation, distance, visibility and clearance shown here comes from the terrain engine, TerrainEngineApi.dll. The app lays out and colours the results." />
-                <TextBlock Classes="heading" Text="Mouse" />
-                <TextBlock TextWrapping="Wrap" Text="Left-click the map to place the observer and Ctrl + left-click to place the target; drag a marker to move it and the path follows. The mouse wheel or the − and + buttons zoom, and a right-drag moves the zoomed map. Rest the pointer on a marker or the red blocking point to read about it. On the profile, the wheel zooms along the path, a right-drag moves along it, a double-click shows all of it, and the legend turns lines on and off." />
+                <Border Classes="factsCard" Margin="0">
+                  <StackPanel>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="110,*">
+                        <TextBlock Classes="muted" Text="Version" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Name="AboutAppVersion" Text="{Binding About.AppVersion}" FontWeight="SemiBold" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="110,*">
+                        <TextBlock Classes="muted" Text="Engine" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding About.EngineVersion}" FontWeight="SemiBold" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow" BorderThickness="0">
+                      <Grid ColumnDefinitions="110,*,Auto">
+                        <TextBlock Classes="muted" Text="Commit" VerticalAlignment="Center" />
+                        <SelectableTextBlock Grid.Column="1" Name="AboutCommit" Text="{Binding About.EngineCommit}" FontWeight="SemiBold"
+                                             TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding About.EngineCommit}" />
+                        <Button Grid.Column="2" Name="CopyCommitButton" Content="Copy" Command="{Binding CopyCommitCommand}" Margin="8,0,0,0"
+                                Padding="10,3" FontSize="12" ToolTip.Tip="Copy the full engine commit" />
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="muted" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="Every number shown comes from the terrain engine, TerrainEngineApi.dll; the app lays the results out and colours them." />
+
+                <TextBlock Classes="heading" Text="Map" />
+                <Border Classes="factsCard" Margin="0">
+                  <StackPanel>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Left-click" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Place the observer" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><TextBlock Classes="action" Text="left-click" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Place the target" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Drag a marker" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move it; the path follows" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Mouse wheel" /><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border><Border Classes="key"><TextBlock Text="+" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Zoom" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Right-drag" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move the zoomed map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow" BorderThickness="0">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Hover a marker" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Show its details" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="heading" Text="Profile" />
+                <Border Classes="factsCard" Margin="0">
+                  <StackPanel>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Mouse wheel" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Zoom along the path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Right-drag" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move along the path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Double-click" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Show the whole path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow" BorderThickness="0">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Click a legend entry" /></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Show or hide that line" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+                </Border>
                 <TextBlock Classes="heading" Text="Keyboard" />
-                <TextBlock TextWrapping="Wrap" Text="Tab moves between controls. Ctrl+O opens a tile, F5 checks the line of sight, Esc cancels a viewshed, Ctrl+Shift+C copies the results. On the focused map, the arrow keys move a crosshair (Shift for bigger steps), Enter places the observer there and Ctrl+Enter the target, and + and − zoom." />
+                <Border Classes="factsCard" Margin="0">
+                  <StackPanel>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="O" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Open a tile" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="F5" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Check the line of sight" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Esc" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Cancel a viewshed" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Shift" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="C" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Copy the results" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Tab" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move between controls" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move the crosshair on the focused map; hold Shift for bigger steps" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Enter" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Enter" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Place the observer / the target at the crosshair" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow" BorderThickness="0">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Zoom the focused map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+                </Border>
               </StackPanel>
             </ScrollViewer>
           </Panel>

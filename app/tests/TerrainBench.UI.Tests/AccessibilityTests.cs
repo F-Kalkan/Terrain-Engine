@@ -170,6 +170,10 @@ public class AccessibilityTests
             app.Window.MouseMove(new Point(2, 2));
             map.ZoomAt(map.Frame!.Value.Area.Center, 1);
 
+            app.SelectTab(MainTab.About);
+            app.Settle();
+            app.Window.CaptureRenderedFrame()!.Save(Path.Combine(folder, $"about-{name}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+
             app.SelectTab(MainTab.Viewshed);
             app.FieldBox(app.ViewModel.Viewshed.RadiusKm).Text = "30";
             app.ViewModel.Viewshed.Comparison = ViewshedComparison.PreviousRun;

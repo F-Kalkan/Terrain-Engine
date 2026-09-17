@@ -338,6 +338,32 @@
     <Style Selector="Button.legendRow.off">
       <Setter Property="Opacity" Value="0.4" />
     </Style>
+
+    <!-- Keyboard keys and mouse actions in the About panel's tables -->
+    <Style Selector="Border.key">
+      <Setter Property="Background" Value="{DynamicResource PanelHeaderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1,1,1,2" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="Margin" Value="0,2,4,2" />
+      <Setter Property="MinWidth" Value="24" />
+    </Style>
+    <Style Selector="Border.key TextBlock">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.keySeparator">
+      <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+    </Style>
+    <Style Selector="TextBlock.action">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,2,4,2" />
+    </Style>
     <!-- The zoom box in the map's corner -->
     <Style Selector="Border.mapControls">
       <Setter Property="Background" Value="{DynamicResource CardBrush}" />

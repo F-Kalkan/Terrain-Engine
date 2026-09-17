@@ -160,6 +160,17 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task The_about_panel_copies_the_full_engine_commit()
+    {
+        var vm = Create();
+
+        await vm.CopyCommitCommand.ExecuteAsync(null);
+
+        Assert.Equal("abc1234", _clipboard.Text);
+        Assert.Equal("Engine commit copied to the clipboard.", vm.StatusMessage);
+    }
+
+    [Fact]
     public async Task Copy_results_puts_the_versions_the_inputs_and_the_outputs_on_the_clipboard()
     {
         var vm = Create();

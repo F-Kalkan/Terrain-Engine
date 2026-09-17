@@ -67,7 +67,7 @@ jobs:
 
             1. Download **TerrainBench-${{ steps.version.outputs.version }}-win-x64-portable.zip** and unzip it anywhere.
             2. Run **TerrainBench.exe**. Nothing needs installing: the .NET runtime and the engine's C runtime are inside.
-            3. On first start, choose **Open the sample tile** to load the bundled Grand Canyon tile.
+            3. On first start, choose **Open the Sample Tile** to load the bundled Grand Canyon tile.
 
             Windows x64 only (Windows 10 or 11).
 
@@ -75,5 +75,5 @@ jobs:
             first time. Choose **More info**, then **Run anyway** -- or check the source at this commit and
             build it yourself with `.\build.ps1 -Zip`.
 
-            The About page shows this version and the commit above. **Copy results** puts the inputs, the
+            The About page shows this version and the commit above. **Copy Results** puts the inputs, the
             outputs, the version and the commit on the clipboard, ready to paste into an issue.
