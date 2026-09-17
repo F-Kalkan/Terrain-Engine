@@ -1,0 +1,26 @@
+<Project>
+
+  <!-- Imported by every project that loads the engine: the app and both test projects. The DLL
+       is built by the C++ solution one folder up (build.ps1 does that first); this copies it,
+       and the sample tile, next to the managed output. -->
+
+  <PropertyGroup>
+    <TerrainEngineRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</TerrainEngineRoot>
+    <NativeEngineConfiguration Condition="'$(NativeEngineConfiguration)' == ''">Release</NativeEngineConfiguration>
+    <NativeEngineDll>$(TerrainEngineRoot)\x64\$(NativeEngineConfiguration)\TerrainEngineApi.dll</NativeEngineDll>
+    <SampleTile>$(TerrainEngineRoot)\DATA\N36W112.hgt</SampleTile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(NativeEngineDll)" Link="TerrainEngineApi.dll" Visible="false"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+          Condition="Exists('$(NativeEngineDll)')" />
+    <None Include="$(SampleTile)" Link="Samples\N36W112.hgt" Visible="false"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="RequireNativeEngine" BeforeTargets="Build" Condition="!Exists('$(NativeEngineDll)')">
+    <Error Text="TerrainEngineApi.dll was not found at $(NativeEngineDll). Build the engine first: run .\build.ps1 from the repository root, or build TerrainEngine.sln as Release | x64." />
+  </Target>
+
+</Project>

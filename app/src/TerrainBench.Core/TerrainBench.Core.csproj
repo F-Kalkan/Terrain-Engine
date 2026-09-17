@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>TerrainBench.Core</AssemblyName>
+    <RootNamespace>TerrainBench</RootNamespace>
+    <Description>Everything in TerrainBench that is not a window: the engine wrapper over TerrainEngineApi.dll, the view models, validation and export. No UI framework.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TerrainBench.Tests" />
+  </ItemGroup>
+
+</Project>

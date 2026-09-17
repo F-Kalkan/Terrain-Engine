@@ -8,3 +8,10 @@ Release/
 *.log
 *.vcxproj.user
 *.pgm
+
+# .NET app
+[Bb]in/
+[Oo]bj/
+artifacts/
+TestResults/
+*.user

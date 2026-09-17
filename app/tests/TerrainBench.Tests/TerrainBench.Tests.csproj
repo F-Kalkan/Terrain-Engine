@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\NativeEngine.props" />
+
+  <PropertyGroup>
+    <!-- xunit v3 test projects are executables. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>TerrainBench.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+
+  <!-- The view models and the engine wrapper, the latter against the real TerrainEngineApi.dll. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TerrainBench.Core\TerrainBench.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\NativeEngine.props" />
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>TerrainBench</AssemblyName>
+    <RootNamespace>TerrainBench</RootNamespace>
+    <AssemblyTitle>TerrainBench</AssemblyTitle>
+    <Description>A desktop test bench for the terrain engine: open a tile, place two points, read the answer and why.</Description>
+    <!-- The runtime identifier belongs to `dotnet publish`; pinning it here would make a plain
+         restore and a Release build disagree about the assets file. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType Condition="'$(Configuration)' == 'Release'">embedded</DebugType>
+    <NoWarn>$(NoWarn);AVLN3001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TerrainBench.UI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TerrainBench.Core\TerrainBench.Core.csproj" />
+  </ItemGroup>
+
+  <!-- SkiaSharp and HarfBuzzSharp ship native debug symbols alongside their libraries, and
+       DebugType=none does not reach package assets. Nobody debugs them from a release folder. -->
+  <Target Name="DropNativeSymbols" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

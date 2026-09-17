@@ -1,0 +1,21 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NeutralLanguage>en</NeutralLanguage>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- The engine DLL is Windows x64 only, so everything that loads it is too. -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Product">
+    <!-- A local build's version. A release takes its version from the tag instead (build.ps1 -Version). -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Product>TerrainBench</Product>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+</Project>

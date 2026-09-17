@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TerrainBench.ViewModels"
+             x:Class="TerrainBench.Views.NumberFieldView"
+             x:DataType="vm:NumberField">
+  <StackPanel Spacing="2" Margin="0,0,0,12">
+    <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+      <TextBlock Text="{Binding DisplayLabel}" FontWeight="SemiBold" VerticalAlignment="Center" />
+      <TextBlock Classes="muted" Text="{Binding Unit, StringFormat='({0})'}" IsVisible="{Binding HasUnit}" Margin="5,0,0,0" VerticalAlignment="Center" />
+      <Border Classes="help" IsVisible="{Binding HasHint}" ToolTip.Tip="{Binding Hint}">
+        <TextBlock />
+      </Border>
+    </StackPanel>
+    <!-- As wide as the drop-downs: long enough for a full-precision coordinate, not the whole panel. -->
+    <TextBox Name="Input"
+             Width="240"
+             HorizontalAlignment="Left"
+             Text="{Binding Text}"
+             AutomationProperties.Name="{Binding Label}"
+             AutomationProperties.HelpText="{Binding Hint}" />
+    <TextBlock Classes="error" Text="{Binding Error}" IsVisible="{Binding HasError}" TextWrapping="Wrap" />
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,450 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TerrainBench.App"
+             RequestedThemeVariant="Default">
+
+  <!-- RequestedThemeVariant="Default" follows the system's light or dark setting. The palette is a
+       deep navy frame around slate surfaces, with a muted teal-green accent; every text colour is
+       chosen for at least 4.5:1 contrast against every surface it sits on (checked by the UI tests). -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <!-- Surfaces -->
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#E4E9EE" />
+          <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#F6F8F9" />
+          <SolidColorBrush x:Key="PanelHeaderBrush" Color="#E8EDF1" />
+          <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="StatusBackgroundBrush" Color="#EDF1F4" />
+          <SolidColorBrush x:Key="BannerBackgroundBrush" Color="#DCEBE5" />
+          <SolidColorBrush x:Key="DividerBrush" Color="#C9D3DB" />
+          <!-- The navy frame: toolbar and the unpinned panel's tab strip -->
+          <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#1D3447" />
+          <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#F1F5F8" />
+          <SolidColorBrush x:Key="ToolbarButtonBrush" Color="#2A4A62" />
+          <SolidColorBrush x:Key="ToolbarButtonHoverBrush" Color="#365A75" />
+          <SolidColorBrush x:Key="ToolbarButtonPressedBrush" Color="#223E54" />
+          <SolidColorBrush x:Key="ToolbarButtonBorderBrush" Color="#3B5E79" />
+          <SolidColorBrush x:Key="ToolbarDisabledForegroundBrush" Color="#8FA6B8" />
+          <!-- Text -->
+          <SolidColorBrush x:Key="BodyTextBrush" Color="#17232D" />
+          <SolidColorBrush x:Key="MutedTextBrush" Color="#4D5C69" />
+          <SolidColorBrush x:Key="HeadingTextBrush" Color="#2B5F52" />
+          <SolidColorBrush x:Key="ErrorTextBrush" Color="#A8322A" />
+          <SolidColorBrush x:Key="WarningTextBrush" Color="#855400" />
+          <SolidColorBrush x:Key="VisibleTextBrush" Color="#1D6A3A" />
+          <SolidColorBrush x:Key="BlockedTextBrush" Color="#A8322A" />
+          <SolidColorBrush x:Key="NoAnswerTextBrush" Color="#6A3E9E" />
+          <!-- Result cards, tinted by the verdict -->
+          <SolidColorBrush x:Key="VisibleCardBrush" Color="#E2F0E6" />
+          <SolidColorBrush x:Key="BlockedCardBrush" Color="#F7E5E3" />
+          <SolidColorBrush x:Key="NoAnswerCardBrush" Color="#EDE6F5" />
+          <!-- Accent -->
+          <SolidColorBrush x:Key="AccentBrush" Color="#2F6B5E" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#3A7B6D" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#265749" />
+          <SolidColorBrush x:Key="OnAccentBrush" Color="#FFFFFF" />
+          <!-- Profile chart -->
+          <SolidColorBrush x:Key="ChartGridBrush" Color="#D3DBE2" />
+          <SolidColorBrush x:Key="ChartTerrainBrush" Color="#6D4C41" />
+          <SolidColorBrush x:Key="ChartTerrainFillBrush" Color="#336D4C41" />
+          <SolidColorBrush x:Key="ChartCorrectedBrush" Color="#8D6E63" />
+          <SolidColorBrush x:Key="ChartSightLineBrush" Color="#1D5B8F" />
+          <SolidColorBrush x:Key="ChartFresnelBrush" Color="#401D5B8F" />
+          <SolidColorBrush x:Key="ChartBlockingBrush" Color="#A8322A" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#0D141B" />
+          <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#15202A" />
+          <SolidColorBrush x:Key="PanelHeaderBrush" Color="#1A2733" />
+          <SolidColorBrush x:Key="CardBrush" Color="#1B2835" />
+          <SolidColorBrush x:Key="StatusBackgroundBrush" Color="#111A22" />
+          <SolidColorBrush x:Key="BannerBackgroundBrush" Color="#14302A" />
+          <SolidColorBrush x:Key="DividerBrush" Color="#2A3A48" />
+          <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#0F2438" />
+          <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#E6EDF2" />
+          <SolidColorBrush x:Key="ToolbarButtonBrush" Color="#1A3650" />
+          <SolidColorBrush x:Key="ToolbarButtonHoverBrush" Color="#234565" />
+          <SolidColorBrush x:Key="ToolbarButtonPressedBrush" Color="#152D43" />
+          <SolidColorBrush x:Key="ToolbarButtonBorderBrush" Color="#2A4A66" />
+          <SolidColorBrush x:Key="ToolbarDisabledForegroundBrush" Color="#6F879B" />
+          <SolidColorBrush x:Key="BodyTextBrush" Color="#E3E9EE" />
+          <SolidColorBrush x:Key="MutedTextBrush" Color="#A0B0BD" />
+          <SolidColorBrush x:Key="HeadingTextBrush" Color="#86C9B4" />
+          <SolidColorBrush x:Key="ErrorTextBrush" Color="#FF9A8F" />
+          <SolidColorBrush x:Key="WarningTextBrush" Color="#F0C060" />
+          <SolidColorBrush x:Key="VisibleTextBrush" Color="#82D39E" />
+          <SolidColorBrush x:Key="BlockedTextBrush" Color="#FF9A8F" />
+          <SolidColorBrush x:Key="NoAnswerTextBrush" Color="#C8A8F2" />
+          <SolidColorBrush x:Key="VisibleCardBrush" Color="#152C20" />
+          <SolidColorBrush x:Key="BlockedCardBrush" Color="#33191A" />
+          <SolidColorBrush x:Key="NoAnswerCardBrush" Color="#251D38" />
+          <SolidColorBrush x:Key="AccentBrush" Color="#2E7564" />
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#2A6C5C" />
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#225A4D" />
+          <SolidColorBrush x:Key="OnAccentBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="ChartGridBrush" Color="#2B3C4A" />
+          <SolidColorBrush x:Key="ChartTerrainBrush" Color="#D7B89C" />
+          <SolidColorBrush x:Key="ChartTerrainFillBrush" Color="#33D7B89C" />
+          <SolidColorBrush x:Key="ChartCorrectedBrush" Color="#A1887F" />
+          <SolidColorBrush x:Key="ChartSightLineBrush" Color="#8CC3F0" />
+          <SolidColorBrush x:Key="ChartFresnelBrush" Color="#408CC3F0" />
+          <SolidColorBrush x:Key="ChartBlockingBrush" Color="#FF9A8F" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <!-- The accent reaches Fluent's own parts too: focus rings, the selected tab, progress bars. -->
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#2F6B5E" />
+        <ColorPaletteResources x:Key="Dark" Accent="#3E8C78" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BodyTextBrush}" />
+    </Style>
+
+    <!-- Text -->
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.heading">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource HeadingTextBrush}" />
+      <Setter Property="Margin" Value="0,14,0,8" />
+    </Style>
+    <Style Selector="TextBlock.overline">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="1" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.fieldLabel">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,3" />
+    </Style>
+
+    <!-- Inputs keep a comfortable width instead of stretching across the panel. -->
+    <Style Selector="ComboBox">
+      <Setter Property="MinWidth" Value="240" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+
+    <!-- Buttons -->
+    <Style Selector="Button">
+      <Setter Property="Margin" Value="0,0,6,6" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Padding" Value="16,7" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.primary /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+    </Style>
+    <Style Selector="Button.primary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentPressedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+    </Style>
+
+    <!-- The navy frame and the buttons on it -->
+    <Style Selector="Border.frame">
+      <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
+    </Style>
+    <Style Selector="Border.frame TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    </Style>
+    <Style Selector="Border.frame Button /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ToolbarButtonBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ToolbarButtonBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    </Style>
+    <Style Selector="Border.frame Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ToolbarButtonHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ToolbarButtonBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    </Style>
+    <Style Selector="Border.frame Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ToolbarButtonPressedBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    </Style>
+    <Style Selector="Border.frame Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ToolbarButtonBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource ToolbarDisabledForegroundBrush}" />
+    </Style>
+    <Style Selector="Border.frame Button:disabled TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource ToolbarDisabledForegroundBrush}" />
+    </Style>
+    <!-- The side panel's title bar and its small icon buttons -->
+    <Style Selector="Button.icon">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="2,0,0,0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.icon /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.icon Path">
+      <Setter Property="Stroke" Value="{DynamicResource BodyTextBrush}" />
+    </Style>
+
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DividerBrush}" />
+    </Style>
+
+    <!-- The side panel's tabs, stacked flush on its left edge: the open one is wider and joins the panel -->
+    <Style Selector="Button.sideTab">
+      <Setter Property="Margin" Value="4,0,1,0" />
+      <Setter Property="Padding" Value="6,16" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.sideTab /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource PanelHeaderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1,1,0,0" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="Button.sideTab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BodyTextBrush}" />
+    </Style>
+    <Style Selector="Button.sideTab.selected">
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.sideTab.selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource HeadingTextBrush}" />
+    </Style>
+    <Style Selector="Button.sideTab.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource HeadingTextBrush}" />
+    </Style>
+    <Style Selector="Button.sideTab:nth-last-child(1) /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderThickness" Value="1,1,0,1" />
+    </Style>
+
+    <!-- A ? beside a name: resting the pointer on it explains the setting -->
+    <Style Selector="Border.help">
+      <Setter Property="Width" Value="17" />
+      <Setter Property="Height" Value="17" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="BorderThickness" Value="1.3" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MutedTextBrush}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Margin" Value="7,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="ToolTip.ShowDelay" Value="150" />
+    </Style>
+    <Style Selector="Border.help TextBlock">
+      <Setter Property="Text" Value="?" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.help:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Border.help:pointerover TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+    </Style>
+    <Style Selector="ToolTip">
+      <Setter Property="MaxWidth" Value="340" />
+    </Style>
+
+    <Style Selector="StackPanel.headingRow">
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Margin" Value="0,14,0,8" />
+    </Style>
+    <Style Selector="StackPanel.headingRow TextBlock.heading">
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="StackPanel.subheading">
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Spacing" Value="8" />
+      <Setter Property="Margin" Value="0,4,0,8" />
+    </Style>
+    <Style Selector="StackPanel.subheading TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+
+    <!-- Legend entries that turn a layer on and off: faded while off -->
+    <Style Selector="ToggleButton.legendItem">
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ToggleButton.legendItem /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource BodyTextBrush}" />
+    </Style>
+    <Style Selector="ToggleButton.legendItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource BodyTextBrush}" />
+    </Style>
+    <Style Selector="ToggleButton.legendItem:checked /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource BodyTextBrush}" />
+    </Style>
+    <Style Selector="ToggleButton.legendItem:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DividerBrush}" />
+    </Style>
+    <Style Selector="ToggleButton.legendItem:not(:checked)">
+      <Setter Property="Opacity" Value="0.4" />
+    </Style>
+
+    <Style Selector="Button.legendRow">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="Button.legendRow /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.legendRow:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DividerBrush}" />
+    </Style>
+    <Style Selector="Button.legendRow.off">
+      <Setter Property="Opacity" Value="0.4" />
+    </Style>
+    <!-- The zoom box in the map's corner -->
+    <Style Selector="Border.mapControls">
+      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="BoxShadow" Value="0 3 10 0 #33000000" />
+    </Style>
+    <Style Selector="Border.mapControls Button">
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+
+    <!-- The line-of-sight answer -->
+    <Style Selector="Border.resultCard">
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="14" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.resultCard.visible">
+      <Setter Property="Background" Value="{DynamicResource VisibleCardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource VisibleTextBrush}" />
+    </Style>
+    <Style Selector="Border.resultCard.blocked">
+      <Setter Property="Background" Value="{DynamicResource BlockedCardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BlockedTextBrush}" />
+    </Style>
+    <Style Selector="Border.resultCard.noanswer">
+      <Setter Property="Background" Value="{DynamicResource NoAnswerCardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource NoAnswerTextBrush}" />
+    </Style>
+    <Style Selector="Border.badge">
+      <Setter Property="Width" Value="44" />
+      <Setter Property="Height" Value="44" />
+      <Setter Property="CornerRadius" Value="22" />
+    </Style>
+    <Style Selector="Border.resultCard.visible Border.badge">
+      <Setter Property="Background" Value="{DynamicResource VisibleTextBrush}" />
+    </Style>
+    <Style Selector="Border.resultCard.blocked Border.badge">
+      <Setter Property="Background" Value="{DynamicResource BlockedTextBrush}" />
+    </Style>
+    <Style Selector="Border.resultCard.noanswer Border.badge">
+      <Setter Property="Background" Value="{DynamicResource NoAnswerTextBrush}" />
+    </Style>
+    <Style Selector="Path.glyph">
+      <Setter Property="StrokeThickness" Value="3.5" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+    </Style>
+    <Style Selector="Border.resultCard.visible Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource VisibleCardBrush}" />
+    </Style>
+    <Style Selector="Border.resultCard.blocked Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource BlockedCardBrush}" />
+    </Style>
+    <Style Selector="Border.resultCard.noanswer Path.glyph">
+      <Setter Property="Stroke" Value="{DynamicResource NoAnswerCardBrush}" />
+    </Style>
+    <Style Selector="TextBlock.verdict">
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style Selector="TextBlock.verdict.visible">
+      <Setter Property="Foreground" Value="{DynamicResource VisibleTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.verdict.blocked">
+      <Setter Property="Foreground" Value="{DynamicResource BlockedTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.verdict.noanswer">
+      <Setter Property="Foreground" Value="{DynamicResource NoAnswerTextBrush}" />
+    </Style>
+
+    <Style Selector="Border.factsCard">
+      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="14,10" />
+      <Setter Property="Margin" Value="0,10,0,0" />
+    </Style>
+    <Style Selector="Border.factRow">
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="0,7" />
+    </Style>
+
+    <Style Selector="Border.chip">
+      <Setter Property="CornerRadius" Value="11" />
+      <Setter Property="Padding" Value="9,2" />
+      <Setter Property="BorderThickness" Value="1.5" />
+    </Style>
+    <Style Selector="Border.chip TextBlock">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.chip.clear"><Setter Property="BorderBrush" Value="{DynamicResource VisibleTextBrush}" /></Style>
+    <Style Selector="Border.chip.clear TextBlock"><Setter Property="Foreground" Value="{DynamicResource VisibleTextBrush}" /></Style>
+    <Style Selector="Border.chip.partly"><Setter Property="BorderBrush" Value="{DynamicResource WarningTextBrush}" /></Style>
+    <Style Selector="Border.chip.partly TextBlock"><Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" /></Style>
+    <Style Selector="Border.chip.blocked"><Setter Property="BorderBrush" Value="{DynamicResource BlockedTextBrush}" /></Style>
+    <Style Selector="Border.chip.blocked TextBlock"><Setter Property="Foreground" Value="{DynamicResource BlockedTextBrush}" /></Style>
+    <Style Selector="Border.chip.unknown"><Setter Property="BorderBrush" Value="{DynamicResource NoAnswerTextBrush}" /></Style>
+    <Style Selector="Border.chip.unknown TextBlock"><Setter Property="Foreground" Value="{DynamicResource NoAnswerTextBrush}" /></Style>
+    <Style Selector="ProgressBar.clear"><Setter Property="Foreground" Value="{DynamicResource VisibleTextBrush}" /></Style>
+    <Style Selector="ProgressBar.partly"><Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" /></Style>
+  </Application.Styles>
+
+</Application>
