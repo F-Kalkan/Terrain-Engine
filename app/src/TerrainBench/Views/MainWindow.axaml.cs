@@ -1,6 +1,9 @@
 using System.ComponentModel;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 using TerrainBench.Controls;
 using TerrainBench.ViewModels;
 
@@ -57,6 +60,28 @@ public partial class MainWindow : Window
         };
         this.FindControl<Button>("ResetProfileZoomButton")!.Click += (_, _) => chart.ResetZoom();
 
+        // Window-wide keys: Ctrl+1 moves to the map, Ctrl+2 to Ctrl+5 open a panel, Ctrl+6 moves to the
+        // profile, and F5 runs whatever the open panel runs.
+        var focusMap = new RelayCommand(() => map.Focus());
+        AddKey(Key.D1, KeyModifiers.Control, focusMap);
+        AddKey(Key.NumPad1, KeyModifiers.Control, focusMap);
+        MainTab[] tabs = [MainTab.Terrain, MainTab.LineOfSight, MainTab.Viewshed, MainTab.About];
+        for (int i = 0; i < tabs.Length; i++)
+        {
+            var tab = tabs[i];
+            AddKey(Key.D2 + i, KeyModifiers.Control, new RelayCommand(() => ViewModel?.ShowTab(tab)));
+            AddKey(Key.NumPad2 + i, KeyModifiers.Control, new RelayCommand(() => ViewModel?.ShowTab(tab)));
+        }
+        var focusProfile = new RelayCommand(() =>
+        {
+            if (ViewModel is null) return;
+            ViewModel.OpenProfile();
+            Dispatcher.UIThread.Post(() => chart.Focus(), DispatcherPriority.Loaded);
+        });
+        AddKey(Key.D6, KeyModifiers.Control, focusProfile);
+        AddKey(Key.NumPad6, KeyModifiers.Control, focusProfile);
+        AddKey(Key.F5, KeyModifiers.None, new AsyncRelayCommand(() => ViewModel?.RunActivePanelAsync() ?? Task.CompletedTask));
+
         this.FindControl<Button>("ZoomInButton")!.Click += (_, _) => map.ZoomIn();
         this.FindControl<Button>("ZoomOutButton")!.Click += (_, _) => map.ZoomOut();
 
@@ -90,6 +115,9 @@ public partial class MainWindow : Window
     }
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
+
+    private void AddKey(Key key, KeyModifiers modifiers, System.Windows.Input.ICommand command) =>
+        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(key, modifiers), Command = command });
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {

@@ -190,6 +190,16 @@ public class AccessibilityTests
             app.Find<TextBlock>("ViewshedSummary").BringIntoView();
             app.Settle();
             app.Window.CaptureRenderedFrame()!.Save(Path.Combine(folder, $"viewshed-k-change-{name}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+
+            // Near the tile's west edge, where part of the disc has no data to answer from.
+            app.FieldBox(app.ViewModel.Viewshed.RefractionK).Text = "4/3";
+            app.ViewModel.Viewshed.Comparison = ViewshedComparison.None;
+            app.ViewModel.Viewshed.ObserverLongitude.Text = "-111.9";
+            app.Click(app.Find<Button>("RunViewshedButton"));
+            app.WaitUntil(() => app.ViewModel.Viewshed.HasResult && !app.ViewModel.Viewshed.IsRunning && !app.ViewModel.Viewshed.IsObserverMoved, TimeSpan.FromSeconds(60), "the edge viewshed");
+            app.Find<ItemsControl>("ViewshedLegend").BringIntoView();
+            app.Settle();
+            app.Window.CaptureRenderedFrame()!.Save(Path.Combine(folder, $"viewshed-edge-{name}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
         }
         Application.Current!.RequestedThemeVariant = ThemeVariant.Default;
     }

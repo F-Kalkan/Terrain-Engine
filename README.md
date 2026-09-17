@@ -360,6 +360,8 @@ from the DLL; the app lays results out and colours them.
 ![A 30 km viewshed compared with the previous run after switching curvature off, light theme](docs/screenshots/viewshed-k-change-light.png)
 ![A 30 km viewshed compared with the previous run after switching curvature off, dark theme](docs/screenshots/viewshed-k-change-dark.png)
 ![The map zoomed in, with the pointer resting on the blocking point, dark theme](docs/screenshots/map-zoom-hover-dark.png)
+![The profile zoomed in, reading the distance and elevation under the pointer, dark theme](docs/screenshots/profile-hover-dark.png)
+![A viewshed near the tile's west edge, where part of the disc has no data to answer from, dark theme](docs/screenshots/viewshed-edge-dark.png)
 
 ### Download and run a release
 
@@ -400,8 +402,9 @@ from the DLL; the app lays results out and colours them.
   Fresnel zone and its clearance too, with a bar for how much of the zone stays free.
 - **Viewshed.** Choose the observer, radius, height, spacing, `k`, interpolation and the
   fast or naive algorithm. The result is drawn inside a dashed ring of the requested radius:
-  visible cells in cyan, cells out of sight only darkened so the ground stays readable, and
-  cells with no confident answer in faint purple. The legend hides or shows each kind of
+  visible cells in cyan, cells out of sight only darkened so the ground stays readable, cells
+  with no confident answer in purple (beyond the tile's edge too, where there is no data) and
+  cells not reached in grey. The legend hides or shows each kind of
   cell, and a slider sets the layer's opacity. It runs off the window's thread with progress
   and a Cancel button. Moving the observer takes the old result off the map (a plain fast
   run redoes itself when the observer is placed on the map); changing another setting fades
@@ -420,8 +423,13 @@ from the DLL; the app lays results out and colours them.
   The profile exports as CSV and the map and viewshed as PNG. The last tile, every
   parameter, the open panel, the panel sizes, the profile's lines and the viewshed layer's
   settings are remembered. The app follows the
-  system's light or dark theme, and everything works from the keyboard: on the focused map,
-  the arrow keys move a crosshair, Enter places the observer and Ctrl + Enter the target.
+  system's light or dark theme, and everything works from the keyboard:
+  Ctrl+1 moves to the map, Ctrl+2 to Ctrl+5 open the Terrain, Line of Sight, Viewshed and About
+  panels, Ctrl+6 moves to the profile, and F5 checks the line of sight or runs the viewshed in
+  the open panel. On the focused map the arrow keys move a crosshair, Enter places the observer
+  and Ctrl + Enter the target, and Ctrl with the arrows moves the zoomed map; on the focused
+  profile the arrow keys move a reading cursor, + and − zoom, and Home shows the whole path.
+  The About panel lists every shortcut.
 
 ### Reference queries
 

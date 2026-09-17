@@ -12,7 +12,8 @@ namespace TerrainBench.Controls;
 /// terrain raised by Earth's curvature, the sight line, the first Fresnel zone and the blocking
 /// point. Every value plotted comes from the engine's samples; this only lays them out.
 /// The mouse wheel zooms along the distance axis towards the pointer, a right-drag moves along it
-/// and a double-click shows the whole path again. Resting the pointer on the chart marks the nearest
+/// and a double-click shows the whole path again; from the keyboard, the arrow keys, + and −, Home and Esc do
+/// the same (see OnKeyDown). Resting the pointer on the chart marks the nearest
 /// sample on the terrain and reads its distance and elevation off the axes.
 /// </summary>
 public sealed class ProfileChart : Control
@@ -39,7 +40,7 @@ public sealed class ProfileChart : Control
 
     static ProfileChart()
     {
-        FocusableProperty.OverrideDefaultValue<ProfileChart>(false);
+        FocusableProperty.OverrideDefaultValue<ProfileChart>(true);
         AffectsRender<ProfileChart>(AnalysisProperty, ShowTerrainProperty, ShowCurvatureProperty, ShowSightLineProperty, ShowFresnelProperty);
     }
 
@@ -116,6 +117,7 @@ public sealed class ProfileChart : Control
         {
             var hint = Label("Check a line of sight to see its profile here.", 13, muted);
             context.DrawText(hint, new Point((area.Width - hint.Width) / 2, (area.Height - hint.Height) / 2));
+            if (IsFocused) context.DrawRectangle(null, new Pen(Brush("AccentBrush", Brushes.SteelBlue), 2), area.Deflate(1));
             return;
         }
         if (_viewEnd <= _viewStart) { _viewStart = 0; _viewEnd = TotalM; }
@@ -214,6 +216,11 @@ public sealed class ProfileChart : Control
         }
 
         if (_hoverIndex is int index && index >= first && index <= last) DrawHover(context, samples[index], plot, P);
+
+        if (IsFocused)
+        {
+            context.DrawRectangle(null, new Pen(Brush("AccentBrush", Brushes.SteelBlue), 2), area.Deflate(1));
+        }
     }
 
     /// <summary>A point on the terrain with dashed lines to both axes, and its distance and elevation read off them.</summary>
@@ -251,6 +258,74 @@ public sealed class ProfileChart : Control
         context.DrawText(label, new Point(box.X + 6, box.Y + 2));
     }
 
+    /// <summary>
+    /// With the chart focused: Enter or the arrow keys show the reading cursor and move it a sample at
+    /// a time (Shift for ten), + and − zoom at the cursor, Home shows the whole path, Esc hides the cursor.
+    /// </summary>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (Analysis is not { Samples.Count: > 1 } analysis) return;
+        var samples = analysis.Samples;
+        int centre = NearestSample(samples, (_viewStart + _viewEnd) / 2);
+
+        switch (e.Key)
+        {
+            case Key.Enter:
+                if (_hoverIndex is null) SetHover(centre);
+                break;
+            case Key.Left:
+            case Key.Right:
+                int step = (e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : 1) * (e.Key == Key.Left ? -1 : 1);
+                int index = _hoverIndex is int current ? Math.Clamp(current + step, 0, samples.Count - 1) : centre;
+                SetHover(index);
+                KeepInView(samples[index].DistanceM);
+                break;
+            case Key.Add:
+            case Key.OemPlus:
+                ZoomAtDistance(samples[_hoverIndex ?? centre].DistanceM, MapView.ButtonStep);
+                break;
+            case Key.Subtract:
+            case Key.OemMinus:
+                ZoomAtDistance(samples[_hoverIndex ?? centre].DistanceM, 1 / MapView.ButtonStep);
+                break;
+            case Key.Home:
+                ResetZoom();
+                break;
+            case Key.Escape when _hoverIndex is not null:
+                SetHover(null);
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
+    }
+
+    protected override void OnGotFocus(FocusChangedEventArgs e)
+    {
+        base.OnGotFocus(e);
+        InvalidateVisual();
+    }
+
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        InvalidateVisual();
+    }
+
+    private void ZoomAtDistance(double distanceM, double factor)
+    {
+        var plot = PlotArea();
+        ZoomAt(plot.X + (distanceM - _viewStart) / (_viewEnd - _viewStart) * plot.Width, factor);
+    }
+
+    /// <summary>A zoomed chart moves so the keyboard cursor stays in view.</summary>
+    private void KeepInView(double distanceM)
+    {
+        double span = _viewEnd - _viewStart;
+        if (distanceM < _viewStart || distanceM > _viewEnd) SetView(distanceM - span / 2, span);
+    }
+
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
@@ -263,6 +338,7 @@ public sealed class ProfileChart : Control
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        Focus();
         if (Analysis is null) return;
         var properties = e.GetCurrentPoint(this).Properties;
         if (properties.IsLeftButtonPressed && e.ClickCount == 2)

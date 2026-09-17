@@ -128,7 +128,7 @@ public class PresentationTests
     }
 
     [Fact]
-    public void Hidden_viewshed_layers_are_left_out_of_the_image_and_cells_never_reached_are_not_drawn()
+    public void Hidden_viewshed_layers_are_left_out_of_the_image_and_every_shown_state_has_its_own_colour()
     {
         var map = Maps.Of(CellState.Visible, CellState.NotVisible, CellState.Degraded, CellState.NotCovered);
         var hidden = new bool[MapPixels.HighlightLayer + 1];
@@ -139,7 +139,7 @@ public class PresentationTests
 
         Assert.Equal(PixelOf(MapPixels.VisibleColour), image[8..12]);   // a hidden highlight shows the cell's own state
         Assert.Equal(new byte[4], image[12..16]);                         // not visible, hidden
-        Assert.Equal(new byte[4], image[4..8]);                           // not reached, never drawn
+        Assert.Equal(PixelOf(MapPixels.NotReachedColour), image[4..8]);   // not reached, shown in grey
         Assert.Equal(PixelOf(MapPixels.DegradedColour), image[0..4]);
     }
 

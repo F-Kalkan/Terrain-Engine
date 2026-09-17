@@ -12,12 +12,13 @@ public static class MapPixels
     /// <summary>Pixel colour of a post with no data.</summary>
     public static readonly Rgba NoData = new(96, 96, 104, 255);
 
-    // Visible is the answer people look for, so it is the one bright colour; not visible only
-    // darkens the terrain a little, so the ground stays readable, and cells never reached aren't drawn.
+    // Visible is the answer people look for, so it is the brightest; not visible only darkens the
+    // terrain a little, so the ground stays readable. No confident answer is a strong purple and not
+    // reached a grey, so all four states stay distinct on the map, beyond the tile's edge too.
     public static readonly Rgba VisibleColour = new(0, 180, 216, 205);
     public static readonly Rgba NotVisibleColour = new(0, 0, 0, 64);
-    public static readonly Rgba DegradedColour = new(142, 36, 170, 120);
-    public static readonly Rgba NotReachedColour = new(0, 0, 0, 0);
+    public static readonly Rgba DegradedColour = new(176, 64, 214, 185);
+    public static readonly Rgba NotReachedColour = new(170, 170, 170, 120);
     public static readonly Rgba DisagreementColour = new(255, 214, 0, 235);
 
     /// <summary>Index of the comparison highlights in a hidden-layers array, after the four cell states.</summary>

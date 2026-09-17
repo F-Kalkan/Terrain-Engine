@@ -109,7 +109,9 @@ public static class MapPainter
         // overlay is averaged instead, and those cells still tint the pixels they fall in.
         var destination = new Rect(topLeft, bottomRight);
         var mode = destination.Width < overlay.PixelSize.Width ? BitmapInterpolationMode.HighQuality : BitmapInterpolationMode.None;
-        using (context.PushClip(frame.Area))
+        // Not clipped to the tile: cells the engine answered beyond its edge (no confident answer, for want of data)
+        // are part of the result and must show, not be cut away with the terrain.
+        using (context.PushClip(new Rect(topLeft, bottomRight).Union(new Rect(centre.X - rx, centre.Y - ry, rx * 2, ry * 2)).Inflate(4)))
         {
             using (context.PushGeometryClip(disc))
             using (context.PushOpacity(Math.Clamp(opacity, 0, 1)))

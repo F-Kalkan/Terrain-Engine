@@ -17,6 +17,8 @@
     <PublishTrimmed>false</PublishTrimmed>
     <DebugType Condition="'$(Configuration)' == 'Release'">embedded</DebugType>
     <NoWarn>$(NoWarn);AVLN3001</NoWarn>
+    <!-- The icon Explorer and the taskbar show for the exe; the window uses the same file. Assets/make-icon.ps1 draws it. -->
+    <ApplicationIcon>Assets/TerrainBench.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +29,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="TerrainBench.UI.Tests" />
+    <AvaloniaResource Include="Assets/TerrainBench.ico" />
   </ItemGroup>
 
   <ItemGroup>

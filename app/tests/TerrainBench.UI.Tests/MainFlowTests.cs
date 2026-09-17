@@ -445,7 +445,7 @@ public class MainFlowTests
     }
 
     [AvaloniaFact]
-    public void The_about_page_shows_the_app_version_and_the_engine_commit()
+    public void The_about_page_shows_the_app_version_and_the_engine_commit_and_the_window_has_its_icon()
     {
         using var app = new Harness();
         app.SelectTab(MainTab.About);
@@ -453,5 +453,6 @@ public class MainFlowTests
         Assert.Equal("1.2.3", app.Find<TextBlock>("AboutAppVersion").Text);
         Assert.Equal(app.ViewModel.About.EngineCommit, app.Find<SelectableTextBlock>("AboutCommit").Text);
         Assert.False(string.IsNullOrEmpty(app.ViewModel.About.EngineCommit));
+        Assert.NotNull(app.Window.Icon);
     }
 }

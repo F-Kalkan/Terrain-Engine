@@ -7,6 +7,7 @@
         x:Class="TerrainBench.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="TerrainBench"
+        Icon="/Assets/TerrainBench.ico"
         Width="1360" Height="880" MinWidth="960" MinHeight="640">
 
   <DockPanel>
@@ -58,7 +59,7 @@
       <Grid Name="MapArea" RowDefinitions="*,Auto,260,Auto">
         <Panel>
           <controls:MapView Name="Map"
-                            AutomationProperties.Name="Terrain map. With focus, arrow keys move a crosshair, Enter places the observer and Ctrl+Enter the target."
+                            AutomationProperties.Name="Terrain map. With focus, arrow keys move a crosshair, Enter places the observer and Ctrl+Enter the target, Ctrl with the arrows moves the map, plus and minus zoom."
                             Posts="{Binding Terrain.Posts}"
                             Tile="{Binding Terrain.Tile.Info}"
                             WidthM="{Binding Terrain.WidthM}"
@@ -144,7 +145,7 @@
             <controls:ProfileChart Name="Chart" Analysis="{Binding LineOfSight.Analysis}" Margin="8"
                                    ShowTerrain="{Binding ProfileShowTerrain}" ShowCurvature="{Binding ProfileShowCurvature}"
                                    ShowSightLine="{Binding ProfileShowSightLine}" ShowFresnel="{Binding ProfileShowFresnel}"
-                                   AutomationProperties.Name="Profile chart of the line of sight. The mouse wheel zooms along the path, a right-drag moves along it and a double-click shows all of it." />
+                                   AutomationProperties.Name="Profile chart of the line of sight. The arrow keys move a reading cursor, plus and minus zoom, Home shows the whole path." />
           </DockPanel>
         </Border>
 
@@ -275,7 +276,7 @@
                           AutomationProperties.HelpText="{x:Static p:PlainWords.InterpolationExplanation}" />
                 <views:NumberFieldView DataContext="{Binding LineOfSight.Frequency}" />
 
-                <Button Name="CheckButton" Classes="primary" Content="Check Line of Sight" Command="{Binding LineOfSight.CheckCommand}" HotKey="F5"
+                <Button Name="CheckButton" Classes="primary" Content="Check Line of Sight" Command="{Binding LineOfSight.CheckCommand}"
                         ToolTip.Tip="Ask the engine whether the observer can see the target (F5)" Margin="0,4,0,0" />
 
                 <TextBlock Classes="error" Text="{Binding LineOfSight.Error}" IsVisible="{Binding LineOfSight.HasError}" TextWrapping="Wrap" Margin="0,8,0,0" />
@@ -411,7 +412,7 @@
 
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                   <Button Name="RunViewshedButton" Classes="primary" Content="Run Viewshed" Command="{Binding Viewshed.RunCommand}"
-                          ToolTip.Tip="Compute which cells the observer can see" />
+                          ToolTip.Tip="Compute which cells the observer can see (F5)" />
                   <Button Name="CancelViewshedButton" Content="Cancel" Command="{Binding Viewshed.CancelCommand}" HotKey="Escape"
                           ToolTip.Tip="Stop the running viewshed (Esc)" />
                 </StackPanel>
@@ -436,13 +437,16 @@
                     <ItemsControl Name="ViewshedLegend" ItemsSource="{Binding Viewshed.Legend}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:LegendRow">
-                          <Button Classes="legendRow" Classes.off="{Binding !IsShown}"
+                          <Button Classes="legendRow" Classes.off="{Binding !IsShown}" Classes.empty="{Binding IsEmpty}"
                                   Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).Viewshed.ToggleLayerCommand}" CommandParameter="{Binding}"
                                   ToolTip.Tip="Show or hide these cells on the map" AutomationProperties.Name="{Binding Name}">
                             <Grid ColumnDefinitions="24,*,Auto">
                               <Border Width="16" Height="16" CornerRadius="3" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
                                       Background="{Binding Colour, Converter={x:Static views:Converters.RgbaToBrush}}" VerticalAlignment="Center" />
-                              <TextBlock Grid.Column="1" Text="{Binding Name}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" Text="None in this run" FontSize="11" IsVisible="{Binding IsEmpty}" />
+                              </StackPanel>
                               <TextBlock Grid.Column="2" Text="{Binding Count}" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
                             </Grid>
                           </Button>
@@ -570,14 +574,26 @@
                   <StackPanel>
                     <Border Classes="factRow">
                       <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="O" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Open a tile" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="1" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move to the map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="2" /></Border><TextBlock Classes="keySeparator" Text="–" /><Border Classes="key"><TextBlock Text="5" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Open the Terrain, Line of Sight, Viewshed or About panel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="6" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Open the profile and move to it" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
                     <Border Classes="factRow">
                       <Grid ColumnDefinitions="175,*">
                         <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="F5" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Check the line of sight" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="Check the line of sight, or run the viewshed, in the open panel" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
                     <Border Classes="factRow">
@@ -588,20 +604,31 @@
                     </Border>
                     <Border Classes="factRow">
                       <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="O" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Open a tile" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
                         <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Shift" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="C" /></Border></WrapPanel>
                         <TextBlock Grid.Column="1" Text="Copy the results" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
-                    <Border Classes="factRow">
+                    <Border Classes="factRow" BorderThickness="0">
                       <Grid ColumnDefinitions="175,*">
                         <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Tab" /></Border></WrapPanel>
                         <TextBlock Grid.Column="1" Text="Move between controls" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="heading" Text="Keyboard on the Map" />
+                <Border Classes="factsCard" Margin="0">
+                  <StackPanel>
                     <Border Classes="factRow">
                       <Grid ColumnDefinitions="175,*">
                         <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move the crosshair on the focused map; hold Shift for bigger steps" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="Move the crosshair; hold Shift for bigger steps" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
                     <Border Classes="factRow">
@@ -610,10 +637,45 @@
                         <TextBlock Grid.Column="1" Text="Place the observer / the target at the crosshair" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Move the zoomed map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
                     <Border Classes="factRow" BorderThickness="0">
                       <Grid ColumnDefinitions="175,*">
                         <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Zoom the focused map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="Zoom" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="heading" Text="Keyboard on the Profile" />
+                <Border Classes="factsCard" Margin="0">
+                  <StackPanel>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Enter" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Show the reading cursor and move it; hold Shift for ten samples" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Zoom at the cursor" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Home" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Show the whole path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="factRow" BorderThickness="0">
+                      <Grid ColumnDefinitions="175,*">
+                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Esc" /></Border></WrapPanel>
+                        <TextBlock Grid.Column="1" Text="Hide the cursor" TextWrapping="Wrap" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
                   </StackPanel>

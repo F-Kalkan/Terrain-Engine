@@ -101,7 +101,7 @@ public sealed class MapView : Control
         AffectsRender<MapView>(PostsProperty, TileProperty, WidthMProperty, ViewshedProperty, HighlightsProperty, ShowViewshedProperty, ShowPathProperty,
             AnalysisProperty, ObserverLatitudeProperty, ObserverLongitudeProperty, TargetLatitudeProperty, TargetLongitudeProperty,
             ViewshedObserverLatitudeProperty, ViewshedObserverLongitudeProperty, ZoomProperty, ViewshedOpacityProperty, ShowViewshedLayerProperty,
-            ViewshedRadiusLabelProperty, ProfileHoverLatitudeProperty, ProfileHoverLongitudeProperty, LiveDragPausedProperty);
+            ViewshedRadiusLabelProperty, ProfileHoverLatitudeProperty, ProfileHoverLongitudeProperty, LiveDragPausedProperty, HiddenLayersProperty, HighlightsProperty);
     }
 
     public TilePosts? Posts { get => GetValue(PostsProperty); set => SetValue(PostsProperty, value); }
@@ -594,6 +594,23 @@ public sealed class MapView : Control
     {
         base.OnKeyDown(e);
         if (Tile is not { } tile) return;
+
+        // Ctrl + an arrow key moves a zoomed map, as a right-drag does.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key is Key.Up or Key.Down or Key.Left or Key.Right)
+        {
+            const double panStep = 80;
+            _pan += e.Key switch
+            {
+                Key.Up => new Vector(0, panStep),
+                Key.Down => new Vector(0, -panStep),
+                Key.Left => new Vector(panStep, 0),
+                _ => new Vector(-panStep, 0),
+            };
+            ClampPan();
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
 
         var cursor = _keyboardCursor ?? ((tile.SouthWestLatitudeDeg + tile.NorthEastLatitudeDeg) / 2, (tile.SouthWestLongitudeDeg + tile.NorthEastLongitudeDeg) / 2);
         double step = (e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 0.05 : 0.005) / Zoom * (tile.NorthEastLatitudeDeg - tile.SouthWestLatitudeDeg);

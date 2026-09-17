@@ -273,6 +273,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         else LineOfSight.PlaceObserver(latitudeDeg, longitudeDeg);
     }
 
+    /// <summary>F5: checks the line of sight or runs the viewshed, whichever panel is open; on the others it does nothing.</summary>
+    [RelayCommand]
+    public async Task RunActivePanelAsync()
+    {
+        switch (SelectedTab)
+        {
+            case MainTab.LineOfSight when LineOfSight.CheckCommand.CanExecute(null):
+                LineOfSight.CheckCommand.Execute(null);
+                break;
+            case MainTab.Viewshed when Viewshed.RunCommand.CanExecute(null):
+                await Viewshed.RunCommand.ExecuteAsync(null);
+                break;
+        }
+    }
+
     /// <summary>Puts the full engine commit on the clipboard, from the About panel.</summary>
     [RelayCommand]
     public async Task CopyCommitAsync()

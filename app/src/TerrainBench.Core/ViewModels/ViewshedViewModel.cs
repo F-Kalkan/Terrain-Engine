@@ -21,6 +21,9 @@ public sealed partial class LegendRow(string name, Rgba colour, string count, in
     public Rgba Colour { get; } = colour;
     public string Count { get; } = count;
 
+    /// <summary>No cell of this kind in the run: the entry says so rather than looking like a toggle that does nothing.</summary>
+    public bool IsEmpty => Count == "0";
+
     /// <summary>The layer this row stands for: a <see cref="CellState"/>, or <see cref="MapPixels.HighlightLayer"/>.</summary>
     public int Layer { get; } = layer;
 

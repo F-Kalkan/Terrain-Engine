@@ -160,6 +160,26 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task F5_runs_what_the_open_panel_runs_and_nothing_elsewhere()
+    {
+        var vm = Create();
+        vm.OpenSampleTileCommand.Execute(null);
+
+        vm.SelectedTab = MainTab.About;
+        await vm.RunActivePanelCommand.ExecuteAsync(null);
+        Assert.Null(vm.LineOfSight.Analysis);
+        Assert.Null(vm.Viewshed.Map);
+
+        vm.SelectedTab = MainTab.LineOfSight;
+        await vm.RunActivePanelCommand.ExecuteAsync(null);
+        Assert.NotNull(vm.LineOfSight.Analysis);
+
+        vm.SelectedTab = MainTab.Viewshed;
+        await vm.RunActivePanelCommand.ExecuteAsync(null);
+        Assert.NotNull(vm.Viewshed.Map);
+    }
+
+    [Fact]
     public async Task The_about_panel_copies_the_full_engine_commit()
     {
         var vm = Create();
