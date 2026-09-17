@@ -25,7 +25,7 @@ between two points:
 
 1. Clone this repository and open `TerrainEngine.sln` in Visual Studio 2022.
 2. Build the solution (`x64`, `Release` recommended for real use).
-3. Run `TerrainEngine.exe` with no arguments — this runs the 46-case test suite and a
+3. Run `TerrainEngine.exe` with no arguments — this runs the 50-case test suite and a
    small demo against the included sample tile (`DATA/N36W112.hgt`, a 3-arcsecond
    stretch of the Grand Canyon), and writes `profile_output.pgm` / `viewshed_output.pgm`
    you can open in any image viewer that supports PGM (e.g. IrfanView, GIMP). If the
@@ -34,12 +34,15 @@ between two points:
    run against it too; without it, those parts skip.
 4. To ask your own question, use the CLI directly, e.g.: 
   ```
-  TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002694 2.0 2.0
+  TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002697964817756191 2.0 2.0
   ```
    This asks: standing 2 m above the ground at (36.3, -111.5), can you see a point
    2 m above the ground at (36.35, -111.45)? The answer, and if blocked, exactly where
-   and by how much.
-    
+   and by how much. The spacing is in degrees: 0.0002697964817756191° is exactly the 30 m
+   TerrainBench samples at, so the app and the CLI answer this query identically.
+5. Or skip the compiler: download TerrainBench, the desktop test bench, from the
+   repository's releases (see "TerrainBench" below).
+
 
 ## Architecture / dependency list
 
@@ -51,6 +54,13 @@ independent of any file format:
 | `TerrainCore`    | Static library  | **C++17 and the standard library only** (`<vector>`, `<optional>`, `<cmath>`) |
 | `TerrainReader`  | Static library  | `TerrainCore` (for the sampler interface) + stdlib (`<fstream>`, `<cstdint>`, `<string>`) |
 | `TerrainEngine`  | Console exe/CLI | `TerrainCore`, `TerrainReader`, plus Windows-only `<windows.h>`/`<psapi.h>` for peak-memory reporting |
+| `TerrainEngineApi` | Windows x64 DLL | `TerrainCore`, `TerrainReader`, `<windows.h>`; the C runtime linked in statically (`/MT`), so it needs nothing installed |
+
+`TerrainEngineApi` exposes the engine to .NET (P/Invoke) or C through a plain C header,
+`TerrainEngineApi/TerrainEngineApi.h`: numeric tile handles, result codes with a
+plain-English message, DLL-allocated arrays released with `te_free`, and no C++ type or
+exception crossing the boundary. Its answers are bit-identical to the CLI's for the same
+inputs. The header documents every function's ownership rules, Big-O and thread-safety.
 
 `TerrainCore` contains the elevation-sampler interface (`IElevationSampler`), four
 in-memory implementations of it (`FakeElevationSampler`, a tiny index-addressed grid for sampler tests,
@@ -63,7 +73,9 @@ include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
 `TerrainReader` contains `RealElevationSampler`, a reader for SRTM `.hgt` tiles —
 3-arcsecond (1201×1201, ~90 m) or 1-arcsecond (3601×3601, ~30 m), the post count
 inferred from the file size, and a file whose size isn't a whole square of posts
-refused — with big-endian 16-bit signed elevations and void = `-32768`.
+refused — with big-endian 16-bit signed elevations and void = `-32768`. It reports a
+loaded tile's posts per side, void count and south-west corner, and takes its path as a
+`std::filesystem::path`, so a folder or file name with non-ASCII characters opens too.
 
 The Windows dependency (`psapi.h`) lives only in `TerrainEngine` (the CLI/benchmark
 driver), never in `TerrainCore` or `TerrainReader` — it is not a library dependency,
@@ -330,8 +342,148 @@ no separate terrain-datum argument that could disagree with the profile. A query
 can't be put on one datum is rejected as a value
 (`LineOfSightResult::status == ComputationStatus::DatumRejected`), not silently
 computed or thrown. A viewshed asked for a grid with no rows or no columns returns an
-empty `ViewshedResult`. Nothing in `TerrainCore` or `TerrainReader` throws across its
+empty `ViewshedResult`. Both viewsheds take an optional progress callback that can stop
+them early, which marks the result `cancelled`; without one they run exactly as before.
+Nothing in `TerrainCore` or `TerrainReader` throws across its
 own boundary, other than the standard library's `std::bad_alloc` if memory runs out.
+
+## TerrainBench: the desktop test bench
+
+TerrainBench is for testing the engine without a compiler and without reading the code:
+open a tile, put two points on it, and read the answer and the reason for it. It is a
+.NET 10 / Avalonia 12 app in `app/`, and it reaches the engine only through
+`TerrainEngineApi.dll`. Every elevation, distance, visibility and clearance on screen comes
+from the DLL; the app lays results out and colours them.
+
+![TerrainBench checking a line of sight, light theme](docs/screenshots/line-of-sight-light.png)
+![TerrainBench checking a line of sight, dark theme](docs/screenshots/line-of-sight-dark.png)
+![A 30 km viewshed compared with the previous run after switching curvature off, light theme](docs/screenshots/viewshed-k-change-light.png)
+![A 30 km viewshed compared with the previous run after switching curvature off, dark theme](docs/screenshots/viewshed-k-change-dark.png)
+![The map zoomed in, with the pointer resting on the blocking point, dark theme](docs/screenshots/map-zoom-hover-dark.png)
+
+### Download and run a release
+
+1. Open this repository's **Releases** page and download
+   `TerrainBench-<version>-win-x64-portable.zip`.
+2. Unzip it anywhere and run `TerrainBench.exe`. It needs Windows 10 or 11, x64, and
+   nothing installed: the .NET runtime and the engine's C runtime are inside.
+3. The build isn't code signed, so Windows SmartScreen may say "Windows protected your PC"
+   the first time. Choose **More info**, then **Run anyway**.
+4. On first start, choose **Open the Sample Tile** to load the bundled Grand Canyon tile.
+
+### What it does
+
+- **Terrain.** Open an `.hgt` tile; the south-west corner is read from the standard file
+  name (`N36W112` is 36, -112) and can be edited. The tile is drawn north up, coloured by
+  elevation, with a scale bar; the status bar reads the latitude, longitude and elevation
+  under the pointer. The Terrain tab lists the tile's extent, grid size, resolution and
+  number of posts with no data.
+- **Map.** A left-click places the observer and Ctrl + left-click the target; a marker can
+  be dragged, and while a line-of-sight marker moves the path is checked live -- the line,
+  the blocking point, the profile and the result card follow it (should a check ever take
+  longer than 60 ms, the drag shows a plain line and checks once on the drop). The mouse
+  wheel zooms towards the pointer (10% a notch) and the − and + buttons in the map's corner,
+  or the + and − keys, by 25%, from 100% to 2000%, with the scale bar following; a
+  right-drag moves the zoomed map. Resting the pointer on the observer or the target shows
+  its coordinates, ground and eye height, and on the red blocking point, why the path is
+  blocked. The sight line is solid as far as the blocking point and dashed red beyond it.
+- **Line of sight.** Type the observer's and the target's latitude, longitude and height
+  above ground, or place them on the map; a button swaps them. Set `k`, the sample spacing
+  and the interpolation. The answer is **Visible**, **Blocked** or **No Confident Answer**,
+  shown as a card with the reason in plain words; when blocked, a second card says where,
+  the terrain height there, how far short the sight line falls and what kind of feature is
+  in the way. The profile panel under the map shows the terrain (with gaps where data is
+  missing), the terrain raised by the Earth's curvature, the sight line and the blocking
+  point; its legend turns each line off and on, the mouse wheel zooms along the path, a
+  right-drag moves along it, and the pointer reads the distance and terrain elevation off
+  the axes while marking the same point on the map. Give a frequency to see the first
+  Fresnel zone and its clearance too, with a bar for how much of the zone stays free.
+- **Viewshed.** Choose the observer, radius, height, spacing, `k`, interpolation and the
+  fast or naive algorithm. The result is drawn inside a dashed ring of the requested radius:
+  visible cells in cyan, cells out of sight only darkened so the ground stays readable, and
+  cells with no confident answer in faint purple. The legend hides or shows each kind of
+  cell, and a slider sets the layer's opacity. It runs off the window's thread with progress
+  and a Cancel button. Moving the observer takes the old result off the map (a plain fast
+  run redoes itself when the observer is placed on the map); changing another setting fades
+  it until the next run. **Compare With** marks cells in yellow: either where fast and naive
+  disagree on the same run (with the count, ratio and both timings), or every cell that
+  changed since the previous run, with the setting that changed (`k: 4/3 → 1e12 changed
+  8,583 cells.`) -- which is how changing one setting shows up even when it moves a few
+  thousand cells out of four million.
+- **Everywhere.** One side panel shows at a time, picked by the tabs on its left edge:
+  Terrain, Line of Sight, Viewshed and About. The profile panel under the map closes to a
+  Profile button; both panels are resized by dragging their edge. A ? beside a setting
+  explains it when the pointer rests on it. Every field states its unit and, for heights,
+  what it is measured from; a mistake is shown at the field, saying what is allowed, before
+  the engine runs. **Copy Results** puts the inputs, outputs, app version and engine commit
+  on the clipboard, including the command line that repeats a line-of-sight query exactly.
+  The profile exports as CSV and the map and viewshed as PNG. The last tile, every
+  parameter, the open panel, the panel sizes, the profile's lines and the viewshed layer's
+  settings are remembered. The app follows the
+  system's light or dark theme, and everything works from the keyboard: on the focused map,
+  the arrow keys move a crosshair, Enter places the observer and Ctrl + Enter the target.
+
+### Reference queries
+
+On the sample tile (south-west corner 36, -112), with 2 m above ground at both ends, 30 m
+spacing and `k` 4/3. The CLI takes the spacing in degrees, and 0.0002697964817756191° is
+exactly the 30 m the app uses, so both give the same answer to the precision the CLI prints.
+
+| Expect | In TerrainBench | On the command line | Answer |
+|---|---|---|---|
+| Blocked | Observer 36.3, -111.5; target 36.35, -111.45; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.3 -111.5 36.35 -111.45 0.0002697964817756191 2 2` | Blocked at 36.3277, -111.472; terrain 1900 m above mean sea level; the sight line falls short by 195.993 m; a falling slope |
+| Visible | Observer 36.4, -111.5; target 36.45, -111.45; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.4 -111.5 36.45 -111.45 0.0002697964817756191 2 2` | Visible (`Status: ok`) |
+| No confident answer | Observer 36.5, -111.5; target 36.5, -111.0; **bilinear** | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.5 -111.5 36.5 -111.0 0.0002697964817756191 2 2 1.3333333333333333 bilinear` | No confident answer: `Status: endpoint elevation missing`. The target sits on the tile's east edge, where bilinear interpolation has no post beyond it to blend with. (The CLI still prints a `Visible:` line; with that status it isn't an answer.) |
+
+### Tests
+
+Besides the engine's own suite, `app/` has two test projects, both run by `build.ps1` and CI:
+
+- `TerrainBench.Tests` (xUnit v3): known answers through the real DLL -- Tests.h's wall
+  (38.0 m) and curvature (34.79 m) cases written out as `.hgt` tiles, and the Blocked
+  reference query checked against `TerrainEngine.exe` itself -- every bad input the DLL must
+  survive (missing, empty and truncated files, a point outside the tile, spacing zero or
+  negative, a pole latitude, a closed handle), and the view models: validation, results,
+  errors, cancellation, comparisons, remembered settings, and numbers that keep a decimal
+  point on a machine that writes a comma.
+- `TerrainBench.UI.Tests` (Avalonia.Headless.XUnit): the main flows clicked through a real
+  window over the real DLL, including a naive 30 km viewshed that reports progress, leaves
+  the window working and cancels; keyboard reach and accessible names for every control;
+  4.5:1 text contrast in both themes. With `TERRAINBENCH_SCREENSHOTS` set to a folder, it
+  also renders the screenshots above.
+
+### Build it yourself
+
+Needs Visual Studio 2022 with the **Desktop development with C++** workload (or its Build
+Tools) and the .NET 10 SDK. From the repository root:
+
+```
+.\build.ps1          # engine, CLI, DLL and app: build and run every test
+.\build.ps1 -Zip     # the same, then a portable zip in artifacts/
+```
+
+`build.ps1` builds `TerrainEngine.sln` (Release | x64), checks the DLL depends on nothing
+but `KERNEL32.dll`, runs `TerrainEngine.exe`'s tests, then builds and tests `app/`. After it
+has built the engine once, the app can be run from source with
+`dotnet run --project app/src/TerrainBench -c Release`.
+
+### Releasing
+
+Versions are `MAJOR.MINOR.PATCH`. The patch number moves for fixes that change no answer and
+no interface; the minor number for new features that keep every existing answer and the DLL
+interface compatible; the major number for anything that changes an answer, the DLL's
+interface or a file format. The version lives in the tag -- `app/Directory.Build.props` only
+gives local builds a default -- so when a commit is ready to test, tag it:
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The release workflow builds that commit from source, runs the same tests as CI, and
+publishes the zip as a GitHub release whose notes name the commit. If any step fails, nothing
+is published. CI builds and tests every push and pull request, so a broken commit is red
+before anyone tags it.
 
 ## Building
 
@@ -341,7 +493,7 @@ links both and produces `TerrainEngine.exe`.
 
 ## CLI usage
 ```
-TerrainEngine.exe # run the 46-case test suite + demo
+TerrainEngine.exe # run the 50-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
@@ -349,7 +501,7 @@ TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize
 TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> <frequencyMHz> [k]
 TerrainEngine.exe batch <hgtFile> <swLat> <swLon> <queriesFile> [k]
 ```
-Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002694 2.0 2.0
+Example, using the included Grand Canyon tile: TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002697964817756191 2.0 2.0
 
 Every numeric argument is checked before anything runs: text that isn't a whole, finite
 number, or a spacing, `k`, frequency or grid size that isn't greater than zero, is
@@ -360,7 +512,7 @@ rather than silently skipped.
 
 ## Test suite
 
-46 hand-checkable test functions, plus a real-data tolerance assertion per tile:
+50 hand-checkable test functions, plus a real-data tolerance assertion per tile:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
   on disk): flat plateau, wall, curvature, void, determinism,
@@ -381,7 +533,8 @@ rather than silently skipped.
   wall hiding nothing; void propagation behind a hole on a straight ray and on every
   sample of a diagonal ray; and both algorithms agreeing when the observer stands on a
   void or its height can't be converted; and a grid with no rows or no columns coming
-  back empty from both, rather than written into or resized to an enormous size.
+  back empty from both, rather than written into or resized to an enormous size; and progress reported in order, and a stop request
+  honoured, by both algorithms without changing a single cell.
 
 No test that computes a profile, a line of sight or a viewshed reads a synthetic grid
 as degrees, which would be ~111 km per cell — a scale at which Earth curvature, not
@@ -394,7 +547,8 @@ terrain, decides every answer.
   toward the pole where degree-space interpolation would not; a profile never sampled
   more coarsely than requested (exact multiples along a meridian and a parallel, and a
   non-multiple); a narrow spike seen at the data's spacing and missed at a coarser one;
-  and the viewshed's longitude spacing correcting for latitude.
+  the viewshed's longitude spacing correcting for latitude; and the shared curvature-drop,
+  sight-line and Fresnel-radius formulas against hand-worked values.
 - **Datums**: an ellipsoidal↔orthometric round trip with a known undulation; the same
   line of sight given as above-ground, orthometric and ellipsoidal heights producing
   the identical blocked-by-15-m answer; rejection of an ellipsoidal height without an
@@ -408,7 +562,10 @@ terrain, decides every answer.
   change made to the buffer after construction; a 2×2 `.hgt` written with a real
   void sentinel and read back through `RealElevationSampler`; tile files whose size
   isn't a whole square of posts (empty, one post, a post short, an odd byte, a post
-  too many) refused rather than read past their end; and the in-place profile
+  too many) refused rather than read past their end; a tile's own facts (posts per
+  side, void count, south-west corner) reported for a file whose name holds a non-ASCII
+  character, and reported as zero for a file that didn't load; one loaded tile answering in the other
+  interpolation mode exactly as a fresh load in that mode would; and the in-place profile
   overload reusing a caller-owned buffer without growing it.
 - **Command line**: the number parser behind every CLI argument accepting real
   numbers and refusing text, trailing characters, `nan`, `inf` and out-of-range

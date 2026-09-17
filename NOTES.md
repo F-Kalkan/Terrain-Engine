@@ -195,3 +195,100 @@ down, none of them a wrong answer and all of them worse than one.
 What these share is that none of the tests asked. Every test fed the code inputs
 shaped the way the code expected, which checks the arithmetic and says nothing about
 what happens on the first input shaped otherwise.
+
+## The DLL boundary
+
+The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called
+from .NET. Everything about that boundary follows from two facts: nothing C++-specific
+survives the crossing, and the caller is a program someone is clicking around in, so no
+input may take it down.
+
+- **Plain C, nothing else.** The header is `extern "C"`: `int32_t`, `double`, UTF-16 and
+  UTF-8 strings, and structs of fixed-size fields. Padding is spelled out as `reserved`
+  fields and the structs are ordered so no hidden padding appears, which lets .NET's
+  sequential layout map them field for field. Booleans are `int32_t`, never `bool`, whose
+  size C and .NET don't agree on.
+- **A tile is a number, not a pointer.** A pointer handed to .NET can't be checked: a
+  stale or invented one reads freed memory. Handles are keys into a table instead, never
+  reused, so a closed, zero or made-up handle is simply not found and comes back as
+  `TE_ERROR_INVALID_HANDLE`. The table holds shared pointers, so closing a tile while a
+  viewshed is still running on it lets that run finish before the tile is freed.
+- **Failures are a code and a sentence.** Every function returns a result code; the
+  matching message is kept per thread and says in plain English what is allowed ("The
+  spacing must be a number greater than 0 m."), because the app shows it as it is. Every
+  exported body runs inside one catch-all, so neither `std::bad_alloc` nor anything else
+  escapes into .NET, where an unwinding C++ exception ends the process.
+- **Validation lives at the boundary, not in the engine.** The engine's behaviour doesn't
+  change in this work, so the DLL refuses what the engine was never meant to see: a
+  spacing, radius or `k` at or below zero, a point outside the open tile, a viewshed
+  within 0.1° of a pole (where `cos(latitude)` sends the column step to infinity), and
+  sizes that would exhaust memory (a million path samples, a 4001-cell-wide grid). A
+  missing, empty, folder-shaped or cut-short `.hgt` is told apart in the message, never
+  reported as a tile of voids.
+- **Who frees what is never in doubt.** Strings the DLL hands out are static or per
+  thread and must not be freed. Arrays the DLL hands out are allocated with `malloc` and
+  released with `te_free`, never by the caller's allocator: the DLL links the C runtime
+  statically, so its heap is its own.
+- **One call per path.** Profile, line of sight and Fresnel clearance come from a single
+  `te_analyze_path` over one profile, with every sample carrying the terrain, the
+  curvature-corrected terrain, the sight line and the Fresnel radius. The app draws its
+  chart from those numbers and computes none of its own, so the chart and the verdict
+  can't drift apart. To make that possible the engine's curvature, sight-line and Fresnel
+  formulas moved into named functions that the engine itself now calls too -- one
+  implementation, with the CLI's output byte-for-byte unchanged.
+- **Metres in, degrees reported back.** People think in metres; the engine samples in
+  degrees. The DLL converts, and returns the degree spacing it used so any query made in
+  the app can be repeated exactly with `TerrainEngine.exe`.
+- **Progress without threads in the DLL.** A viewshed runs on whatever thread calls it,
+  reporting progress through a C callback on that same thread; the app runs it off the
+  UI thread and marshals the reports back. Stopping is the callback's return value. The
+  engine gained an optional `ViewshedProgress` parameter for this, defaulting to nothing,
+  so every existing caller runs exactly as before.
+- **Both interpolation modes, one open file.** A sampler's interpolation mode is fixed at
+  construction, and changing it on a shared sampler would break its thread-safety. A tile
+  therefore holds one sampler per mode, the second copied from the first in memory -- twice
+  the tile's size (about 52 MB for a 1-arcsecond tile) in exchange for no locking and no
+  second read of the file.
+- **No runtime to install.** The DLL is built with `/MT`, so its only dependency is
+  `KERNEL32.dll`: a release runs on a clean Windows machine without the Visual C++
+  Redistributable.
+
+## TerrainBench, the app on top of it
+
+- **Its own folder.** The .NET solution lives in `app/`, not beside the C++ projects:
+  `Directory.Build.props` is picked up by every MSBuild project under it, `.vcxproj` files
+  included, and the app's settings have no business in the engine's build.
+- **Where "no geometry" draws its line.** The rule is that the app computes no terrain
+  geometry, and the tempting cases are the small ones. The map places the tile's square
+  degree on screen and converts a pixel to a latitude and longitude linearly -- laying out a
+  picture -- but its proportions come from the post spacings the DLL reports, and the scale
+  bar's metres from a great-circle distance the DLL computes. The chart plots, and never
+  derives, the curvature-corrected terrain, the sight line and the Fresnel radius: they
+  arrive per sample from `te_analyze_path`. Metres become degrees inside the DLL, which also
+  returns the degrees it used.
+- **Numbers never pick up a decimal comma.** The first probe of the DLL from .NET, on a
+  Turkish Windows, printed the spacing as `0,0002697964817756191`, and the CLI rightly
+  refused it. Every number the app writes -- copied results, CSV, the command line it
+  offers -- is formatted invariantly, and a test runs that code under `tr-TR`. Typing still
+  accepts either form, since nobody should need to know which one is expected.
+- **k typed as 4/3.** `1.3333333333333333` is what the engine's default really is, and it is
+  unreadable. Fields accept a simple fraction and read it exactly, so the default shows as
+  `4/3` and is still the same double the CLI uses.
+- **Comparing with the previous run.** The task asks that a very large `k` visibly change a
+  30 km viewshed. Measured on the sample tile, it doesn't, much: with a 2 m observer, 8,583
+  of 4,000,000 cells change (0.21%); even at 300 m it is 1.87%. Drawn at map size, picking one
+  cell per screen pixel, scattered changes like that simply vanish. Two changes fix it
+  without touching the engine: the viewshed can be compared with the previous run, marking
+  every changed cell and counting them, and an overlay larger than the screen is averaged
+  down rather than sampled, so a lone changed cell still tints its pixel.
+- **Viewsheds off the window's thread.** A run goes to a worker with `Task.Run`; the DLL's
+  progress callback reports through a `Progress<double>` created on the UI thread, and
+  Cancel sets a token the callback turns into "stop". A headless test starts a naive 30 km
+  run, waits for progress, switches tabs while it runs, and cancels it.
+- **Tests against the real thing.** The interop tests write the engine's hand-checkable
+  cases out as `.hgt` tiles, because the DLL only reads tiles, and check one query against
+  `TerrainEngine.exe`'s own output. The window tests run the real DLL too; only dialogs, the
+  clipboard and the settings file are faked.
+- **Pinned build image.** CI and releases run on `windows-2025` rather than
+  `windows-latest`, so a runner image update can't swap the Visual C++ toolset under a
+  release. Actions are pinned to commit SHAs.
