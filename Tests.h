@@ -1789,7 +1789,7 @@ void TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive()
     // at 0 m and 30 m nothing east of the wall can be seen, so there is no boundary in
     // the open field and the two must agree on every cell. At 120 m a target clears the
     // wall out to about 225 m east, so the visible region ends in the open field -- and
-    // there, as for the ridgelines README's fast/naive section explains, the fast
+    // there, as docs/ENGINE.md's fast/naive section explains for ridgelines, the fast
     // algorithm's rays sample a cell off its centre and may answer the other way. Every
     // disagreement must lie on that boundary: a cell with a neighbour naive answers
     // differently. One anywhere else fails the test.

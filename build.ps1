@@ -135,9 +135,12 @@ if (-not $SkipTests) {
 if ($Zip -or $Installer) {
     Write-Step 'Publishing TerrainBench, self-contained win-x64'
     if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
+    # In an array, like $versionArgs: written bare, PowerShell 7 reads -p: as a parameter of
+    # Invoke-Dotnet and passes on only what follows it, which dotnet takes for a second project.
+    $publishArgs = @('-p:PublishSingleFile=false', '-p:DebugType=none')
     Invoke-Checked 'publish' {
         Invoke-Dotnet publish (Join-Path $root 'app/src/TerrainBench/TerrainBench.csproj') -c Release -r win-x64 --self-contained true `
-            -p:PublishSingleFile=false -p:DebugType=none @versionArgs -o $publishDir
+            @publishArgs @versionArgs -o $publishDir
     }
 
     foreach ($required in 'TerrainBench.exe', 'TerrainEngineApi.dll', 'Samples/N36W112.hgt') {

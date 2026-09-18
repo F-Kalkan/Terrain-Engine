@@ -137,7 +137,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 
 // Complexity: O(gridRows + gridCols) rays cast from the boundary inward, each
 // O(samples per profile) -- far below naive's O(gridRows * gridCols * samples),
-// at the cost of being an approximation (see README's stated fast/naive
+// at the cost of being an approximation (see docs/ENGINE.md's stated fast/naive
 // tolerance) rather than an exact per-cell answer.
 //
 // Threading position: deliberately serial, not order-independent -- and this is a

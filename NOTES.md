@@ -17,8 +17,9 @@
   signatures** (`ComputeLineOfSight`, `ComputeViewshedNaive`, `ComputeViewshedFast`)
   and re-threaded through every call site, including the CLI's argument parsing. It was
   always clear that someone would want to set it, and that should have been read as
-  "expose it all the way to the CLI," not just "make it a function default." Doing it from the first line would have cost nothing; doing it after the
-  fact touched code in four files.
+  "expose it all the way to the CLI," not just "make it a function default." Doing it
+  from the first line would have cost nothing; doing it after the fact touched code in
+  four files.
 
 - **`assert()` is a silent no-op once `NDEBUG` is defined** (i.e. in every Release
   build). All ten hand-checkable tests were written with `assert(condition);` followed
@@ -52,7 +53,7 @@ The mismatch is inherent to "assign by nearest ray" and only goes away by comput
 exact per-cell direction, which is the naive algorithm by definition.
 
 A third change moved the ratio again, this time for an unrelated reason: fixing the
-viewshed grid's longitude spacing (see `README.md`, "Viewshed grid shape") so a
+viewshed grid's longitude spacing (see `docs/ENGINE.md`, "Viewshed grid shape") so a
 "30 km radius" grid is a real-world circle instead of an ellipse also changed the real
 spacing between the fast algorithm's boundary rays. The ratio went from 3.58% to
 4.65% — still under the 5% tolerance, but the fix wasn't chosen to improve or preserve
@@ -182,8 +183,8 @@ down, none of them a wrong answer and all of them worse than one.
 - **A grid with no cells.** Both viewsheds set the observer's own cell unconditionally,
   so a zero-sized grid wrote into an empty result, and a negative size turned into an
   enormous one on its way into `std::vector::resize`, which throws — contradicting the
-  README's claim that nothing throws across the library boundary. Such a grid now comes
-  back empty.
+  API contract's claim (docs/ENGINE.md) that nothing throws across the library
+  boundary. Such a grid now comes back empty.
 - **A word where a number belongs.** The CLI parsed with `std::stod`/`std::stoi`, which
   throw; nothing caught them. Every argument now goes through a parser that returns
   nothing instead of throwing, and the CLI names the argument it couldn't use. The batch
