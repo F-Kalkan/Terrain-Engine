@@ -1,8 +1,9 @@
 name: CI
 
-# Every push to a branch and every pull request builds the engine, the CLI, the DLL and the app, and
-# runs the engine's test executable and the app's tests. It publishes nothing: a broken commit is red
-# here before anyone tags it. Tags are the release workflow's business.
+# Every push to a branch and every pull request builds the engine, the CLI, the DLL and the app, runs
+# the engine's test executable and the app's tests, and packs the zip and the installer, so a change
+# that breaks packaging is caught too. It publishes nothing: a broken commit is red here before anyone
+# tags it. Tags are the release workflow's business.
 
 on:
   push:
@@ -42,8 +43,8 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('app/**/*.csproj', 'app/**/*.props') }}
           restore-keys: nuget-${{ runner.os }}-
 
-      - name: Build and test
+      - name: Build, test and pack
         shell: pwsh
         env:
           COMMIT: ${{ github.sha }}
-        run: ./build.ps1 -Commit $env:COMMIT
+        run: ./build.ps1 -Commit $env:COMMIT -Zip -Installer

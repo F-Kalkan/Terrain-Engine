@@ -251,6 +251,7 @@ typedef struct te_viewshed_query
     double refraction_k;       // > 0
     int32_t interpolation;     // TE_INTERPOLATION_*
     int32_t algorithm;         // TE_ALGORITHM_*
+    double target_height_above_ground_m;  // each cell asks about a target this high above its ground; 0 = the ground itself
 } te_viewshed_query;
 
 typedef struct te_viewshed_grid

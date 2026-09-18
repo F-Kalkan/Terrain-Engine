@@ -1731,3 +1731,147 @@ void TestSharedPathGeometryMatchesHandCalculation()
         && std::abs(FirstFresnelRadiusM(WavelengthM(2.4e9), 5000.0, 5000.0, 10000.0) - 17.6716) < 1e-3,
         "TestSharedPathGeometryMatchesHandCalculation");
 }
+// The wall scene of test 7: 21x21 cells of 30 m on flat ground at 0 m, with a 50 m wall
+// running north-south three cells east of the observer.
+inline RasterBlockElevationSampler MakeWallScene(GeoPoint observer, double spacingDeg, int size, int wallCol)
+{
+    ElevationCells cells = MakeFlatCells(size, 0.0);
+    for (int row = 0; row < size; row++)
+    {
+        cells[row][wallCol] = 50.0;
+    }
+    return MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+}
+
+//TEST 51
+void TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight()
+{
+    // Straight east of a 2 m observer, the wall stands 90 m out and the cell being asked
+    // about 180 m out, all on 0 m ground. The sight line to a target of height h there
+    // passes the wall at (2 + h) / 2, so it clears the 50 m wall once h reaches 98 m --
+    // plus the fraction of a millimetre the Earth's curvature adds to the wall at 90 m.
+    // Both algorithms must hide the cell at 97.9 m and show it at 98.1 m, and at the
+    // default target height of 0 m (the ground itself) hide it as they always have.
+    const int size = 21;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    RasterBlockElevationSampler scene = MakeWallScene(observer, spacingDeg, size, center + 3);
+    const int cellCol = center + 6;
+
+    auto answer = [&](bool fast, double targetHeightM)
+    {
+        ViewshedResult result = fast
+            ? ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, scene, 4.0 / 3.0, nullptr, Agl(targetHeightM))
+            : ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, scene, 4.0 / 3.0, nullptr, Agl(targetHeightM));
+        return result.visible[center][cellCol];
+    };
+
+    bool naiveRight = answer(false, 0.0) == CellVisibility::NotVisible
+        && answer(false, 97.9) == CellVisibility::NotVisible
+        && answer(false, 98.1) == CellVisibility::Visible;
+    bool fastRight = answer(true, 0.0) == CellVisibility::NotVisible
+        && answer(true, 97.9) == CellVisibility::NotVisible
+        && answer(true, 98.1) == CellVisibility::Visible;
+
+    Expect(naiveRight && fastRight, "TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight");
+}
+
+//TEST 52
+void TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive()
+{
+    // A taller target can see over more terrain, never less, and it never raises the
+    // horizon for the cells behind it: every cell visible at a lower target height stays
+    // visible at a higher one, and more cells become visible, in both algorithms. An
+    // explicit 0 m above ground is the default, cell for cell.
+    //
+    // Fast against naive, off the wall's column (for the reason test 7 leaves it out):
+    // at 0 m and 30 m nothing east of the wall can be seen, so there is no boundary in
+    // the open field and the two must agree on every cell. At 120 m a target clears the
+    // wall out to about 225 m east, so the visible region ends in the open field -- and
+    // there, as for the ridgelines README's fast/naive section explains, the fast
+    // algorithm's rays sample a cell off its centre and may answer the other way. Every
+    // disagreement must lie on that boundary: a cell with a neighbour naive answers
+    // differently. One anywhere else fails the test.
+    const int size = 21;
+    const int center = size / 2;
+    const int wallCol = center + 3;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    RasterBlockElevationSampler scene = MakeWallScene(observer, spacingDeg, size, wallCol);
+
+    const double heightsM[] = { 0.0, 30.0, 120.0 };
+    ViewshedResult naive[3], fast[3];
+    for (int i = 0; i < 3; i++)
+    {
+        naive[i] = ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, scene, 4.0 / 3.0, nullptr, Agl(heightsM[i]));
+        fast[i] = ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, scene, 4.0 / 3.0, nullptr, Agl(heightsM[i]));
+    }
+
+    auto onNaiveBoundary = [&](const ViewshedResult& result, int row, int col)
+    {
+        const int steps[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
+        for (const auto& step : steps)
+        {
+            int r = row + step[0], c = col + step[1];
+            if (r >= 0 && r < size && c >= 0 && c < size && result.visible[r][c] != result.visible[row][col]) return true;
+        }
+        return false;
+    };
+
+    bool onlyReveals = true;
+    int mismatchesAtLowTargets = 0;
+    int mismatchesOffTheBoundary = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        for (int row = 0; row < size; row++)
+        {
+            for (int col = 0; col < size; col++)
+            {
+                if (col != wallCol && naive[i].visible[row][col] != fast[i].visible[row][col])
+                {
+                    if (i < 2) mismatchesAtLowTargets++;
+                    else if (!onNaiveBoundary(naive[i], row, col)) mismatchesOffTheBoundary++;
+                }
+                if (i == 0) continue;
+                for (const ViewshedResult* results : { naive, fast })
+                {
+                    if (results[i - 1].visible[row][col] == CellVisibility::Visible && results[i].visible[row][col] != CellVisibility::Visible) onlyReveals = false;
+                }
+            }
+        }
+    }
+
+    bool moreEachTime = CountCells(naive[1], CellVisibility::Visible) > CountCells(naive[0], CellVisibility::Visible)
+        && CountCells(naive[2], CellVisibility::Visible) > CountCells(naive[1], CellVisibility::Visible)
+        && CountCells(fast[1], CellVisibility::Visible) > CountCells(fast[0], CellVisibility::Visible)
+        && CountCells(fast[2], CellVisibility::Visible) > CountCells(fast[1], CellVisibility::Visible);
+
+    bool zeroIsTheDefault = ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, scene).visible == naive[0].visible
+        && ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, scene).visible == fast[0].visible;
+
+    Expect(onlyReveals && moreEachTime && mismatchesAtLowTargets == 0 && mismatchesOffTheBoundary == 0 && zeroIsTheDefault,
+        "TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive");
+}
+
+//TEST 53
+void TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown()
+{
+    // A target height above the ellipsoid, with no geoid undulation to put it on the
+    // terrain's mean-sea-level datum, can't be compared with the terrain: every cell but
+    // the observer's own is Degraded, the same in both algorithms -- never guessed.
+    const int size = 7;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    RasterBlockElevationSampler ground = MakeViewshedAlignedRaster(MakeFlatCells(size, 100.0), observer, spacingDeg);
+    DatumHeight unusable{ 10.0, VerticalDatum::EllipsoidalHae };
+
+    ViewshedResult naive = ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, ground, 4.0 / 3.0, nullptr, unusable);
+    ViewshedResult fast = ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, ground, 4.0 / 3.0, nullptr, unusable);
+
+    Expect(CountCells(naive, CellVisibility::Degraded) == size * size - 1
+        && naive.visible[center][center] == CellVisibility::Visible
+        && fast.visible == naive.visible,
+        "TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown");
+}

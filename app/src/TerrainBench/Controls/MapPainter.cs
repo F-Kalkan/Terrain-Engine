@@ -109,30 +109,39 @@ public static class MapPainter
         // overlay is averaged instead, and those cells still tint the pixels they fall in.
         var destination = new Rect(topLeft, bottomRight);
         var mode = destination.Width < overlay.PixelSize.Width ? BitmapInterpolationMode.HighQuality : BitmapInterpolationMode.None;
-        // Not clipped to the tile: cells the engine answered beyond its edge (no confident answer, for want of data)
-        // are part of the result and must show, not be cut away with the terrain.
-        using (context.PushClip(new Rect(topLeft, bottomRight).Union(new Rect(centre.X - rx, centre.Y - ry, rx * 2, ry * 2)).Inflate(4)))
+        // Drawn where the disc and the tile overlap. Past the tile's edge there is no terrain to show and
+        // the engine answers every cell there with "no confident answer"; the legend counts those cells
+        // and says how many lie beyond the edge, so nothing is hidden by leaving them off the map.
+        var shown = new CombinedGeometry(GeometryCombineMode.Intersect, disc, new RectangleGeometry(frame.Area));
+        using (context.PushGeometryClip(shown))
+        using (context.PushOpacity(Math.Clamp(opacity, 0, 1)))
+        using (context.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = mode, EdgeMode = EdgeMode.Antialias }))
         {
-            using (context.PushGeometryClip(disc))
-            using (context.PushOpacity(Math.Clamp(opacity, 0, 1)))
-            using (context.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = mode, EdgeMode = EdgeMode.Antialias }))
-            {
-                context.DrawImage(overlay, new Rect(overlay.Size), destination);
-            }
-
-            context.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(110, 0, 0, 0)), 3), disc);
-            context.DrawGeometry(null, new Pen(Brushes.White, 1.5, new DashStyle([5, 3], 0)), disc);
-
-            if (radiusLabel is not null)
-            {
-                var text = new FormattedText(radiusLabel, Format.Invariant, FlowDirection.LeftToRight, new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold), 11, Brushes.White);
-                // On the ring, up and to the right of the observer.
-                var at = new Point(centre.X + rx * Math.Cos(Math.PI / 4), centre.Y - ry * Math.Sin(Math.PI / 4));
-                var box = new Rect(at.X - text.Width / 2 - 7, at.Y - text.Height / 2 - 2, text.Width + 14, text.Height + 4);
-                context.FillRectangle(new SolidColorBrush(Color.Parse("#D90F2438")), box, (float)(box.Height / 2));
-                context.DrawText(text, new Point(box.X + 7, box.Y + 2));
-            }
+            context.DrawImage(overlay, new Rect(overlay.Size), destination);
         }
+
+        context.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(110, 0, 0, 0)), 3), shown);
+        context.DrawGeometry(null, new Pen(Brushes.White, 1.5, new DashStyle([5, 3], 0)), shown);
+
+        if (radiusLabel is not null && RadiusLabelPoint(frame.Area, centre, rx, ry) is { } at)
+        {
+            var text = new FormattedText(radiusLabel, Format.Invariant, FlowDirection.LeftToRight, new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold), 11, Brushes.White);
+            var box = new Rect(at.X - text.Width / 2 - 7, at.Y - text.Height / 2 - 2, text.Width + 14, text.Height + 4);
+            context.FillRectangle(new SolidColorBrush(Color.Parse("#D90F2438")), box, (float)(box.Height / 2));
+            context.DrawText(text, new Point(box.X + 7, box.Y + 2));
+        }
+    }
+
+    /// <summary>A point on the ring inside the tile for the radius label: up and to the right when it fits, else the first angle that does.</summary>
+    private static Point? RadiusLabelPoint(Rect tile, Point centre, double rx, double ry)
+    {
+        foreach (double degrees in new[] { 45.0, 135.0, 315.0, 225.0, 90.0, 0.0, 180.0, 270.0, 20.0, 70.0, 110.0, 160.0, 200.0, 250.0, 290.0, 340.0 })
+        {
+            double radians = degrees * Math.PI / 180;
+            var at = new Point(centre.X + rx * Math.Cos(radians), centre.Y - ry * Math.Sin(radians));
+            if (tile.Deflate(12).Contains(at)) return at;
+        }
+        return null;
     }
 
     private static WriteableBitmap ToBitmap(byte[] bgra, int width, int height)

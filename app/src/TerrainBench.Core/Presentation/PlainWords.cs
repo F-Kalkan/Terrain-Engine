@@ -49,6 +49,9 @@ public static class PlainWords
 
     public const string RadiusExplanation = "How far from the observer the viewshed reaches.";
 
+    public const string TargetHeightExplanation =
+        "Every cell is asked whether something this high above its ground can be seen: 0 for the ground itself, about 1.8 for a person standing there, a mast's height for a radio link. The terrain in between stays as it is.";
+
     public const string FrequencyExplanation =
         "Enter a radio frequency to also check the first Fresnel zone: the space around the sight line a radio link needs kept clear. Leave it empty to skip.";
 

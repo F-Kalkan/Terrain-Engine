@@ -146,6 +146,7 @@ internal static class NativeMethods
         public double RefractionK;
         public int Interpolation;
         public int Algorithm;
+        public double TargetHeightAboveGroundM;
     }
 
     [StructLayout(LayoutKind.Sequential)]

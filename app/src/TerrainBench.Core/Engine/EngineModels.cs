@@ -158,7 +158,8 @@ public sealed record ViewshedQuery(
     double SpacingM,
     double RefractionK,
     Interpolation Interpolation,
-    ViewshedAlgorithm Algorithm);
+    ViewshedAlgorithm Algorithm,
+    double TargetHeightAboveGroundM = 0);
 
 /// <summary>
 /// A viewshed grid: <see cref="Cells"/> is row-major with row 0 the southernmost row, and cell

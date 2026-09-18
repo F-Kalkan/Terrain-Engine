@@ -4,8 +4,8 @@ name: Release
 #
 #   git tag v1.0.0 && git push origin v1.0.0
 #
-# The tagged commit is built from source, tested exactly as CI tests it, packed as a portable zip and
-# published as a GitHub release. Any failed step -- a non-zero exit from the engine's test executable,
+# The tagged commit is built from source, tested exactly as CI tests it, packed as a portable zip and an MSI
+# installer, and published as a GitHub release. Any failed step -- a non-zero exit from the engine's test executable,
 # a failing app test, anything else -- stops the job before the publish step, so nothing is released.
 
 on:
@@ -52,28 +52,40 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           COMMIT: ${{ github.sha }}
-        run: ./build.ps1 -Version $env:VERSION -Commit $env:COMMIT -Zip
+        run: ./build.ps1 -Version $env:VERSION -Commit $env:COMMIT -Zip -Installer
 
       - name: Publish the GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: TerrainBench ${{ steps.version.outputs.version }}
           draft: false
-          files: artifacts/TerrainBench-${{ steps.version.outputs.version }}-win-x64-portable.zip
+          files: |
+            artifacts/TerrainBench-${{ steps.version.outputs.version }}-win-x64.msi
+            artifacts/TerrainBench-${{ steps.version.outputs.version }}-win-x64-portable.zip
           body: |
             Built and tested from commit ${{ github.sha }}.
 
-            ## Run it
+            ## Install it
+
+            1. Download **TerrainBench-${{ steps.version.outputs.version }}-win-x64.msi** and run it.
+            2. It installs for your user only, under `%LOCALAPPDATA%\Programs\TerrainBench`, asks for no
+               administrator rights, and adds **TerrainBench** to the Start menu (and to the desktop, if you tick
+               that box). The last page can start it. A newer version replaces an older one.
+            3. Remove it from **Settings > Apps > Installed apps**.
+
+            ## Or run it without installing
 
             1. Download **TerrainBench-${{ steps.version.outputs.version }}-win-x64-portable.zip** and unzip it anywhere.
-            2. Run **TerrainBench.exe**. Nothing needs installing: the .NET runtime and the engine's C runtime are inside.
-            3. On first start, choose **Open the Sample Tile** to load the bundled Grand Canyon tile.
+            2. Run **TerrainBench.exe**. The .NET runtime and the engine's C runtime are inside.
+
+            Both hold the same files. On first start, choose **Open the Sample Tile** to load the bundled
+            Grand Canyon tile.
 
             Windows x64 only (Windows 10 or 11).
 
             **SmartScreen.** The build isn't code signed, so Windows may show "Windows protected your PC" the
-            first time. Choose **More info**, then **Run anyway** -- or check the source at this commit and
-            build it yourself with `.\build.ps1 -Zip`.
+            first time, for the installer or the app. Choose **More info**, then **Run anyway** -- or check the
+            source at this commit and build it yourself with `.\build.ps1 -Zip -Installer`.
 
             The About page shows this version and the commit above. **Copy Results** puts the inputs, the
             outputs, the version and the commit on the clipboard, ready to paste into an issue.

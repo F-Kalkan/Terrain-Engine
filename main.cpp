@@ -241,10 +241,11 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        if (mode == "viewshed" && (argc == 10 || argc == 11 || argc == 12))
+        if (mode == "viewshed" && argc >= 10 && argc <= 13)
         {
             std::string hgtFile = argv[2];
             double swLat, swLon, obsLat, obsLon, spacing, height;
+            double targetHeight = 0.0;
             int gridSize = 0;
             double k = 4.0 / 3.0;
             if (!ReadNumberArg(argv, 3, "swLat", swLat) || !ReadNumberArg(argv, 4, "swLon", swLon)
@@ -252,12 +253,13 @@ int main(int argc, char* argv[])
                 || !ReadPositiveIntArg(argv, 7, "gridSize", gridSize)
                 || !ReadPositiveNumberArg(argv, 8, "spacing", spacing)
                 || !ReadNumberArg(argv, 9, "height", height)
-                || (argc >= 11 && !ReadPositiveNumberArg(argv, 10, "k", k)))
+                || (argc >= 11 && !ReadPositiveNumberArg(argv, 10, "k", k))
+                || (argc >= 13 && !ReadNumberArg(argv, 12, "targetHeight", targetHeight)))
             {
                 return 1;
             }
             InterpolationMode interp = InterpolationMode::Nearest;
-            if (argc == 12 && std::string(argv[11]) == "bilinear") interp = InterpolationMode::Bilinear;
+            if (argc >= 12 && std::string(argv[11]) == "bilinear") interp = InterpolationMode::Bilinear;
 
             RealElevationSampler sampler(hgtFile, swLat, swLon, interp);
             if (!sampler.IsLoaded())
@@ -269,7 +271,7 @@ int main(int argc, char* argv[])
             GeoPoint observer{ obsLat, obsLon };
             DatumHeight heightDatum{ height, VerticalDatum::HeightAboveGround };
 
-            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k);
+            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k, nullptr, DatumHeight{ targetHeight, VerticalDatum::HeightAboveGround });
             WriteViewshedPGM(result, "cli_viewshed_output.pgm");
 
             std::cout << "Viewshed written to cli_viewshed_output.pgm" << std::endl;
@@ -494,7 +496,7 @@ int main(int argc, char* argv[])
         std::cout << "  TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>" << std::endl;
         std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
-        std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear]" << std::endl;
+        std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]" << std::endl;
         std::cout << "  TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> <frequencyMHz> [k]" << std::endl;
         std::cout << "  TerrainEngine.exe batch <hgtFile> <swLat> <swLon> <queriesFile> [k]" << std::endl;
         return 1;
@@ -552,6 +554,9 @@ int main(int argc, char* argv[])
     TestViewshedProgressIsReportedAndCanCancel();
     TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad();
     TestSharedPathGeometryMatchesHandCalculation();
+    TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight();
+    TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive();
+    TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown();
 
     std::cout << "-------------------------" << std::endl;
 

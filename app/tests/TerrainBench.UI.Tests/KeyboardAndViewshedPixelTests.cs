@@ -100,7 +100,7 @@ public class KeyboardAndViewshedPixelTests
     }
 
     [AvaloniaFact]
-    public void No_confident_answer_beyond_the_tile_edge_is_painted_and_its_legend_entry_hides_it_at_once()
+    public void Cells_beyond_the_tile_edge_are_neither_drawn_nor_counted_and_a_legend_entry_hides_its_cells_at_once()
     {
         using var app = new Harness();
         app.Click(app.Find<Button>("SamplePromptButton"));
@@ -111,23 +111,37 @@ public class KeyboardAndViewshedPixelTests
         app.Settle();
         app.Click(app.Find<Button>("RunViewshedButton"));
         app.WaitUntil(() => app.ViewModel.Viewshed.HasResult && !app.ViewModel.Viewshed.IsRunning, TimeSpan.FromSeconds(60), "the viewshed");
-        Assert.NotEqual("0", app.ViewModel.Viewshed.Legend.Single(r => r.Layer == (int)CellState.Degraded).Count);
 
+        // The legend counts only what the map draws: every cell with no confident answer lies past the edge
+        // here, so it counts none, and the summary says part of the circle lies beyond the tile.
+        Assert.Equal("0", app.ViewModel.Viewshed.Legend.Single(r => r.Layer == (int)CellState.Degraded).Count);
+        Assert.EndsWith(ViewshedViewModel.BeyondTileSentence, app.ViewModel.Viewshed.Summary);
+
+        // The map leaves them off: beyond the edge is the window's own background.
         var map = app.Find<MapView>("Map");
         var beyondEdge = map.TranslatePoint(map.Frame!.Value.ToScreen(36.5, -112.12), app.Window)!.Value;
+        var outside = PixelAt(app, beyondEdge);
+        Assert.False(IsPurple(outside), $"Expected nothing drawn beyond the tile's edge, got {outside}.");
 
-        var shown = PixelAt(app, beyondEdge);
-        Assert.True(IsPurple(shown), $"Expected purple beyond the tile's edge, got {shown}.");
-
+        // Inside the tile, hiding the cells out of sight takes their shading off at once.
+        var insideTile = map.TranslatePoint(map.Frame!.Value.ToScreen(36.35, -111.85), app.Window)!.Value;
+        Assert.Equal(CellState.NotVisible, CellStateAt(app.ViewModel.Viewshed.Map!, 36.35, -111.85));
+        var shaded = PixelAt(app, insideTile);
         var legendButton = app.Find<ItemsControl>("ViewshedLegend").GetVisualDescendants().OfType<Button>()
-            .First(b => b.DataContext is LegendRow { Layer: (int)CellState.Degraded });
+            .First(b => b.DataContext is LegendRow { Layer: (int)CellState.NotVisible });
         app.Click(legendButton);
-
-        var hidden = PixelAt(app, beyondEdge);
-        Assert.False(IsPurple(hidden), $"Expected the purple gone once hidden, got {hidden}.");
+        var bare = PixelAt(app, insideTile);
+        Assert.True(bare.R + bare.G + bare.B > shaded.R + shaded.G + shaded.B + 30, $"Expected the ground brighter once its shading is hidden: {shaded} then {bare}.");
     }
 
     private static bool IsPurple((byte R, byte G, byte B) pixel) => pixel.R > pixel.G + 40 && pixel.B > pixel.G + 40;
+
+    private static CellState CellStateAt(ViewshedMap map, double latitudeDeg, double longitudeDeg)
+    {
+        int row = (int)Math.Round((latitudeDeg - map.SouthWestCellLatitudeDeg) / map.SpacingDeg);
+        int col = (int)Math.Round((longitudeDeg - map.SouthWestCellLongitudeDeg) / map.ColStepDeg);
+        return map.At(row, col);
+    }
 
     private static void Press(Harness app, Key key, RawInputModifiers modifiers, PhysicalKey physical)
     {

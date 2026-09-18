@@ -1,0 +1,123 @@
+<!--
+  The TerrainBench installer: the same self-contained app the portable zip holds, installed for the
+  current user only, under %LOCALAPPDATA%\Programs\TerrainBench, with no administrator rights
+  asked, with a Start menu entry, and removed again from Settings > Apps. A newer version
+  replaces an older one in place.
+
+  The wizard: Welcome, then Options (a desktop shortcut, off unless ticked), Ready to Install,
+  progress, and a Finish page that can start TerrainBench (ticked by default). No licence page
+  and no folder choice: the per-user Programs folder is where such an install belongs.
+
+  Built by build.ps1 -Installer with WiX Toolset 5 (a local dotnet tool, .config/dotnet-tools.json)
+  and its UI and Util extensions:
+    dotnet wix build installer/TerrainBench.wxs -arch x64 -ext WixToolset.UI.wixext/5.0.2 ...
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="TerrainBench"
+           Manufacturer="F-Kalkan"
+           Version="$(Version)"
+           UpgradeCode="BCCA003F-3C81-4EED-9A86-2028256BFCAA"
+           Scope="perUser"
+           Language="1033">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of TerrainBench is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="TerrainBench.ico" SourceFile="$(IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="TerrainBench.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/F-Kalkan/Terrain-Engine" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="TerrainBench">
+          <!-- Every file the self-contained publish produced: the app, the .NET runtime, the engine DLL and the sample tile. -->
+          <Files Include="$(PublishDir)\**" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="TerrainBenchShortcut"
+                  Name="TerrainBench"
+                  Description="A desktop test bench for the terrain engine"
+                  Target="[INSTALLFOLDER]TerrainBench.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="TerrainBench.ico" />
+        <!-- A per-user shortcut needs a per-user key path for Windows Installer to track it. -->
+        <RegistryValue Root="HKCU" Key="Software\TerrainBench" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Installed only when the Options page's box is ticked. -->
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Condition="INSTALLDESKTOPSHORTCUT">
+        <Shortcut Id="TerrainBenchDesktopShortcut"
+                  Name="TerrainBench"
+                  Description="A desktop test bench for the terrain engine"
+                  Target="[INSTALLFOLDER]TerrainBench.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="TerrainBench.ico" />
+        <RegistryValue Root="HKCU" Key="Software\TerrainBench" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Finish page: "Launch TerrainBench", ticked by default, starts the installed app. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch TerrainBench" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <!-- Set once the install folder is known, in the wizard's own sequence, where the Finish page runs. -->
+    <SetProperty Id="WixShellExecTarget" Value="[INSTALLFOLDER]TerrainBench.exe" After="CostFinalize" Sequence="ui" />
+    <CustomAction Id="LaunchTerrainBench" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" />
+
+    <UI Id="TerrainBenchUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Dialog Id="OptionsDlg" Width="370" Height="270" Title="!(loc.WelcomeDlg_Title)">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Options" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose how TerrainBench is installed." />
+        <Control Id="DesktopShortcutCheckBox" Type="CheckBox" X="20" Y="60" Width="330" Height="18" Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1" Text="Add a shortcut to the desktop" />
+        <Control Id="StartMenuNote" Type="Text" X="20" Y="84" Width="330" Height="30" NoPrefix="yes" Text="A Start menu entry is always added. TerrainBench installs for you only and needs no administrator rights." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- A new install: Welcome, Options, Ready, progress, Finish. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="OptionsDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+      <Publish Dialog="OptionsDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="OptionsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="OptionsDlg" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Condition="Installed AND PATCH" />
+
+      <!-- Run again once installed: repair or remove. -->
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchTerrainBench" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+    </UI>
+    <UIRef Id="WixUI_Common" />
+  </Package>
+</Wix>

@@ -221,6 +221,7 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                 RefractionK = query.RefractionK,
                 Interpolation = (int)query.Interpolation,
                 Algorithm = (int)query.Algorithm,
+                TargetHeightAboveGroundM = query.TargetHeightAboveGroundM,
             };
 
             // An exception must never unwind into the DLL: anything thrown while reporting stops the run.

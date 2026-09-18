@@ -47,6 +47,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
         ObserverLatitude = new NumberField("vs-observer-lat", "Observer Latitude", "degrees", "36.5", InsideTile(true), shortLabel: "Latitude");
         ObserverLongitude = new NumberField("vs-observer-lon", "Observer Longitude", "degrees", "-111.5", InsideTile(false), shortLabel: "Longitude");
         ObserverHeight = new NumberField("vs-observer-height", "Observer Height", "m above ground", "2", Rules.HeightAboveGround("The observer"), hint: PlainWords.HeightExplanation, shortLabel: "Height");
+        TargetHeight = new NumberField("vs-target-height", "Target Height", "m above ground", "0", Rules.HeightAboveGround("The target"), hint: PlainWords.TargetHeightExplanation);
         RadiusKm = new NumberField("vs-radius", "Radius", "km", "30", Rules.Positive("The radius", 1000), hint: PlainWords.RadiusExplanation);
         Spacing = new NumberField("vs-spacing", "Cell Spacing", "m", "30", Rules.Positive("The spacing", 100000), hint: PlainWords.CellSpacingExplanation);
         RefractionK = new NumberField("vs-k", "Refraction Factor - k", "", "4/3", Rules.Positive("k"), hint: PlainWords.RefractionExplanation);
@@ -65,11 +66,12 @@ public sealed partial class ViewshedViewModel : ObservableObject
     public NumberField ObserverLatitude { get; }
     public NumberField ObserverLongitude { get; }
     public NumberField ObserverHeight { get; }
+    public NumberField TargetHeight { get; }
     public NumberField RadiusKm { get; }
     public NumberField Spacing { get; }
     public NumberField RefractionK { get; }
 
-    public IReadOnlyList<NumberField> Fields => [ObserverLatitude, ObserverLongitude, ObserverHeight, RadiusKm, Spacing, RefractionK];
+    public IReadOnlyList<NumberField> Fields => [ObserverLatitude, ObserverLongitude, ObserverHeight, TargetHeight, RadiusKm, Spacing, RefractionK];
 
     public IReadOnlyList<Interpolation> InterpolationChoices { get; } = [Interpolation.Nearest, Interpolation.Bilinear];
 
@@ -157,7 +159,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
         var query = new ViewshedQuery(
             ObserverLatitude.Value!.Value, ObserverLongitude.Value!.Value, ObserverHeight.Value!.Value,
-            RadiusKm.Value!.Value, Spacing.Value!.Value, RefractionK.Value!.Value, Interpolation, Algorithm);
+            RadiusKm.Value!.Value, Spacing.Value!.Value, RefractionK.Value!.Value, Interpolation, Algorithm, TargetHeight.Value!.Value);
 
         _cancellation = new CancellationTokenSource();
         var token = _cancellation.Token;
@@ -173,6 +175,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
                 if (!result.IsOk) { Fail(result.Error!); return; }
 
                 var description = Describe(query);
+                var (drawn, partlyBeyondTile) = DrawnCells(result.Value);
                 string summary = $"{PlainWords.Algorithm(query.Algorithm)} viewshed of {Format.Count(result.Value.Rows)} × {Format.Count(result.Value.Cols)} cells in {Format.Milliseconds(elapsed)}.";
                 bool[]? changed = null;
 
@@ -180,7 +183,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
                 {
                     if (_previous is { } previous && SameGrid(previous.Map, result.Value))
                     {
-                        (changed, int count) = Changes(previous.Map, result.Value);
+                        (changed, int count) = Changes(previous.Map, result.Value, drawn);
                         summary += " " + DescribeChange(previous.Settings, description, count);
                     }
                     else
@@ -191,8 +194,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
                     }
                 }
 
-                Show(result.Value, changed, "Changed Since the Previous Run", query);
-                Summary = summary;
+                Show(result.Value, changed, "Changed Since the Previous Run", query, drawn);
+                Summary = summary + (partlyBeyondTile ? BeyondTileSentence : "");
                 _previous = (result.Value, description);
                 return;
             }
@@ -202,10 +205,12 @@ public sealed partial class ViewshedViewModel : ObservableObject
             var (naive, naiveTime) = await RunOne(tile, query with { Algorithm = ViewshedAlgorithm.Naive }, "Naive Viewshed (2 of 2)", token);
             if (!naive.IsOk) { Fail(naive.Error!); return; }
 
-            var (disagree, compared, differing) = Disagreement(fast.Value, naive.Value);
-            Show(naive.Value, disagree, "Fast and Naive Disagree", query);
+            var (naiveDrawn, naivePartlyBeyondTile) = DrawnCells(naive.Value);
+            var (disagree, compared, differing) = Disagreement(fast.Value, naive.Value, naiveDrawn);
+            Show(naive.Value, disagree, "Fast and Naive Disagree", query, naiveDrawn);
             Summary = $"{Format.Count(differing)} of {Format.Count(compared)} cells disagree ({Format.Percent(compared == 0 ? 0 : (double)differing / compared)}), counting only cells both algorithms answered with confidence. " +
-                      $"Fast took {Format.Milliseconds(fastTime)}, naive {Format.Milliseconds(naiveTime)}. The map shows the naive result, with disagreements highlighted.";
+                      $"Fast took {Format.Milliseconds(fastTime)}, naive {Format.Milliseconds(naiveTime)}. The map shows the naive result, with disagreements highlighted." +
+                      (naivePartlyBeyondTile ? BeyondTileSentence : "");
             _previous = (naive.Value, Describe(query with { Algorithm = ViewshedAlgorithm.Naive }));
         }
         finally
@@ -250,6 +255,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
     {
         report.Section("Viewshed inputs")
             .Line("Observer", $"{ObserverLatitude.Text}, {ObserverLongitude.Text} degrees, {ObserverHeight.Text} m above ground")
+            .Line("Target height", TargetHeight.Text + " m above ground")
             .Line("Radius", RadiusKm.Text + " km")
             .Line("Cell spacing", Spacing.Text + " m")
             .Line("Refraction factor k", RefractionK.Text)
@@ -266,6 +272,10 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
         report.Line("Grid", $"{Map.Rows} x {Map.Cols} cells");
         foreach (var row in Legend) report.Line(row.Name, row.Count);
+        if (_engineCounts is { } all)
+        {
+            report.Line("Engine counts, whole grid", $"visible {Format.Count(all[(int)CellState.Visible])}, not visible {Format.Count(all[(int)CellState.NotVisible])}, no confident answer {Format.Count(all[(int)CellState.Degraded])}, not reached {Format.Count(all[(int)CellState.NotCovered])}");
+        }
         if (Summary is not null) report.Line("Summary", Summary);
     }
 
@@ -278,13 +288,13 @@ public sealed partial class ViewshedViewModel : ObservableObject
     }
 
     /// <summary>Cells where both algorithms answered with confidence and the answers differ.</summary>
-    public static (bool[] Mask, int Compared, int Differing) Disagreement(ViewshedMap a, ViewshedMap b)
+    public static (bool[] Mask, int Compared, int Differing) Disagreement(ViewshedMap a, ViewshedMap b, bool[]? counted = null)
     {
         var mask = new bool[a.Cells.Length];
         int compared = 0, differing = 0;
         for (int i = 0; i < mask.Length; i++)
         {
-            bool confident = IsConfident(a.Cells[i]) && IsConfident(b.Cells[i]);
+            bool confident = IsConfident(a.Cells[i]) && IsConfident(b.Cells[i]) && (counted is null || counted[i]);
             if (!confident) continue;
             compared++;
             if (a.Cells[i] != b.Cells[i])
@@ -297,13 +307,13 @@ public sealed partial class ViewshedViewModel : ObservableObject
     }
 
     /// <summary>Every cell whose state differs between two runs over the same grid.</summary>
-    public static (bool[] Mask, int Changed) Changes(ViewshedMap before, ViewshedMap after)
+    public static (bool[] Mask, int Changed) Changes(ViewshedMap before, ViewshedMap after, bool[]? counted = null)
     {
         var mask = new bool[after.Cells.Length];
         int changed = 0;
         for (int i = 0; i < mask.Length; i++)
         {
-            if (before.Cells[i] == after.Cells[i]) continue;
+            if (before.Cells[i] == after.Cells[i] || (counted is not null && !counted[i])) continue;
             mask[i] = true;
             changed++;
         }
@@ -320,11 +330,12 @@ public sealed partial class ViewshedViewModel : ObservableObject
     [
         ("k", RefractionK.Text.Trim()),
         ("height", Format.Number(query.ObserverHeightAboveGroundM) + " m"),
+        ("target height", Format.Number(query.TargetHeightAboveGroundM) + " m"),
         ("algorithm", PlainWords.Algorithm(query.Algorithm).ToLowerInvariant()),
         ("interpolation", PlainWords.Interpolation(query.Interpolation).ToLowerInvariant()),
     ];
 
-    /// <summary>"k: 4/3 → 1e12 changed 8,583 cells.", or that nothing was changed to change anything.</summary>
+    /// <summary>"k: 4/3 → 1e12 changed 8,135 cells.", or that nothing was changed to change anything.</summary>
     public static string DescribeChange(IReadOnlyList<(string Name, string Value)> before, IReadOnlyList<(string Name, string Value)> after, int changedCells)
     {
         var differences = before.Zip(after).Where(p => p.First.Value != p.Second.Value)
@@ -360,10 +371,51 @@ public sealed partial class ViewshedViewModel : ObservableObject
         Error = error.Kind == EngineErrorKind.Cancelled ? "Cancelled. The previous result was cleared; run again to compute a new one." : error.Message;
     }
 
-    private void Show(ViewshedMap map, bool[]? highlights, string highlightName, ViewshedQuery query)
+    /// <summary>
+    /// Which cells the map draws: inside the circle of the requested radius and on the open tile.
+    /// The engine lays a square grid out around the circle and answers every cell of it, past the
+    /// tile's edge too (with no confident answer, for want of data); the legend and the comparison
+    /// counts count only what the map shows, so the numbers match the picture.
+    /// </summary>
+    public (bool[] Drawn, bool PartlyBeyondTile) DrawnCells(ViewshedMap map)
+    {
+        var tile = _tile()?.Info;
+        var drawn = new bool[map.Cells.Length];
+        bool partlyBeyondTile = false;
+        double rowRadius = Math.Max(map.ObserverRow, map.Rows - 1 - map.ObserverRow) + 0.5;
+        double colRadius = Math.Max(map.ObserverCol, map.Cols - 1 - map.ObserverCol) + 0.5;
+        for (int row = 0; row < map.Rows; row++)
+        {
+            double latitude = map.SouthWestCellLatitudeDeg + row * map.SpacingDeg;
+            double dr = (row - map.ObserverRow) / rowRadius;
+            for (int col = 0; col < map.Cols; col++)
+            {
+                double dc = (col - map.ObserverCol) / colRadius;
+                if (dr * dr + dc * dc > 1) continue;
+                double longitude = map.SouthWestCellLongitudeDeg + col * map.ColStepDeg;
+                bool onTile = tile is null
+                    || (latitude >= tile.SouthWestLatitudeDeg && latitude <= tile.NorthEastLatitudeDeg
+                        && longitude >= tile.SouthWestLongitudeDeg && longitude <= tile.NorthEastLongitudeDeg);
+                if (onTile) drawn[row * map.Cols + col] = true;
+                else partlyBeyondTile = true;
+            }
+        }
+        return (drawn, partlyBeyondTile);
+    }
+
+    /// <summary>Said in the summary when part of the circle lies past the tile's edge, which the map leaves off.</summary>
+    public const string BeyondTileSentence = " Part of the circle lies beyond the tile, where there is no data; it isn't drawn or counted.";
+
+    private void Show(ViewshedMap map, bool[]? highlights, string highlightName, ViewshedQuery query, bool[] drawn)
     {
         int[] counts = new int[4];
-        foreach (var cell in map.Cells) counts[(int)cell]++;
+        int highlighted = 0;
+        for (int i = 0; i < map.Cells.Length; i++)
+        {
+            if (!drawn[i]) continue;
+            counts[(int)map.Cells[i]]++;
+            if (highlights is not null && highlights[i]) highlighted++;
+        }
 
         Legend.Clear();
         AddLegendRow("Visible", MapPixels.VisibleColour, counts[(int)CellState.Visible], (int)CellState.Visible);
@@ -372,8 +424,12 @@ public sealed partial class ViewshedViewModel : ObservableObject
         AddLegendRow("Not Reached", MapPixels.NotReachedColour, counts[(int)CellState.NotCovered], (int)CellState.NotCovered);
         if (highlights is not null)
         {
-            AddLegendRow(highlightName, MapPixels.DisagreementColour, highlights.Count(d => d), MapPixels.HighlightLayer);
+            AddLegendRow(highlightName, MapPixels.DisagreementColour, highlighted, MapPixels.HighlightLayer);
         }
+
+        // The engine's own counts, over its whole square grid, for the copied report.
+        _engineCounts = new int[4];
+        foreach (var cell in map.Cells) _engineCounts[(int)cell]++;
 
         RadiusLabel = Format.Number(query.RadiusKm) + " km";
         Highlights = highlights;
@@ -382,6 +438,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
         IsStale = false;
         Progress = 1;
     }
+
+    private int[]? _engineCounts;
 
     private void AddLegendRow(string name, Rgba colour, int count, int layer) =>
         Legend.Add(new LegendRow(name, colour, Format.Count(count), layer) { IsShown = !HiddenLayers[layer] });

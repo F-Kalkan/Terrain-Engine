@@ -385,6 +385,7 @@
                 <views:NumberFieldView DataContext="{Binding Viewshed.ObserverHeight}" />
 
                 <TextBlock Classes="heading" Text="Parameters" />
+                <views:NumberFieldView DataContext="{Binding Viewshed.TargetHeight}" />
                 <views:NumberFieldView DataContext="{Binding Viewshed.RadiusKm}" />
                 <views:NumberFieldView DataContext="{Binding Viewshed.Spacing}" />
                 <views:NumberFieldView DataContext="{Binding Viewshed.RefractionK}" />
@@ -455,7 +456,7 @@
                     </ItemsControl>
                   </Border>
                   <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
-                             Text="Click an entry to hide or show its cells. The counts cover the whole computed grid, a square around the circle, so they include its corners." />
+                             Text="Click an entry to hide or show its cells. Hiding one state leaves the others drawn, so its shape still shows: hide both, or set the opacity to 0, to see the bare terrain. The counts are the cells drawn on the map: inside the circle and on the tile." />
 
                   <StackPanel Orientation="Horizontal" Margin="0,10,0,3">
                     <TextBlock Text="Layer Opacity" FontWeight="SemiBold" VerticalAlignment="Center" />

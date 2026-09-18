@@ -97,6 +97,42 @@ public class KnownAnswerTests
     }
 
     [Fact]
+    public void A_viewshed_with_a_target_height_on_the_sample_tile_matches_the_command_line_tool_cell_for_cell()
+    {
+        // The same fast viewshed -- a 10 m target, so the new parameter is really in play --
+        // through the DLL and through TerrainEngine.exe, which writes it as a PGM: 255 visible,
+        // 0 hidden, 128 no confident answer. Every cell must agree.
+        Assert.True(File.Exists(RepositoryFiles.Cli), $"Build the engine first: {RepositoryFiles.Cli} is missing.");
+
+        using var tile = Engine.OpenTile(RepositoryFiles.SampleTile, 36, -112).Value;
+        var ground = tile.Viewshed(new ViewshedQuery(36.3, -111.6, 2, 3, 30, 4.0 / 3.0, Interpolation.Nearest, ViewshedAlgorithm.Fast), null, default).Value;
+        var map = tile.Viewshed(new ViewshedQuery(36.3, -111.6, 2, 3, 30, 4.0 / 3.0, Interpolation.Nearest, ViewshedAlgorithm.Fast, TargetHeightAboveGroundM: 10), null, default).Value;
+
+        var folder = Path.Combine(Path.GetTempPath(), $"terrainbench-cli-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            RunCliIn(folder, "viewshed", RepositoryFiles.SampleTile, "36", "-112", "36.3", "-111.6", map.Rows.ToString(CultureInfo.InvariantCulture),
+                map.SpacingDeg.ToString("R", CultureInfo.InvariantCulture), "2", (4.0 / 3.0).ToString("R", CultureInfo.InvariantCulture), "nearest", "10");
+            var pixels = ReadPgm(Path.Combine(folder, "cli_viewshed_output.pgm"), out int width, out int height);
+
+            Assert.Equal((map.Cols, map.Rows), (width, height));
+            for (int i = 0; i < map.Cells.Length; i++)
+            {
+                byte expected = map.Cells[i] switch { CellState.Visible => 255, CellState.NotVisible => 0, _ => 128 };
+                Assert.True(pixels[i] == expected, $"Cell {i}: the DLL says {map.Cells[i]}, the command line {pixels[i]}.");
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); } catch (IOException) { }
+        }
+
+        // And the taller target sees more than the ground does.
+        Assert.True(map.Cells.Count(c => c == CellState.Visible) > ground.Cells.Count(c => c == CellState.Visible));
+    }
+
+    [Fact]
     public void The_sample_tile_reports_its_facts()
     {
         using var tile = Engine.OpenTile(RepositoryFiles.SampleTile, 36, -112).Value;
@@ -112,13 +148,37 @@ public class KnownAnswerTests
     /// <summary>A double as std::cout prints it by default: six significant digits.</summary>
     private static string Cout(double value) => value.ToString("G6", CultureInfo.InvariantCulture);
 
-    private static string RunCli(params string[] arguments)
+
+    /// <summary>A binary (P5) PGM as the CLI writes it: its pixels, first row first.</summary>
+    private static byte[] ReadPgm(string path, out int width, out int height)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        int position = 0;
+        string Token()
+        {
+            while (char.IsWhiteSpace((char)bytes[position])) position++;
+            int start = position;
+            while (!char.IsWhiteSpace((char)bytes[position])) position++;
+            return System.Text.Encoding.ASCII.GetString(bytes, start, position - start);
+        }
+
+        Assert.Equal("P5", Token());
+        width = int.Parse(Token(), CultureInfo.InvariantCulture);
+        height = int.Parse(Token(), CultureInfo.InvariantCulture);
+        Assert.Equal("255", Token());
+        position++;
+        return bytes[position..];
+    }
+    private static string RunCli(params string[] arguments) => RunCliIn(RepositoryFiles.Root, arguments);
+
+    /// <summary>Runs the CLI in <paramref name="folder"/>, where it writes any image it makes.</summary>
+    private static string RunCliIn(string folder, params string[] arguments)
     {
         var start = new ProcessStartInfo(RepositoryFiles.Cli)
         {
             RedirectStandardOutput = true,
             UseShellExecute = false,
-            WorkingDirectory = RepositoryFiles.Root,
+            WorkingDirectory = folder,
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
 

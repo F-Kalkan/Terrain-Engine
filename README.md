@@ -25,7 +25,7 @@ between two points:
 
 1. Clone this repository and open `TerrainEngine.sln` in Visual Studio 2022.
 2. Build the solution (`x64`, `Release` recommended for real use).
-3. Run `TerrainEngine.exe` with no arguments — this runs the 50-case test suite and a
+3. Run `TerrainEngine.exe` with no arguments — this runs the 53-case test suite and a
    small demo against the included sample tile (`DATA/N36W112.hgt`, a 3-arcsecond
    stretch of the Grand Canyon), and writes `profile_output.pgm` / `viewshed_output.pgm`
    you can open in any image viewer that supports PGM (e.g. IrfanView, GIMP). If the
@@ -361,17 +361,25 @@ from the DLL; the app lays results out and colours them.
 ![A 30 km viewshed compared with the previous run after switching curvature off, dark theme](docs/screenshots/viewshed-k-change-dark.png)
 ![The map zoomed in, with the pointer resting on the blocking point, dark theme](docs/screenshots/map-zoom-hover-dark.png)
 ![The profile zoomed in, reading the distance and elevation under the pointer, dark theme](docs/screenshots/profile-hover-dark.png)
-![A viewshed near the tile's west edge, where part of the disc has no data to answer from, dark theme](docs/screenshots/viewshed-edge-dark.png)
+![A viewshed near the tile's west edge: the disc is drawn where it overlaps the tile, dark theme](docs/screenshots/viewshed-edge-dark.png)
 
 ### Download and run a release
 
-1. Open this repository's **Releases** page and download
-   `TerrainBench-<version>-win-x64-portable.zip`.
-2. Unzip it anywhere and run `TerrainBench.exe`. It needs Windows 10 or 11, x64, and
-   nothing installed: the .NET runtime and the engine's C runtime are inside.
-3. The build isn't code signed, so Windows SmartScreen may say "Windows protected your PC"
-   the first time. Choose **More info**, then **Run anyway**.
-4. On first start, choose **Open the Sample Tile** to load the bundled Grand Canyon tile.
+Each release on this repository's **Releases** page has two downloads holding the same files.
+Both need Windows 10 or 11, x64, and nothing else installed: the .NET runtime and the
+engine's C runtime are inside.
+
+- **The installer**, `TerrainBench-<version>-win-x64.msi`. It installs for the current user
+  only, under `%LOCALAPPDATA%\Programs\TerrainBench`, asks for no administrator rights and adds
+  TerrainBench to the Start menu, and to the desktop if its Options page's box is ticked. Its
+  last page can start TerrainBench straight away. Installing a newer version replaces the older one; remove it
+  from **Settings > Apps > Installed apps**.
+- **The portable zip**, `TerrainBench-<version>-win-x64-portable.zip`. Unzip it anywhere and
+  run `TerrainBench.exe`; delete the folder to remove it.
+
+The build isn't code signed, so Windows SmartScreen may say "Windows protected your PC" the
+first time. Choose **More info**, then **Run anyway**. On first start, choose **Open the
+Sample Tile** to load the bundled Grand Canyon tile.
 
 ### What it does
 
@@ -401,17 +409,21 @@ from the DLL; the app lays results out and colours them.
   the axes while marking the same point on the map. Give a frequency to see the first
   Fresnel zone and its clearance too, with a bar for how much of the zone stays free.
 - **Viewshed.** Choose the observer, radius, height, spacing, `k`, interpolation and the
-  fast or naive algorithm. The result is drawn inside a dashed ring of the requested radius:
+  fast or naive algorithm, and a target height: 0 asks whether the ground itself can be
+  seen, 1.8 m a person standing there, a mast's height a radio link. The result is drawn
+  inside a dashed ring of the requested radius:
   visible cells in cyan, cells out of sight only darkened so the ground stays readable, cells
-  with no confident answer in purple (beyond the tile's edge too, where there is no data) and
-  cells not reached in grey. The legend hides or shows each kind of
-  cell, and a slider sets the layer's opacity. It runs off the window's thread with progress
+  with no confident answer in purple and cells not reached in grey. The disc is drawn where it
+  overlaps the tile, and the legend counts exactly the cells drawn; when part of the circle lies
+  past the tile's edge, where there is no data, the summary says so. The legend hides or shows
+  each kind of cell, and a slider sets the layer's opacity.
+  It runs off the window's thread with progress
   and a Cancel button. Moving the observer takes the old result off the map (a plain fast
   run redoes itself when the observer is placed on the map); changing another setting fades
   it until the next run. **Compare With** marks cells in yellow: either where fast and naive
   disagree on the same run (with the count, ratio and both timings), or every cell that
   changed since the previous run, with the setting that changed (`k: 4/3 → 1e12 changed
-  8,583 cells.`) -- which is how changing one setting shows up even when it moves a few
+  8,135 cells.`) -- which is how changing one setting shows up even when it moves a few
   thousand cells out of four million.
 - **Everywhere.** One side panel shows at a time, picked by the tabs on its left edge:
   Terrain, Line of Sight, Viewshed and About. The profile panel under the map closes to a
@@ -468,10 +480,14 @@ Tools) and the .NET 10 SDK. From the repository root:
 ```
 .\build.ps1          # engine, CLI, DLL and app: build and run every test
 .\build.ps1 -Zip     # the same, then a portable zip in artifacts/
+.\build.ps1 -Zip -Installer   # and the MSI installer beside it
 ```
 
 `build.ps1` builds `TerrainEngine.sln` (Release | x64), checks the DLL depends on nothing
-but `KERNEL32.dll`, runs `TerrainEngine.exe`'s tests, then builds and tests `app/`. After it
+but `KERNEL32.dll`, runs `TerrainEngine.exe`'s tests, then builds and tests `app/`. The
+installer is built with WiX Toolset 5 from `installer/TerrainBench.wxs`; WiX is pinned as a
+local dotnet tool in `.config/dotnet-tools.json`, and `build.ps1` restores it and the two WiX
+extensions the wizard uses (into `.wix/`), so nothing needs installing first. After it
 has built the engine once, the app can be run from source with
 `dotnet run --project app/src/TerrainBench -c Release`.
 
@@ -489,7 +505,7 @@ git push origin v1.0.0
 ```
 
 The release workflow builds that commit from source, runs the same tests as CI, and
-publishes the zip as a GitHub release whose notes name the commit. If any step fails, nothing
+publishes the installer and the zip as a GitHub release whose notes name the commit. If any step fails, nothing
 is published. CI builds and tests every push and pull request, so a broken commit is red
 before anyone tags it.
 
@@ -501,11 +517,11 @@ links both and produces `TerrainEngine.exe`.
 
 ## CLI usage
 ```
-TerrainEngine.exe # run the 50-case test suite + demo
+TerrainEngine.exe # run the 53-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
-TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear]
+TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]
 TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> <frequencyMHz> [k]
 TerrainEngine.exe batch <hgtFile> <swLat> <swLon> <queriesFile> [k]
 ```
@@ -520,7 +536,7 @@ rather than silently skipped.
 
 ## Test suite
 
-50 hand-checkable test functions, plus a real-data tolerance assertion per tile:
+53 hand-checkable test functions, plus a real-data tolerance assertion per tile:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
   on disk): flat plateau, wall, curvature, void, determinism,
@@ -575,6 +591,16 @@ terrain, decides every answer.
   character, and reported as zero for a file that didn't load; one loaded tile answering in the other
   interpolation mode exactly as a fresh load in that mode would; and the in-place profile
   overload reusing a caller-owned buffer without growing it.
+- **Viewshed target height** (the wall scene of the fast/naive test): straight east of a
+  2 m observer, a target 180 m out behind a 50 m wall 90 m out clears it once its height
+  reaches 98 m, worked by hand -- both viewsheds hide it at 97.9 m and show it at 98.1 m, and
+  at the default of 0 m (the ground itself) hide it as they always did; a taller target only
+  ever reveals cells, never hides one or raises the horizon for the cells behind it, and an
+  explicit 0 m is the default cell for cell; fast matches naive on every cell off the wall
+  at 0 m and 30 m, and at 120 m, where the visible region ends in the open field, disagrees
+  only on that boundary, for the reason the fast/naive section gives for ridgelines; and a
+  target height in a datum the terrain can't be put on leaves every cell but the observer's
+  Degraded in both, never guessed.
 - **Command line**: the number parser behind every CLI argument accepting real
   numbers and refusing text, trailing characters, `nan`, `inf` and out-of-range
   values, instead of throwing.
@@ -623,7 +649,7 @@ first, so the top of the image) corresponds to the observer's south, because
 north). This is not a standard north-up map; it's the raw grid orientation exactly as
 computed. Flip the image vertically if you want a conventional north-up view.
 
-## Stretch goals implemented
+## Beyond the three questions
 
 - **Fresnel-zone clearance** — `ComputeFresnelClearance` (in `LineOfSight.h`) reports
   the worst-case fraction of the first Fresnel zone that is clear along a path, given

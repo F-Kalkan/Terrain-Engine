@@ -145,6 +145,25 @@ public class ViewshedViewModelTests
         Assert.False(vm.HiddenLayers[(int)CellState.NotVisible]);
     }
     [Fact]
+    public async Task The_target_height_reaches_the_engine_and_a_change_to_it_is_named()
+    {
+        var vm = new ViewshedViewModel(() => _tile) { Comparison = ViewshedComparison.PreviousRun };
+        await vm.RunAsync();
+        Assert.Equal(0, _tile.ViewshedQueries[^1].TargetHeightAboveGroundM);
+
+        vm.TargetHeight.Text = "10";
+        Assert.True(vm.IsStale);
+        await vm.RunAsync();
+
+        Assert.Equal(10, _tile.ViewshedQueries[^1].TargetHeightAboveGroundM);
+        Assert.Contains("target height: 0 m → 10 m", vm.Summary);
+
+        vm.TargetHeight.Text = "-1";
+        Assert.Equal("The target height must be between 0 and 100000.", vm.TargetHeight.Error);
+        Assert.False(vm.RunCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Comparing_with_the_previous_run_marks_what_changing_k_did()
     {
         _tile.OnViewshed = (query, _, _) => EngineResult<ViewshedMap>.Ok(query.RefractionK > 1e6

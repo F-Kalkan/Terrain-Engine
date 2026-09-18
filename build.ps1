@@ -7,11 +7,14 @@
 
         .\build.ps1                          # engine, CLI, DLL and app: build and test
         .\build.ps1 -Zip                     # + a portable, self-contained win-x64 zip in artifacts/
-        .\build.ps1 -Zip -Version 1.2.0      # a release build, stamped with that version
+        .\build.ps1 -Zip -Installer          # + a per-user MSI installer beside it
+        .\build.ps1 -Zip -Installer -Version 2.0.0   # a release build, stamped with that version
 
     Steps, each stopping the build on failure: build TerrainEngine.sln (Release | x64); check the
     DLL needs no runtime installed; run the engine's test executable; build and test the .NET
-    solution; and, with -Zip, publish TerrainBench self-contained and pack it.
+    solution; with -Zip or -Installer, publish TerrainBench self-contained; with -Zip, pack it as a
+    portable zip; and with -Installer, build a per-user MSI from the same files (WiX Toolset 5,
+    restored as a local dotnet tool).
 
     Needs Visual Studio 2022 with the C++ desktop workload (or its Build Tools) and the .NET 10 SDK.
 
@@ -28,6 +31,7 @@ param(
     [string] $Version,
     [string] $Commit,
     [switch] $Zip,
+    [switch] $Installer,
     [switch] $SkipTests
 )
 
@@ -48,6 +52,15 @@ function Write-Step([string] $message) {
 function Invoke-Checked([string] $what, [scriptblock] $action) {
     & $action
     if ($LASTEXITCODE -ne 0) { throw "$what failed with exit code $LASTEXITCODE." }
+}
+
+# Runs dotnet from app/, where app/global.json is found. The SDK looks for global.json from the current
+# folder, not the solution's; run from the root, dotnet test ignores the test runner set there, finds no
+# tests at all and still reports success.
+function Invoke-Dotnet {
+    Push-Location (Join-Path $root 'app')
+    try { & dotnet @args }
+    finally { Pop-Location }
 }
 
 function Find-VsTool([string] $pattern) {
@@ -111,26 +124,28 @@ $versionArgs = @(
 )
 
 Write-Step 'Building the app'
-Invoke-Checked 'restore' { dotnet restore $appSolution }
-Invoke-Checked 'The app build' { dotnet build $appSolution -c Release --no-restore @versionArgs }
+Invoke-Checked 'restore' { Invoke-Dotnet restore $appSolution }
+Invoke-Checked 'The app build' { Invoke-Dotnet build $appSolution -c Release --no-restore @versionArgs }
 
 if (-not $SkipTests) {
     Write-Step "Running the app's tests"
-    Invoke-Checked 'The app tests' { dotnet test $appSolution -c Release --no-build }
+    Invoke-Checked 'The app tests' { Invoke-Dotnet test $appSolution -c Release --no-build }
 }
 
-if ($Zip) {
+if ($Zip -or $Installer) {
     Write-Step 'Publishing TerrainBench, self-contained win-x64'
     if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
     Invoke-Checked 'publish' {
-        dotnet publish (Join-Path $root 'app/src/TerrainBench/TerrainBench.csproj') -c Release -r win-x64 --self-contained true `
+        Invoke-Dotnet publish (Join-Path $root 'app/src/TerrainBench/TerrainBench.csproj') -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=false -p:DebugType=none @versionArgs -o $publishDir
     }
 
     foreach ($required in 'TerrainBench.exe', 'TerrainEngineApi.dll', 'Samples/N36W112.hgt') {
         if (-not (Test-Path (Join-Path $publishDir $required))) { throw "The published app is missing $required." }
     }
+}
 
+if ($Zip) {
     Write-Step 'Packing the portable archive'
     New-Item -ItemType Directory -Force $artifacts | Out-Null
     $zipPath = Join-Path $artifacts "TerrainBench-$Version-win-x64-portable.zip"
@@ -138,6 +153,36 @@ if ($Zip) {
     Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath
     $sizeMb = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
     Write-Host "    $zipPath ($sizeMb MB)"
+}
+
+if ($Installer) {
+    Write-Step 'Building the installer (MSI, per user)'
+    Push-Location $root
+    try {
+        # WiX Toolset 5, pinned in .config/dotnet-tools.json: restored like a package, nothing to install first.
+        Invoke-Checked 'The WiX tool restore' { dotnet tool restore }
+        # Its UI extension draws the wizard; its Util extension starts the app from the Finish page.
+        # Both are cached under .wix/ in the repository root.
+        $wixExtensions = 'WixToolset.UI.wixext/5.0.2', 'WixToolset.Util.wixext/5.0.2'
+        Invoke-Checked 'The WiX extension restore' { dotnet wix extension add @wixExtensions }
+        New-Item -ItemType Directory -Force $artifacts | Out-Null
+        $msiPath = Join-Path $artifacts "TerrainBench-$Version-win-x64.msi"
+        if (Test-Path $msiPath) { Remove-Item $msiPath -Force }
+        Invoke-Checked 'The installer build' {
+            dotnet wix build (Join-Path $root 'installer/TerrainBench.wxs') -arch x64 `
+                -ext $wixExtensions[0] -ext $wixExtensions[1] `
+                -d "Version=$Version" -d "PublishDir=$publishDir" `
+                -d "IconPath=$(Join-Path $root 'app/src/TerrainBench/Assets/TerrainBench.ico')" `
+                -o $msiPath
+        }
+        $pdb = [System.IO.Path]::ChangeExtension($msiPath, '.wixpdb')
+        if (Test-Path $pdb) { Remove-Item $pdb -Force }
+    }
+    finally {
+        Pop-Location
+    }
+    $sizeMb = [math]::Round((Get-Item $msiPath).Length / 1MB, 1)
+    Write-Host "    $msiPath ($sizeMb MB)"
 }
 
 Write-Host ''

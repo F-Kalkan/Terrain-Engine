@@ -73,7 +73,11 @@ using ViewshedProgress = std::function<bool(double fractionDone)>;
 // parallelised across rows or cells with no change to its reduction; it simply
 // never has been, since nothing in this project calls it per frame either.
 // Progress (optional): reported before each grid row, then once at the end.
-inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr)
+// Target height (optional): every cell is asked whether a target that high can be seen -- a
+// person, a vehicle, a mast. Usually above the ground under each cell; any datum the terrain can be
+// put on works, as for the observer. 0 m above ground, the default, asks about the ground itself. A
+// target height that can't be put on the terrain's datum leaves every cell but the observer's Degraded.
+inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround })
 {
     ViewshedResult result;
 
@@ -113,7 +117,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
             GeoPoint target{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (col - centerCol) * lonSpacingDeg };
 
             std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacingDeg, sampler);
-            LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, k);
+            LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, targetHeight, k);
 
             if (!IsOk(los.status))
             {
@@ -157,7 +161,8 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 // Thread-safety: single-thread-only. Builds one profile at a time in a local,
 // per-ray vector and calls the non-thread-affine sampler sequentially.
 // Progress (optional): reported before every 16th boundary ray, then once at the end.
-inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr)
+// Target height (optional): as for ComputeViewshedNaive -- see the two slopes in the ray loop.
+inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround })
 {
     ViewshedResult result;
 
@@ -178,10 +183,21 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
         return result;
     }
 
-    result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
-
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
+
+    // A target height that can't be put on the terrain's datum leaves nothing known about
+    // any cell but the observer's own -- what naive's per-cell ComputeLineOfSight reports.
+    if (!CanExpressInTerrainDatum(targetHeight, terrainDatum))
+    {
+        result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::Degraded));
+        result.visible[centerRow][centerCol] = CellVisibility::Visible;
+        if (progress) progress(1.0);
+        return result;
+    }
+
+    result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
+
     double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
 
     double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *observerElevationM, terrainDatum);
@@ -255,11 +271,19 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
             double curvatureDropM = CurvatureDropM(dM, dRemainM, k);
             double pointHeightM = *profile[i].elevationM + curvatureDropM;
 
+            // Two slopes: the terrain's own, which is what raises the horizon for every
+            // cell further out, and the target's -- a mast of targetHeight standing in
+            // this cell -- which is what this cell's answer is about. A target sees
+            // over the horizon the terrain before it built, but its height never
+            // raises that horizon: the next cell's mast stands on the ground, not on
+            // this one. With no target height the two are the same slope.
+            double targetPointHeightM = *EyeHeightInTerrainDatum(targetHeight, *profile[i].elevationM, terrainDatum) + curvatureDropM;
             double slope = (pointHeightM - observerEyeHeightM) / dM;
+            double targetSlope = (targetPointHeightM - observerEyeHeightM) / dM;
 
-            bool isVisible = slope >= maxSlope;
+            bool isVisible = targetSlope >= maxSlope;
 
-            if (isVisible)
+            if (slope > maxSlope)
             {
                 maxSlope = slope;
             }

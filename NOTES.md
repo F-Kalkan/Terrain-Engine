@@ -8,18 +8,16 @@
   ends up calling it once per sampled point along every ray, one point at a time. A
   batched or ray-aware query would let a real reader do smarter I/O (e.g. reading a
   strip of a `.hgt` file at once instead of one point at a time), but that would have
-  leaked the *reader's* concerns back into the *core* interface — exactly what the
-  spec warns against ("if you write the reader first you will shape the interface
-  around a file format"). I kept the interface pure and paid for it in the fast
-  algorithm's call count instead.
+  leaked the *reader's* concerns back into the *core* interface — the classic trap of
+  writing the reader first and shaping the interface around a file format. I kept the
+  interface pure and paid for it in the fast algorithm's call count instead.
 
 - **`k` (the curvature/refraction coefficient) started as a local constant inside
   `ComputeLineOfSight`, then had to be retrofitted as a parameter into three function
   signatures** (`ComputeLineOfSight`, `ComputeViewshedNaive`, `ComputeViewshedFast`)
-  and re-threaded through every call site, including the CLI's argument parsing. The
-  spec said outright that "someone will want to set it" — that sentence should have
-  been read as "expose it all the way to the CLI," not just "make it a function
-  default." Doing it from the first line would have cost nothing; doing it after the
+  and re-threaded through every call site, including the CLI's argument parsing. It was
+  always clear that someone would want to set it, and that should have been read as
+  "expose it all the way to the CLI," not just "make it a function default." Doing it from the first line would have cost nothing; doing it after the
   fact touched code in four files.
 
 - **`assert()` is a silent no-op once `NDEBUG` is defined** (i.e. in every Release
@@ -138,7 +136,7 @@ the suite has gone red.
 
 ## Update: the 30 m data
 
-The task asked for 30 m data, and the repository only ever had the 3-arcsecond (~90 m)
+The target was 30 m data, and the repository only ever had the 3-arcsecond (~90 m)
 tile, so every "30 m" benchmark was a sampling spacing laid over 90 m posts. The
 1-arcsecond tile for the same square degree now goes through the same reader unchanged
 — it infers the post count from the file size — and through the same benchmark and
@@ -195,6 +193,36 @@ down, none of them a wrong answer and all of them worse than one.
 What these share is that none of the tests asked. Every test fed the code inputs
 shaped the way the code expected, which checks the arithmetic and says nothing about
 what happens on the first input shaped otherwise.
+
+## Update: a target height for the viewshed
+
+Both viewsheds asked one question of every cell: can the observer see the ground there? A
+viewshed for a radio link or a lookout asks something else -- can the observer see a mast, a
+vehicle or a standing person in that cell -- so both now take a target height, the last
+parameter, defaulting to 0 m above ground. As a `DatumHeight`, like the observer's, not a
+bare `double`: the reason heights carry their datum everywhere else applies here too, and a
+target in a datum the terrain can't be put on is refused the same way (every cell but the
+observer's Degraded), never guessed.
+
+Naive needed nothing new: it already runs a full line of sight per cell, and passes the target
+height to it. Fast needed care. Its ray keeps a horizon, the steepest slope from the observer's
+eye to the terrain seen so far, and calls a cell visible when that cell's slope reaches it. With
+a target height there are two slopes per cell: the terrain's, which is what raises the horizon
+for every cell further out, and the target's, which is what this cell's answer is about. Letting
+the target's slope raise the horizon would be wrong -- the next cell's mast stands on the
+ground, not on this one -- and a test puts that mistake back and watches it fail.
+
+With the default, the two slopes are the same number and the old code path is taken exactly: the
+command line's viewshed images came out byte for byte the same as before the change, for three
+observers and both interpolation modes. At a large target height the visible region can end in
+open ground rather than at a ridge, and fast then disagrees with naive on a few boundary cells
+for the same reason it does on ridgelines (its rays sample a cell away from the cell's centre);
+the test allows that on the boundary and nowhere else.
+
+In the DLL, `te_viewshed_query` gained `target_height_above_ground_m` as its last field. The
+app and the DLL ship together, so there is no older caller to keep working; a DLL meant to be
+called by programs built against an earlier header would need a size field or a new function
+instead.
 
 ## The DLL boundary
 
@@ -274,9 +302,10 @@ input may take it down.
 - **k typed as 4/3.** `1.3333333333333333` is what the engine's default really is, and it is
   unreadable. Fields accept a simple fraction and read it exactly, so the default shows as
   `4/3` and is still the same double the CLI uses.
-- **Comparing with the previous run.** The task asks that a very large `k` visibly change a
-  30 km viewshed. Measured on the sample tile, it doesn't, much: with a 2 m observer, 8,583
-  of 4,000,000 cells change (0.21%); even at 300 m it is 1.87%. Drawn at map size, picking one
+- **Comparing with the previous run.** A very large `k` should visibly change a 30 km
+  viewshed. Measured on the sample tile, it doesn't, much: with a 2 m observer, 8,583
+  of the 4,000,000 cells in the whole square grid change (0.21%; 8,135 of them inside the
+  30 km circle the app draws and counts); even at 300 m it is 1.87%. Drawn at map size, picking one
   cell per screen pixel, scattered changes like that simply vanish. Two changes fix it
   without touching the engine: the viewshed can be compared with the previous run, marking
   every changed cell and counting them, and an overlay larger than the screen is averaged
@@ -285,10 +314,44 @@ input may take it down.
   progress callback reports through a `Progress<double>` created on the UI thread, and
   Cancel sets a token the callback turns into "stop". A headless test starts a naive 30 km
   run, waits for progress, switches tabs while it runs, and cancels it.
+- **Labels that explain themselves.** Field names are in Title Case and carry their unit in
+  lighter text beside them; a unitless field shows none rather than "(no unit)". Every field
+  that needs more than its name has a "?" whose tooltip says, in plain words, what the value
+  does to the answer -- what k is, why the Fresnel zone needs a frequency, what a target
+  height means -- so the panel stays short and the explanation is one hover away.
+- **A viewshed at the tile's edge.** A radius can reach past the tile, where there is no
+  data. Drawn as it came from the engine, that part of the disc was a large purple block of
+  "no confident answer" which said nothing about the terrain. The disc is now clipped to the
+  tile, the legend counts only the cells that are drawn -- inside the circle and on the
+  tile -- and the summary says, in a sentence, that part of the circle lies beyond the tile
+  and isn't drawn or counted. The engine's own counts for the whole grid are unchanged and
+  still go into Copy Results, so nothing is hidden from a bug report.
 - **Tests against the real thing.** The interop tests write the engine's hand-checkable
   cases out as `.hgt` tiles, because the DLL only reads tiles, and check one query against
   `TerrainEngine.exe`'s own output. The window tests run the real DLL too; only dialogs, the
   clipboard and the settings file are faked.
+- **App tests that CI never ran.** `app/global.json` selects Microsoft.Testing.Platform as
+  the test runner, but the SDK looks for `global.json` from the current folder, and
+  `build.ps1` ran `dotnet test app/TerrainBench.sln` from the repository root. There the
+  setting was never seen, the older runner found no tests in the xUnit v3 projects, and
+  reported success -- so every CI run and release up to v1.1.0 built the app's tests
+  without running one. They passed when run from `app/`, as they had been locally, so no
+  release shipped a failing test; but nothing guaranteed it. `build.ps1` now runs every
+  `dotnet` command for the app from `app/`, and the platform fails a run that finds no
+  tests.
 - **Pinned build image.** CI and releases run on `windows-2025` rather than
   `windows-latest`, so a runner image update can't swap the Visual C++ toolset under a
-  release. Actions are pinned to commit SHAs.
+  release. Actions are pinned to commit SHAs.- **An installer beside the zip.** The portable zip stays; the MSI holds the same published
+  files, built by WiX Toolset 5 from `installer/TerrainBench.wxs`. It installs per user under
+  `%LOCALAPPDATA%\Programs\TerrainBench`: a tool for trying the engine shouldn't need an
+  administrator, and a per-user install can't touch anything outside the user's own profile.
+  WiX comes in as a local dotnet tool pinned in `.config/dotnet-tools.json`, so a build machine
+  needs nothing more than the .NET SDK it already has; version 5 rather than 6, whose licence
+  terms changed. The first build had no wizard at all -- a progress bar that vanished, with no
+  word that it had worked -- so it now has the usual pages: an Options page with a desktop
+  shortcut, off unless ticked, and a Finish page that starts the app, ticked. The desktop box
+  has to come before the install, since the shortcut is one of the things installed. WiX's
+  ready-made wizards all include a licence page or a folder choice, so the page order is
+  written out in the `.wxs` from WiX's own dialogs. The package's upgrade code is fixed, so installing a newer version replaces
+  the older one in place. CI builds the installer on every push, so a packaging break is red
+  before a tag finds it.

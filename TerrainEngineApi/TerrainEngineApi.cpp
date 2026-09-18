@@ -542,6 +542,7 @@ int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_ca
         if (problem.empty() && std::abs(q.observer_latitude_deg) > 89.9)
             problem = "A viewshed can't be laid out within 0.1 degree of a pole, where lines of longitude meet. Choose an observer latitude between -89.9 and 89.9 degrees.";
         if (problem.empty()) problem = HeightProblem("observer", q.observer_height_above_ground_m);
+        if (problem.empty()) problem = HeightProblem("target", q.target_height_above_ground_m);
         if (problem.empty()) problem = PositiveProblem("radius", q.radius_km, " km");
         if (problem.empty()) problem = PositiveProblem("spacing", q.spacing_m, " m");
         if (problem.empty()) problem = PositiveProblem("refraction factor k", q.refraction_k, "");
@@ -573,10 +574,11 @@ int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_ca
 
         GeoPoint observer{ q.observer_latitude_deg, q.observer_longitude_deg };
         DatumHeight observerHeight{ q.observer_height_above_ground_m, VerticalDatum::HeightAboveGround };
+        DatumHeight targetHeight{ q.target_height_above_ground_m, VerticalDatum::HeightAboveGround };
         RealElevationSampler& sampler = found->Sampler(q.interpolation);
         ViewshedResult viewshed = q.algorithm == TE_ALGORITHM_NAIVE
-            ? ComputeViewshedNaive(observer, observerHeight, gridSize, gridSize, spacingDeg, sampler, q.refraction_k, report)
-            : ComputeViewshedFast(observer, observerHeight, gridSize, gridSize, spacingDeg, sampler, q.refraction_k, report);
+            ? ComputeViewshedNaive(observer, observerHeight, gridSize, gridSize, spacingDeg, sampler, q.refraction_k, report, targetHeight)
+            : ComputeViewshedFast(observer, observerHeight, gridSize, gridSize, spacingDeg, sampler, q.refraction_k, report, targetHeight);
 
         if (viewshed.cancelled) return Fail(TE_ERROR_CANCELLED, "The viewshed was cancelled.");
 
