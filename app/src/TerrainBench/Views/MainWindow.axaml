@@ -10,681 +10,712 @@
         Icon="/Assets/TerrainBench.ico"
         Width="1360" Height="880" MinWidth="960" MinHeight="640">
 
-  <DockPanel>
+  <!-- The window, with the first-run tour over it when it is open -->
+  <Panel>
+    <DockPanel>
 
-    <!-- Toolbar -->
-    <Border DockPanel.Dock="Top" Classes="frame" Padding="10,10,10,4">
-      <DockPanel>
-        <TextBlock DockPanel.Dock="Right" Text="{Binding Terrain.FileName}" VerticalAlignment="Center" Margin="12,0,4,6" FontWeight="SemiBold" />
-        <WrapPanel>
-          <Button Name="OpenTileButton" Content="Open Tile…" Command="{Binding OpenTileCommand}" HotKey="Ctrl+O"
-                  ToolTip.Tip="Open an SRTM .hgt tile from disk (Ctrl+O)" />
-          <Button Name="OpenSampleButton" Content="Open Sample Tile" Command="{Binding OpenSampleTileCommand}"
-                  ToolTip.Tip="Open the bundled Grand Canyon tile, N36W112" />
-          <Button Content="Copy Results" Command="{Binding CopyResultsCommand}" HotKey="Ctrl+Shift+C"
-                  ToolTip.Tip="Copy the inputs, outputs, app version and engine commit as text (Ctrl+Shift+C)" />
-          <Button Content="Export Profile (CSV)" Command="{Binding ExportProfileCsvCommand}" />
-          <Button Content="Export Map (PNG)" Command="{Binding ExportMapPngCommand}" />
-          <Button Content="Export Viewshed (PNG)" Command="{Binding ExportViewshedPngCommand}" />
-        </WrapPanel>
-      </DockPanel>
-    </Border>
+      <!-- Toolbar -->
+      <Border DockPanel.Dock="Top" Classes="frame" Padding="10,10,10,4">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Right" Text="{Binding Terrain.FileName}" VerticalAlignment="Center" Margin="12,0,4,6" FontWeight="SemiBold" />
+          <WrapPanel>
+            <Button Name="OpenTileButton" Content="Open Tile…" Command="{Binding OpenTileCommand}" HotKey="Ctrl+O"
+                    ToolTip.Tip="Open an SRTM .hgt tile from disk (Ctrl+O)" />
+            <Button Name="OpenSampleButton" Content="Open Sample Tile" Command="{Binding OpenSampleTileCommand}"
+                    ToolTip.Tip="Open the bundled Grand Canyon tile, N36W112" />
+            <Button Content="Copy Results" Command="{Binding CopyResultsCommand}" HotKey="Ctrl+Shift+C"
+                    ToolTip.Tip="Copy the inputs, outputs, app version and engine commit as text (Ctrl+Shift+C)" />
+            <Button Content="Export Profile (CSV)" Command="{Binding ExportProfileCsvCommand}" />
+            <Button Content="Export Map (PNG)" Command="{Binding ExportMapPngCommand}" />
+            <Button Content="Export Viewshed (PNG)" Command="{Binding ExportViewshedPngCommand}" />
+          </WrapPanel>
+        </DockPanel>
+      </Border>
 
-    <!-- Engine missing -->
-    <Border DockPanel.Dock="Top" Padding="12" Background="{DynamicResource BannerBackgroundBrush}" IsVisible="{Binding HasEngineError}">
-      <TextBlock Classes="error" Text="{Binding EngineError}" TextWrapping="Wrap" FontWeight="SemiBold" />
-    </Border>
+      <!-- Engine missing -->
+      <Border DockPanel.Dock="Top" Padding="12" Background="{DynamicResource BannerBackgroundBrush}" IsVisible="{Binding HasEngineError}">
+        <TextBlock Classes="error" Text="{Binding EngineError}" TextWrapping="Wrap" FontWeight="SemiBold" />
+      </Border>
 
-    <!-- First start -->
-    <Border DockPanel.Dock="Top" Padding="12,8" Background="{DynamicResource BannerBackgroundBrush}" IsVisible="{Binding ShowSamplePrompt}">
-      <StackPanel Orientation="Horizontal" Spacing="12">
-        <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
-                   Text="New here? Start with the bundled sample tile, a stretch of the Grand Canyon." />
-        <Button Name="SamplePromptButton" Classes="primary" Content="Open the Sample Tile" Command="{Binding OpenSampleTileCommand}" Margin="0" />
-      </StackPanel>
-    </Border>
-
-    <!-- Status bar -->
-    <Border DockPanel.Dock="Bottom" Padding="10,6" Background="{DynamicResource StatusBackgroundBrush}"
-            BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0">
-      <StackPanel Spacing="2">
-        <TextBlock Name="StatusText" Text="{Binding StatusMessage}" IsVisible="{Binding HasStatus}" Classes.error="{Binding StatusIsError}" TextWrapping="Wrap" />
-        <TextBlock Classes="muted" Text="{Binding Terrain.CursorText}" />
-      </StackPanel>
-    </Border>
-
-    <!-- Map and profile | splitter | side panel, with the panel's tabs over the map's edge. MainWindow.axaml.cs sizes the profile row and the panel column. -->
-    <Grid Name="Workspace" ColumnDefinitions="*,Auto,440">
-
-      <Grid Name="MapArea" RowDefinitions="*,Auto,260,Auto">
-        <Panel>
-          <controls:MapView Name="Map"
-                            AutomationProperties.Name="Terrain map. With focus, arrow keys move a crosshair, Enter places the observer and Ctrl+Enter the target, Ctrl with the arrows moves the map, plus and minus zoom."
-                            Posts="{Binding Terrain.Posts}"
-                            Tile="{Binding Terrain.Tile.Info}"
-                            WidthM="{Binding Terrain.WidthM}"
-                            Viewshed="{Binding Viewshed.Map}"
-                            Highlights="{Binding Viewshed.Highlights}"
-                            ShowViewshed="{Binding IsViewshedTab}"
-                            ShowPath="{Binding !IsViewshedTab}"
-                            Analysis="{Binding LineOfSight.Analysis}"
-                            ObserverLatitude="{Binding LineOfSight.ObserverLatitude.Value}"
-                            ObserverLongitude="{Binding LineOfSight.ObserverLongitude.Value}"
-                            TargetLatitude="{Binding LineOfSight.TargetLatitude.Value}"
-                            TargetLongitude="{Binding LineOfSight.TargetLongitude.Value}"
-                            ViewshedObserverLatitude="{Binding Viewshed.ObserverLatitude.Value}"
-                            ViewshedObserverLongitude="{Binding Viewshed.ObserverLongitude.Value}"
-                            HiddenLayers="{Binding Viewshed.HiddenLayers}"
-                            ViewshedOpacity="{Binding Viewshed.MapOpacity}"
-                            ShowViewshedLayer="{Binding Viewshed.ShowLayer}"
-                            ViewshedRadiusLabel="{Binding Viewshed.RadiusLabel}" />
-
-          <!-- Zoom -->
-          <Border Classes="mapControls" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,20"
-                  IsVisible="{Binding Terrain.IsLoaded}">
-            <StackPanel Orientation="Horizontal">
-              <Button Name="ZoomOutButton" Classes="icon" Content="−" ToolTip.Tip="Zoom out" AutomationProperties.Name="Zoom out" />
-              <TextBlock Name="ZoomText" Text="{Binding #Map.Zoom, Converter={x:Static views:Converters.ZoomPercent}}"
-                         MinWidth="52" TextAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
-              <Button Name="ZoomInButton" Classes="icon" Content="+" ToolTip.Tip="Zoom in" AutomationProperties.Name="Zoom in" />
-            </StackPanel>
-          </Border>
-        </Panel>
-
-        <GridSplitter Grid.Row="1" Name="ProfileSplitter" Height="5" ResizeDirection="Rows" Background="{DynamicResource DividerBrush}"
-                      IsVisible="{Binding IsProfileOpen}" />
-
-        <!-- Profile: its own panel under the map, like an IDE's output window -->
-        <Border Grid.Row="2" Name="ProfilePanel" Background="{DynamicResource PanelBackgroundBrush}" IsVisible="{Binding IsProfileOpen}">
-          <DockPanel>
-            <Border DockPanel.Dock="Top" Background="{DynamicResource PanelHeaderBrush}" Padding="14,3,6,3"
-                    BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1">
-              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                <TextBlock Classes="overline" Text="PROFILE" VerticalAlignment="Center" Margin="0,0,18,0" />
-
-                <!-- The legend: each entry turns its line on and off -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" IsVisible="{Binding LineOfSight.HasResult}">
-                  <ToggleButton Name="LegendTerrain" Classes="legendItem" IsChecked="{Binding ProfileShowTerrain}"
-                                ToolTip.Tip="Show or hide the terrain line" AutomationProperties.Name="Terrain line">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Line StartPoint="0,0" EndPoint="18,0" Stroke="{DynamicResource ChartTerrainBrush}" StrokeThickness="2" VerticalAlignment="Center" />
-                      <TextBlock Text="Terrain" />
-                    </StackPanel>
-                  </ToggleButton>
-                  <ToggleButton Name="LegendCurvature" Classes="legendItem" IsChecked="{Binding ProfileShowCurvature}"
-                                ToolTip.Tip="Show or hide the terrain raised by the Earth's curvature" AutomationProperties.Name="With curvature line">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Line StartPoint="0,0" EndPoint="18,0" Stroke="{DynamicResource ChartCorrectedBrush}" StrokeThickness="2" StrokeDashArray="2,1.5" VerticalAlignment="Center" />
-                      <TextBlock Text="With curvature" />
-                    </StackPanel>
-                  </ToggleButton>
-                  <ToggleButton Name="LegendSightLine" Classes="legendItem" IsChecked="{Binding ProfileShowSightLine}"
-                                ToolTip.Tip="Show or hide the sight line" AutomationProperties.Name="Sight line">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Line StartPoint="0,0" EndPoint="18,0" Stroke="{DynamicResource ChartSightLineBrush}" StrokeThickness="2" VerticalAlignment="Center" />
-                      <TextBlock Text="Sight line" />
-                    </StackPanel>
-                  </ToggleButton>
-                  <ToggleButton Name="LegendFresnel" Classes="legendItem" IsChecked="{Binding ProfileShowFresnel}" IsVisible="{Binding LineOfSight.HasFresnel}"
-                                ToolTip.Tip="Show or hide the first Fresnel zone" AutomationProperties.Name="First Fresnel zone">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Border Width="18" Height="11" Background="{DynamicResource ChartFresnelBrush}" VerticalAlignment="Center" />
-                      <TextBlock Text="First Fresnel zone" />
-                    </StackPanel>
-                  </ToggleButton>
-                </StackPanel>
-
-                <Button Grid.Column="2" Name="ResetProfileZoomButton" Content="Reset Zoom" IsVisible="{Binding #Chart.IsZoomed}"
-                        Margin="0,0,6,0" Padding="10,3" FontSize="12" ToolTip.Tip="Show the whole path again (or double-click the chart)" />
-                <Button Grid.Column="3" Name="CloseProfileButton" Classes="icon" Command="{Binding CloseProfileCommand}"
-                        ToolTip.Tip="Close the profile" AutomationProperties.Name="Close the profile">
-                  <Path StrokeThickness="1.6" StrokeLineCap="Round" Data="M7,7 L17,17 M17,7 L7,17" />
-                </Button>
-              </Grid>
-            </Border>
-            <controls:ProfileChart Name="Chart" Analysis="{Binding LineOfSight.Analysis}" Margin="8"
-                                   ShowTerrain="{Binding ProfileShowTerrain}" ShowCurvature="{Binding ProfileShowCurvature}"
-                                   ShowSightLine="{Binding ProfileShowSightLine}" ShowFresnel="{Binding ProfileShowFresnel}"
-                                   AutomationProperties.Name="Profile chart of the line of sight. The arrow keys move a reading cursor, plus and minus zoom, Home shows the whole path." />
-          </DockPanel>
-        </Border>
-
-        <Border Grid.Row="3" Padding="8,4" Background="{DynamicResource PanelHeaderBrush}"
-                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" IsVisible="{Binding !IsProfileOpen}">
-          <Button Name="OpenProfileButton" Content="Profile" Command="{Binding OpenProfileCommand}" Margin="0"
-                  ToolTip.Tip="Show the profile chart" />
-        </Border>
-      </Grid>
-
-      <GridSplitter Grid.Column="1" Name="PanelSplitter" Width="5" ResizeDirection="Columns" Background="{DynamicResource DividerBrush}" />
-
-        <!-- One panel at a time, picked by these tabs hanging on its left edge over the map -->
-        <StackPanel Name="SideTabs" Grid.Column="0" Grid.ColumnSpan="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,-1,0" Width="37" ZIndex="10">
-          <Button Name="TerrainTabButton" Classes="sideTab" Classes.selected="{Binding IsTerrainTab}"
-                  Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.Terrain}"
-                  ToolTip.Tip="Terrain" AutomationProperties.Name="Terrain panel">
-            <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="Terrain" /></LayoutTransformControl>
-          </Button>
-          <Button Name="LineOfSightTabButton" Classes="sideTab" Classes.selected="{Binding IsLineOfSightTab}"
-                  Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.LineOfSight}"
-                  ToolTip.Tip="Line of Sight" AutomationProperties.Name="Line of Sight panel">
-            <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="Line of Sight" /></LayoutTransformControl>
-          </Button>
-          <Button Name="ViewshedTabButton" Classes="sideTab" Classes.selected="{Binding IsViewshedTab}"
-                  Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.Viewshed}"
-                  ToolTip.Tip="Viewshed" AutomationProperties.Name="Viewshed panel">
-            <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="Viewshed" /></LayoutTransformControl>
-          </Button>
-          <Button Name="AboutTabButton" Classes="sideTab" Classes.selected="{Binding IsAboutTab}"
-                  Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.About}"
-                  ToolTip.Tip="About" AutomationProperties.Name="About panel">
-            <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="About" /></LayoutTransformControl>
-          </Button>
+      <!-- First start -->
+      <Border DockPanel.Dock="Top" Padding="12,8" Background="{DynamicResource BannerBackgroundBrush}" IsVisible="{Binding ShowSamplePrompt}">
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
+                     Text="New here? Start with the bundled sample tile, a stretch of the Grand Canyon." />
+          <Button Name="SamplePromptButton" Classes="primary" Content="Open the Sample Tile" Command="{Binding OpenSampleTileCommand}" Margin="0" />
         </StackPanel>
+      </Border>
 
-        <Border Grid.Column="2" Name="SidePanel" Background="{DynamicResource PanelBackgroundBrush}"
-                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1,0,0,0">
+      <!-- Status bar -->
+      <Border DockPanel.Dock="Bottom" Padding="10,6" Background="{DynamicResource StatusBackgroundBrush}"
+              BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0">
+        <StackPanel Spacing="2">
+          <TextBlock Name="StatusText" Text="{Binding StatusMessage}" IsVisible="{Binding HasStatus}" Classes.error="{Binding StatusIsError}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding Terrain.CursorText}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Map and profile | splitter | side panel, with the panel's tabs over the map's edge. MainWindow.axaml.cs sizes the profile row and the panel column. -->
+      <Grid Name="Workspace" ColumnDefinitions="*,Auto,440">
+
+        <Grid Name="MapArea" RowDefinitions="*,Auto,260,Auto">
           <Panel>
+            <controls:MapView Name="Map"
+                              AutomationProperties.Name="Terrain map. With focus, arrow keys move a crosshair, Enter places the observer and Ctrl+Enter the target, Ctrl with the arrows moves the map, plus and minus zoom."
+                              Posts="{Binding Terrain.Posts}"
+                              Tile="{Binding Terrain.Tile.Info}"
+                              WidthM="{Binding Terrain.WidthM}"
+                              Viewshed="{Binding Viewshed.Map}"
+                              Highlights="{Binding Viewshed.Highlights}"
+                              ShowViewshed="{Binding IsViewshedTab}"
+                              ShowPath="{Binding !IsViewshedTab}"
+                              Analysis="{Binding LineOfSight.Analysis}"
+                              ObserverLatitude="{Binding LineOfSight.ObserverLatitude.Value}"
+                              ObserverLongitude="{Binding LineOfSight.ObserverLongitude.Value}"
+                              TargetLatitude="{Binding LineOfSight.TargetLatitude.Value}"
+                              TargetLongitude="{Binding LineOfSight.TargetLongitude.Value}"
+                              ViewshedObserverLatitude="{Binding Viewshed.ObserverLatitude.Value}"
+                              ViewshedObserverLongitude="{Binding Viewshed.ObserverLongitude.Value}"
+                              HiddenLayers="{Binding Viewshed.HiddenLayers}"
+                              ViewshedOpacity="{Binding Viewshed.MapOpacity}"
+                              ShowViewshedLayer="{Binding Viewshed.ShowLayer}"
+                              ViewshedRadiusLabel="{Binding Viewshed.RadiusLabel}" />
 
-            <!-- Terrain -->
-            <ScrollViewer Name="TerrainPanel" IsVisible="{Binding IsTerrainTab}">
-              <StackPanel Margin="18,4,18,18">
-                <TextBlock Classes="heading" Text="Tile" />
-                <TextBlock Text="{Binding Terrain.FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                <TextBlock Classes="muted" Text="{Binding Terrain.TilePath}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,12" />
-                <views:NumberFieldView DataContext="{Binding Terrain.SouthWestLatitude}" />
-                <views:NumberFieldView DataContext="{Binding Terrain.SouthWestLongitude}" />
-                <Button Content="Reopen with This Corner" Command="{Binding ReopenCommand}" />
-                <TextBlock Classes="error" Text="{Binding Terrain.LoadError}" TextWrapping="Wrap"
-                           IsVisible="{Binding Terrain.LoadError, Converter={x:Static ObjectConverters.IsNotNull}}" />
-
-                <TextBlock Classes="heading" Text="Facts" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="130,*">
-                        <TextBlock Classes="muted" Text="Extent" />
-                        <TextBlock Grid.Column="1" Text="{Binding Terrain.ExtentText}" TextWrapping="Wrap" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="130,*">
-                        <TextBlock Classes="muted" Text="Grid Size" />
-                        <TextBlock Grid.Column="1" Text="{Binding Terrain.GridText}" TextWrapping="Wrap" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="130,*">
-                        <TextBlock Classes="muted" Text="Resolution" />
-                        <TextBlock Grid.Column="1" Text="{Binding Terrain.ResolutionText}" TextWrapping="Wrap" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="130,*">
-                        <TextBlock Classes="muted" Text="Missing Data" />
-                        <TextBlock Grid.Column="1" Text="{Binding Terrain.VoidText}" TextWrapping="Wrap" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-
-                <TextBlock Classes="heading" Text="Map Colours" />
-                <TextBlock TextWrapping="Wrap"
-                           Text="Elevation runs from green on the tile's lowest ground, through tan and brown, to pale grey on its highest. Dark grey marks posts with no data. North is up." />
+            <!-- Zoom -->
+            <Border Classes="mapControls" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,20"
+                    IsVisible="{Binding Terrain.IsLoaded}">
+              <StackPanel Orientation="Horizontal">
+                <Button Name="ZoomOutButton" Classes="icon" Content="−" ToolTip.Tip="Zoom out" AutomationProperties.Name="Zoom out" />
+                <TextBlock Name="ZoomText" Text="{Binding #Map.Zoom, Converter={x:Static views:Converters.ZoomPercent}}"
+                           MinWidth="52" TextAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                <Button Name="ZoomInButton" Classes="icon" Content="+" ToolTip.Tip="Zoom in" AutomationProperties.Name="Zoom in" />
               </StackPanel>
-            </ScrollViewer>
+            </Border>
+          </Panel>
 
-            <!-- Line of sight -->
-            <ScrollViewer Name="LineOfSightPanel" IsVisible="{Binding IsLineOfSightTab}">
-              <StackPanel Margin="18,4,18,18">
-                <Grid ColumnDefinitions="*,Auto">
-                  <StackPanel Classes="headingRow">
-                    <TextBlock Classes="heading" Text="Points" />
-                    <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.PointsExplanation}"><TextBlock /></Border>
+          <GridSplitter Grid.Row="1" Name="ProfileSplitter" Height="5" ResizeDirection="Rows" Background="{DynamicResource DividerBrush}"
+                        IsVisible="{Binding IsProfileOpen}" />
+
+          <!-- Profile: its own panel under the map, like an IDE's output window -->
+          <Border Grid.Row="2" Name="ProfilePanel" Background="{DynamicResource PanelBackgroundBrush}" IsVisible="{Binding IsProfileOpen}">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Background="{DynamicResource PanelHeaderBrush}" Padding="14,3,6,3"
+                      BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <TextBlock Classes="overline" Text="PROFILE" VerticalAlignment="Center" Margin="0,0,18,0" />
+
+                  <!-- The legend: each entry turns its line on and off -->
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" IsVisible="{Binding LineOfSight.HasResult}">
+                    <ToggleButton Name="LegendTerrain" Classes="legendItem" IsChecked="{Binding ProfileShowTerrain}"
+                                  ToolTip.Tip="Show or hide the terrain line" AutomationProperties.Name="Terrain line">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Line StartPoint="0,0" EndPoint="18,0" Stroke="{DynamicResource ChartTerrainBrush}" StrokeThickness="2" VerticalAlignment="Center" />
+                        <TextBlock Text="Terrain" />
+                      </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton Name="LegendCurvature" Classes="legendItem" IsChecked="{Binding ProfileShowCurvature}"
+                                  ToolTip.Tip="Show or hide the terrain raised by the Earth's curvature" AutomationProperties.Name="With curvature line">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Line StartPoint="0,0" EndPoint="18,0" Stroke="{DynamicResource ChartCorrectedBrush}" StrokeThickness="2" StrokeDashArray="2,1.5" VerticalAlignment="Center" />
+                        <TextBlock Text="With curvature" />
+                      </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton Name="LegendSightLine" Classes="legendItem" IsChecked="{Binding ProfileShowSightLine}"
+                                  ToolTip.Tip="Show or hide the sight line" AutomationProperties.Name="Sight line">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Line StartPoint="0,0" EndPoint="18,0" Stroke="{DynamicResource ChartSightLineBrush}" StrokeThickness="2" VerticalAlignment="Center" />
+                        <TextBlock Text="Sight line" />
+                      </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton Name="LegendFresnel" Classes="legendItem" IsChecked="{Binding ProfileShowFresnel}" IsVisible="{Binding LineOfSight.HasFresnel}"
+                                  ToolTip.Tip="Show or hide the first Fresnel zone" AutomationProperties.Name="First Fresnel zone">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Border Width="18" Height="11" Background="{DynamicResource ChartFresnelBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="First Fresnel zone" />
+                      </StackPanel>
+                    </ToggleButton>
                   </StackPanel>
-                  <Button Grid.Column="1" Name="SwapPointsButton" Classes="icon" Command="{Binding LineOfSight.SwapCommand}" VerticalAlignment="Center"
-                          Margin="0,6,0,0" ToolTip.Tip="Swap the observer and the target, with their heights" AutomationProperties.Name="Swap the observer and the target">
-                    <Path StrokeThickness="1.6" StrokeLineCap="Round" StrokeJoin="Round" Data="M8,4 L8,20 M4,8 L8,4 L12,8 M16,20 L16,4 M12,16 L16,20 L20,16" />
+
+                  <Button Grid.Column="2" Name="ResetProfileZoomButton" Content="Reset Zoom" IsVisible="{Binding #Chart.IsZoomed}"
+                          Margin="0,0,6,0" Padding="10,3" FontSize="12" ToolTip.Tip="Show the whole path again (or double-click the chart)" />
+                  <Button Grid.Column="3" Name="CloseProfileButton" Classes="icon" Command="{Binding CloseProfileCommand}"
+                          ToolTip.Tip="Close the profile" AutomationProperties.Name="Close the profile">
+                    <Path StrokeThickness="1.6" StrokeLineCap="Round" Data="M7,7 L17,17 M17,7 L7,17" />
                   </Button>
                 </Grid>
+              </Border>
+              <controls:ProfileChart Name="Chart" Analysis="{Binding LineOfSight.Analysis}" Margin="8"
+                                     ShowTerrain="{Binding ProfileShowTerrain}" ShowCurvature="{Binding ProfileShowCurvature}"
+                                     ShowSightLine="{Binding ProfileShowSightLine}" ShowFresnel="{Binding ProfileShowFresnel}"
+                                     AutomationProperties.Name="Profile chart of the line of sight. The arrow keys move a reading cursor, plus and minus zoom, Home shows the whole path." />
+            </DockPanel>
+          </Border>
 
-                <StackPanel Classes="subheading">
-                  <Ellipse Width="14" Height="14" Fill="#0072B2" Stroke="White" StrokeThickness="3" VerticalAlignment="Center" />
-                  <TextBlock Text="Observer" />
-                </StackPanel>
-                <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverLatitude}" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverLongitude}" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverHeight}" />
+          <Border Grid.Row="3" Padding="8,4" Background="{DynamicResource PanelHeaderBrush}"
+                  BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" IsVisible="{Binding !IsProfileOpen}">
+            <Button Name="OpenProfileButton" Content="Profile" Command="{Binding OpenProfileCommand}" Margin="0"
+                    ToolTip.Tip="Show the profile chart" />
+          </Border>
+        </Grid>
 
-                <StackPanel Classes="subheading">
-                  <Ellipse Width="14" Height="14" Fill="#E69F00" Stroke="White" StrokeThickness="3" VerticalAlignment="Center" />
-                  <TextBlock Text="Target" />
-                </StackPanel>
-                <views:NumberFieldView DataContext="{Binding LineOfSight.TargetLatitude}" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.TargetLongitude}" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.TargetHeight}" />
+        <GridSplitter Grid.Column="1" Name="PanelSplitter" Width="5" ResizeDirection="Columns" Background="{DynamicResource DividerBrush}" />
 
-                <TextBlock Classes="heading" Text="Parameters" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.RefractionK}" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.Spacing}" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
-                  <TextBlock Text="Interpolation" FontWeight="SemiBold" VerticalAlignment="Center" />
-                  <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.InterpolationExplanation}"><TextBlock /></Border>
-                </StackPanel>
-                <ComboBox ItemsSource="{Binding LineOfSight.InterpolationChoices}" SelectedItem="{Binding LineOfSight.Interpolation}"
-                          Margin="0,0,0,12" AutomationProperties.Name="Interpolation"
-                          AutomationProperties.HelpText="{x:Static p:PlainWords.InterpolationExplanation}" />
-                <views:NumberFieldView DataContext="{Binding LineOfSight.Frequency}" />
+          <!-- One panel at a time, picked by these tabs hanging on its left edge over the map -->
+          <StackPanel Name="SideTabs" Grid.Column="0" Grid.ColumnSpan="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,-1,0" Width="37" ZIndex="10">
+            <Button Name="TerrainTabButton" Classes="sideTab" Classes.selected="{Binding IsTerrainTab}"
+                    Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.Terrain}"
+                    ToolTip.Tip="Terrain" AutomationProperties.Name="Terrain panel">
+              <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="Terrain" /></LayoutTransformControl>
+            </Button>
+            <Button Name="LineOfSightTabButton" Classes="sideTab" Classes.selected="{Binding IsLineOfSightTab}"
+                    Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.LineOfSight}"
+                    ToolTip.Tip="Line of Sight" AutomationProperties.Name="Line of Sight panel">
+              <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="Line of Sight" /></LayoutTransformControl>
+            </Button>
+            <Button Name="ViewshedTabButton" Classes="sideTab" Classes.selected="{Binding IsViewshedTab}"
+                    Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.Viewshed}"
+                    ToolTip.Tip="Viewshed" AutomationProperties.Name="Viewshed panel">
+              <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="Viewshed" /></LayoutTransformControl>
+            </Button>
+            <Button Name="AboutTabButton" Classes="sideTab" Classes.selected="{Binding IsAboutTab}"
+                    Command="{Binding ShowTabCommand}" CommandParameter="{x:Static vm:MainTab.About}"
+                    ToolTip.Tip="About" AutomationProperties.Name="About panel">
+              <LayoutTransformControl LayoutTransform="rotate(90deg)"><TextBlock Text="About" /></LayoutTransformControl>
+            </Button>
+          </StackPanel>
 
-                <Button Name="CheckButton" Classes="primary" Content="Check Line of Sight" Command="{Binding LineOfSight.CheckCommand}"
-                        ToolTip.Tip="Ask the engine whether the observer can see the target (F5)" Margin="0,4,0,0" />
+          <Border Grid.Column="2" Name="SidePanel" Background="{DynamicResource PanelBackgroundBrush}"
+                  BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1,0,0,0">
+            <Panel>
 
-                <TextBlock Classes="error" Text="{Binding LineOfSight.Error}" IsVisible="{Binding LineOfSight.HasError}" TextWrapping="Wrap" Margin="0,8,0,0" />
+              <!-- Terrain -->
+              <ScrollViewer Name="TerrainPanel" IsVisible="{Binding IsTerrainTab}">
+                <StackPanel Margin="18,4,18,18">
+                  <TextBlock Classes="heading" Text="Tile" />
+                  <TextBlock Text="{Binding Terrain.FileName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                  <TextBlock Classes="muted" Text="{Binding Terrain.TilePath}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,12" />
+                  <views:NumberFieldView DataContext="{Binding Terrain.SouthWestLatitude}" />
+                  <views:NumberFieldView DataContext="{Binding Terrain.SouthWestLongitude}" />
+                  <Button Content="Reopen with This Corner" Command="{Binding ReopenCommand}" />
+                  <TextBlock Classes="error" Text="{Binding Terrain.LoadError}" TextWrapping="Wrap"
+                             IsVisible="{Binding Terrain.LoadError, Converter={x:Static ObjectConverters.IsNotNull}}" />
 
-                <StackPanel Name="LineOfSightResult" IsVisible="{Binding LineOfSight.HasResult}" Margin="0,14,0,0">
-
-                  <!-- The verdict -->
-                  <Border Classes="resultCard"
-                          Classes.visible="{Binding LineOfSight.IsVisibleVerdict}"
-                          Classes.blocked="{Binding LineOfSight.IsBlocked}"
-                          Classes.noanswer="{Binding LineOfSight.IsNoConfidentAnswer}">
-                    <StackPanel Spacing="10">
-                      <Grid ColumnDefinitions="Auto,*">
-                        <Border Classes="badge">
-                          <Panel Width="44" Height="44">
-                            <Path Classes="glyph" IsVisible="{Binding LineOfSight.IsVisibleVerdict}" Data="M13,23 L19.5,29.5 L31,16" />
-                            <Path Classes="glyph" IsVisible="{Binding LineOfSight.IsBlocked}" Data="M15,15 L29,29 M29,15 L15,29" />
-                            <Path Classes="glyph" IsVisible="{Binding LineOfSight.IsNoConfidentAnswer}" Data="M22,12 L22,25 M22,31.5 L22,32" />
-                          </Panel>
-                        </Border>
-                        <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
-                          <TextBlock Classes="overline" Text="LINE OF SIGHT" />
-                          <TextBlock Name="VerdictText" Classes="verdict"
-                                     Classes.visible="{Binding LineOfSight.IsVisibleVerdict}"
-                                     Classes.blocked="{Binding LineOfSight.IsBlocked}"
-                                     Classes.noanswer="{Binding LineOfSight.IsNoConfidentAnswer}"
-                                     Text="{Binding LineOfSight.VerdictText}" />
-                        </StackPanel>
-                      </Grid>
-                      <TextBlock Name="ReasonText" Text="{Binding LineOfSight.Reason}" IsVisible="{Binding LineOfSight.HasReason}" TextWrapping="Wrap" />
+                  <TextBlock Classes="heading" Text="Facts" />
+                  <Border Classes="factsCard" Margin="0">
+                    <StackPanel>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="130,*">
+                          <TextBlock Classes="muted" Text="Extent" />
+                          <TextBlock Grid.Column="1" Text="{Binding Terrain.ExtentText}" TextWrapping="Wrap" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="130,*">
+                          <TextBlock Classes="muted" Text="Grid Size" />
+                          <TextBlock Grid.Column="1" Text="{Binding Terrain.GridText}" TextWrapping="Wrap" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="130,*">
+                          <TextBlock Classes="muted" Text="Resolution" />
+                          <TextBlock Grid.Column="1" Text="{Binding Terrain.ResolutionText}" TextWrapping="Wrap" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="130,*">
+                          <TextBlock Classes="muted" Text="Missing Data" />
+                          <TextBlock Grid.Column="1" Text="{Binding Terrain.VoidText}" TextWrapping="Wrap" />
+                        </Grid>
+                      </Border>
                     </StackPanel>
                   </Border>
 
-                  <!-- Where the terrain gets in the way -->
-                  <Border Classes="factsCard" IsVisible="{Binding LineOfSight.HasObstruction}">
-                    <StackPanel>
-                      <TextBlock Classes="overline" Text="OBSTRUCTION" Margin="0,2,0,2" />
-                      <ItemsControl ItemsSource="{Binding LineOfSight.ObstructionDetails}">
+                  <TextBlock Classes="heading" Text="Map Colours" />
+                  <TextBlock TextWrapping="Wrap"
+                             Text="Elevation runs from green on the tile's lowest ground, through tan and brown, to pale grey on its highest. Dark grey marks posts with no data. North is up." />
+                </StackPanel>
+              </ScrollViewer>
+
+              <!-- Line of sight -->
+              <ScrollViewer Name="LineOfSightPanel" IsVisible="{Binding IsLineOfSightTab}">
+                <StackPanel Margin="18,4,18,18">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Classes="headingRow">
+                      <TextBlock Classes="heading" Text="Points" />
+                      <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.PointsExplanation}"><TextBlock /></Border>
+                    </StackPanel>
+                    <Button Grid.Column="1" Name="SwapPointsButton" Classes="icon" Command="{Binding LineOfSight.SwapCommand}" VerticalAlignment="Center"
+                            Margin="0,6,0,0" ToolTip.Tip="Swap the observer and the target, with their heights" AutomationProperties.Name="Swap the observer and the target">
+                      <Path StrokeThickness="1.6" StrokeLineCap="Round" StrokeJoin="Round" Data="M8,4 L8,20 M4,8 L8,4 L12,8 M16,20 L16,4 M12,16 L16,20 L20,16" />
+                    </Button>
+                  </Grid>
+
+                  <StackPanel Classes="subheading">
+                    <Ellipse Width="14" Height="14" Fill="#0072B2" Stroke="White" StrokeThickness="3" VerticalAlignment="Center" />
+                    <TextBlock Text="Observer" />
+                  </StackPanel>
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverLatitude}" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverLongitude}" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverHeight}" />
+
+                  <StackPanel Classes="subheading">
+                    <Ellipse Width="14" Height="14" Fill="#E69F00" Stroke="White" StrokeThickness="3" VerticalAlignment="Center" />
+                    <TextBlock Text="Target" />
+                  </StackPanel>
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.TargetLatitude}" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.TargetLongitude}" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.TargetHeight}" />
+
+                  <TextBlock Classes="heading" Text="Parameters" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.RefractionK}" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.Spacing}" />
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+                    <TextBlock Text="Interpolation" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.InterpolationExplanation}"><TextBlock /></Border>
+                  </StackPanel>
+                  <ComboBox ItemsSource="{Binding LineOfSight.InterpolationChoices}" SelectedItem="{Binding LineOfSight.Interpolation}"
+                            Margin="0,0,0,12" AutomationProperties.Name="Interpolation"
+                            AutomationProperties.HelpText="{x:Static p:PlainWords.InterpolationExplanation}" />
+                  <views:NumberFieldView DataContext="{Binding LineOfSight.Frequency}" />
+
+                  <Button Name="CheckButton" Classes="primary" Content="Check Line of Sight" Command="{Binding LineOfSight.CheckCommand}"
+                          ToolTip.Tip="Ask the engine whether the observer can see the target (F5)" Margin="0,4,0,0" />
+
+                  <TextBlock Classes="error" Text="{Binding LineOfSight.Error}" IsVisible="{Binding LineOfSight.HasError}" TextWrapping="Wrap" Margin="0,8,0,0" />
+
+                  <StackPanel Name="LineOfSightResult" IsVisible="{Binding LineOfSight.HasResult}" Margin="0,14,0,0">
+
+                    <!-- The verdict -->
+                    <Border Classes="resultCard"
+                            Classes.visible="{Binding LineOfSight.IsVisibleVerdict}"
+                            Classes.blocked="{Binding LineOfSight.IsBlocked}"
+                            Classes.noanswer="{Binding LineOfSight.IsNoConfidentAnswer}">
+                      <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Border Classes="badge">
+                            <Panel Width="44" Height="44">
+                              <Path Classes="glyph" IsVisible="{Binding LineOfSight.IsVisibleVerdict}" Data="M13,23 L19.5,29.5 L31,16" />
+                              <Path Classes="glyph" IsVisible="{Binding LineOfSight.IsBlocked}" Data="M15,15 L29,29 M29,15 L15,29" />
+                              <Path Classes="glyph" IsVisible="{Binding LineOfSight.IsNoConfidentAnswer}" Data="M22,12 L22,25 M22,31.5 L22,32" />
+                            </Panel>
+                          </Border>
+                          <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Classes="overline" Text="LINE OF SIGHT" />
+                            <TextBlock Name="VerdictText" Classes="verdict"
+                                       Classes.visible="{Binding LineOfSight.IsVisibleVerdict}"
+                                       Classes.blocked="{Binding LineOfSight.IsBlocked}"
+                                       Classes.noanswer="{Binding LineOfSight.IsNoConfidentAnswer}"
+                                       Text="{Binding LineOfSight.VerdictText}" />
+                          </StackPanel>
+                        </Grid>
+                        <TextBlock Name="ReasonText" Text="{Binding LineOfSight.Reason}" IsVisible="{Binding LineOfSight.HasReason}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+
+                    <!-- Where the terrain gets in the way -->
+                    <Border Classes="factsCard" IsVisible="{Binding LineOfSight.HasObstruction}">
+                      <StackPanel>
+                        <TextBlock Classes="overline" Text="OBSTRUCTION" Margin="0,2,0,2" />
+                        <ItemsControl ItemsSource="{Binding LineOfSight.ObstructionDetails}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ResultRow">
+                              <Border Classes="factRow">
+                                <Grid ColumnDefinitions="150,*">
+                                  <TextBlock Classes="muted" Text="{Binding Label}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                  <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Right" />
+                                </Grid>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <!-- The path -->
+                    <Border Classes="factsCard">
+                      <StackPanel>
+                        <TextBlock Classes="overline" Text="PATH" Margin="0,2,0,2" />
+                        <ItemsControl ItemsSource="{Binding LineOfSight.PathDetails}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ResultRow">
+                              <Border Classes="factRow">
+                                <Grid ColumnDefinitions="150,*">
+                                  <TextBlock Classes="muted" Text="{Binding Label}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                  <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Right" />
+                                </Grid>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <!-- Fresnel zone, when a frequency was given -->
+                    <Border Classes="factsCard" IsVisible="{Binding LineOfSight.HasFresnel}">
+                      <StackPanel Spacing="8" Margin="0,2,0,4">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Classes="overline" Text="FIRST FRESNEL ZONE" VerticalAlignment="Center" />
+                          <Border Grid.Column="1" Classes="chip"
+                                  Classes.clear="{Binding LineOfSight.IsFresnelClear}"
+                                  Classes.partly="{Binding LineOfSight.IsFresnelPartlyObstructed}"
+                                  Classes.blocked="{Binding LineOfSight.IsFresnelBlocked}"
+                                  Classes.unknown="{Binding LineOfSight.IsFresnelUnknown}">
+                            <TextBlock Name="FresnelVerdictText" Text="{Binding LineOfSight.FresnelVerdictText}" />
+                          </Border>
+                        </Grid>
+                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding LineOfSight.FresnelFreeFraction}" Height="8"
+                                     Classes.clear="{Binding LineOfSight.IsFresnelClear}"
+                                     Classes.partly="{Binding LineOfSight.IsFresnelPartlyObstructed}"
+                                     IsVisible="{Binding !LineOfSight.IsFresnelUnknown}"
+                                     AutomationProperties.Name="Share of the first Fresnel zone radius left free" />
+                        <TextBlock Text="{Binding LineOfSight.FresnelDetail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+
+              <!-- Viewshed -->
+              <ScrollViewer Name="ViewshedPanel" IsVisible="{Binding IsViewshedTab}">
+                <StackPanel Margin="18,4,18,18">
+                  <StackPanel Classes="headingRow">
+                    <TextBlock Classes="heading" Text="Observer" />
+                    <Border Classes="help" ToolTip.Tip="Left-click the map to place the observer, or type the coordinates. Drag the marker to move it."><TextBlock /></Border>
+                  </StackPanel>
+                  <views:NumberFieldView DataContext="{Binding Viewshed.ObserverLatitude}" />
+                  <views:NumberFieldView DataContext="{Binding Viewshed.ObserverLongitude}" />
+                  <views:NumberFieldView DataContext="{Binding Viewshed.ObserverHeight}" />
+
+                  <TextBlock Classes="heading" Text="Parameters" />
+                  <views:NumberFieldView DataContext="{Binding Viewshed.TargetHeight}" />
+                  <views:NumberFieldView DataContext="{Binding Viewshed.RadiusKm}" />
+                  <views:NumberFieldView DataContext="{Binding Viewshed.Spacing}" />
+                  <views:NumberFieldView DataContext="{Binding Viewshed.RefractionK}" />
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+                    <TextBlock Text="Interpolation" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.InterpolationExplanation}"><TextBlock /></Border>
+                  </StackPanel>
+                  <ComboBox ItemsSource="{Binding Viewshed.InterpolationChoices}" SelectedItem="{Binding Viewshed.Interpolation}"
+                            Margin="0,0,0,12" AutomationProperties.Name="Viewshed interpolation"
+                            AutomationProperties.HelpText="{x:Static p:PlainWords.InterpolationExplanation}" />
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+                    <TextBlock Text="Algorithm" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.AlgorithmExplanation}"><TextBlock /></Border>
+                  </StackPanel>
+                  <ComboBox ItemsSource="{Binding Viewshed.AlgorithmChoices}" SelectedItem="{Binding Viewshed.Algorithm}"
+                            IsEnabled="{Binding Viewshed.IsAlgorithmChoiceEnabled}" Margin="0,0,0,12" AutomationProperties.Name="Algorithm"
+                            AutomationProperties.HelpText="{x:Static p:PlainWords.AlgorithmExplanation}" />
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+                    <TextBlock Text="Compare With" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.ComparisonExplanation}"><TextBlock /></Border>
+                  </StackPanel>
+                  <ComboBox ItemsSource="{Binding Viewshed.ComparisonChoices}" SelectedIndex="{Binding Viewshed.ComparisonIndex}"
+                            IsEnabled="{Binding Viewshed.IsIdle}" Margin="0,0,0,12" AutomationProperties.Name="Compare with"
+                            AutomationProperties.HelpText="{x:Static p:PlainWords.ComparisonExplanation}" />
+
+                  <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Name="RunViewshedButton" Classes="primary" Content="Run Viewshed" Command="{Binding Viewshed.RunCommand}"
+                            ToolTip.Tip="Compute which cells the observer can see (F5)" />
+                    <Button Name="CancelViewshedButton" Content="Cancel" Command="{Binding Viewshed.CancelCommand}" HotKey="Escape"
+                            ToolTip.Tip="Stop the running viewshed (Esc)" />
+                  </StackPanel>
+
+                  <StackPanel IsVisible="{Binding Viewshed.IsRunning}" Spacing="4" Margin="0,4,0,0">
+                    <TextBlock Text="{Binding Viewshed.ProgressText}" FontWeight="SemiBold" />
+                    <ProgressBar Minimum="0" Maximum="1" Value="{Binding Viewshed.Progress}" Height="10"
+                                 AutomationProperties.Name="Viewshed progress" />
+                    <TextBlock Classes="muted" Text="{Binding Viewshed.Progress, Converter={x:Static views:Converters.Percent}}" />
+                  </StackPanel>
+
+                  <TextBlock Classes="error" Text="{Binding Viewshed.Error}" IsVisible="{Binding Viewshed.HasError}" TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                  <Border Name="RunAgainNote" Classes="factsCard" IsVisible="{Binding Viewshed.NeedsRunAgain}" Margin="0,10,0,0">
+                    <TextBlock Text="{Binding Viewshed.RunAgainText}" TextWrapping="Wrap" />
+                  </Border>
+
+                  <StackPanel Name="ViewshedResult" IsVisible="{Binding Viewshed.ShowResult}" Spacing="6" Margin="0,8,0,0">
+                    <TextBlock Name="ViewshedSummary" Text="{Binding Viewshed.Summary}" TextWrapping="Wrap" />
+                    <TextBlock Classes="heading" Text="Legend" />
+                    <Border Classes="factsCard" Margin="0" Padding="6,6">
+                      <ItemsControl Name="ViewshedLegend" ItemsSource="{Binding Viewshed.Legend}">
                         <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:ResultRow">
-                            <Border Classes="factRow">
-                              <Grid ColumnDefinitions="150,*">
-                                <TextBlock Classes="muted" Text="{Binding Label}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Right" />
+                          <DataTemplate x:DataType="vm:LegendRow">
+                            <Button Classes="legendRow" Classes.off="{Binding !IsShown}" Classes.empty="{Binding IsEmpty}"
+                                    Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).Viewshed.ToggleLayerCommand}" CommandParameter="{Binding}"
+                                    ToolTip.Tip="Show or hide these cells on the map" AutomationProperties.Name="{Binding Name}">
+                              <Grid ColumnDefinitions="24,*,Auto">
+                                <Border Width="16" Height="16" CornerRadius="3" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
+                                        Background="{Binding Colour, Converter={x:Static views:Converters.RgbaToBrush}}" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                  <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                                  <TextBlock Classes="muted" Text="None in this run" FontSize="11" IsVisible="{Binding IsEmpty}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="{Binding Count}" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
                               </Grid>
-                            </Border>
+                            </Button>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
                       </ItemsControl>
-                    </StackPanel>
-                  </Border>
+                    </Border>
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                               Text="Click an entry to hide or show its cells. Hiding one state leaves the others drawn, so its shape still shows: hide both, or set the opacity to 0, to see the bare terrain. The counts are the cells drawn on the map: inside the circle and on the tile." />
 
-                  <!-- The path -->
-                  <Border Classes="factsCard">
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,3">
+                      <TextBlock Text="Layer Opacity" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <TextBlock Classes="muted" Text="{Binding Viewshed.OverlayOpacity, StringFormat='{}{0:0}%'}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Slider Name="ViewshedOpacitySlider" Minimum="0" Maximum="100" Value="{Binding Viewshed.OverlayOpacity}" Width="240" HorizontalAlignment="Left"
+                            AutomationProperties.Name="Viewshed layer opacity" />
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+
+              <!-- About -->
+              <ScrollViewer Name="AboutPanel" IsVisible="{Binding IsAboutTab}">
+                <StackPanel Margin="18,4,18,18">
+                  <TextBlock Classes="heading" Text="TerrainBench" />
+                  <Border Classes="factsCard" Margin="0">
                     <StackPanel>
-                      <TextBlock Classes="overline" Text="PATH" Margin="0,2,0,2" />
-                      <ItemsControl ItemsSource="{Binding LineOfSight.PathDetails}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:ResultRow">
-                            <Border Classes="factRow">
-                              <Grid ColumnDefinitions="150,*">
-                                <TextBlock Classes="muted" Text="{Binding Label}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Right" />
-                              </Grid>
-                            </Border>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="110,*">
+                          <TextBlock Classes="muted" Text="Version" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Name="AboutAppVersion" Text="{Binding About.AppVersion}" FontWeight="SemiBold" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="110,*">
+                          <TextBlock Classes="muted" Text="Engine" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="1" Text="{Binding About.EngineVersion}" FontWeight="SemiBold" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="110,*,Auto">
+                          <TextBlock Classes="muted" Text="Commit" VerticalAlignment="Center" />
+                          <SelectableTextBlock Grid.Column="1" Name="AboutCommit" Text="{Binding About.EngineCommit}" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding About.EngineCommit}" />
+                          <Button Grid.Column="2" Name="CopyCommitButton" Content="Copy" Command="{Binding CopyCommitCommand}" Margin="8,0,0,0"
+                                  Padding="10,3" FontSize="12" ToolTip.Tip="Copy the full engine commit" />
+                        </Grid>
+                      </Border>
                     </StackPanel>
                   </Border>
+                  <TextBlock Classes="muted" TextWrapping="Wrap" Margin="0,8,0,0"
+                             Text="Every number shown comes from the terrain engine, TerrainEngineApi.dll; the app lays the results out and colours them." />
+                  <Button Name="ShowTourButton" Content="Show the Tour Again" Command="{Binding Tour.OpenCommand}" Margin="0,10,0,0"
+                          ToolTip.Tip="The short walk-through shown on first start" />
 
-                  <!-- Fresnel zone, when a frequency was given -->
-                  <Border Classes="factsCard" IsVisible="{Binding LineOfSight.HasFresnel}">
-                    <StackPanel Spacing="8" Margin="0,2,0,4">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Classes="overline" Text="FIRST FRESNEL ZONE" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Classes="chip"
-                                Classes.clear="{Binding LineOfSight.IsFresnelClear}"
-                                Classes.partly="{Binding LineOfSight.IsFresnelPartlyObstructed}"
-                                Classes.blocked="{Binding LineOfSight.IsFresnelBlocked}"
-                                Classes.unknown="{Binding LineOfSight.IsFresnelUnknown}">
-                          <TextBlock Name="FresnelVerdictText" Text="{Binding LineOfSight.FresnelVerdictText}" />
-                        </Border>
-                      </Grid>
-                      <ProgressBar Minimum="0" Maximum="1" Value="{Binding LineOfSight.FresnelFreeFraction}" Height="8"
-                                   Classes.clear="{Binding LineOfSight.IsFresnelClear}"
-                                   Classes.partly="{Binding LineOfSight.IsFresnelPartlyObstructed}"
-                                   IsVisible="{Binding !LineOfSight.IsFresnelUnknown}"
-                                   AutomationProperties.Name="Share of the first Fresnel zone radius left free" />
-                      <TextBlock Text="{Binding LineOfSight.FresnelDetail}" TextWrapping="Wrap" />
+                  <TextBlock Classes="heading" Text="Map" />
+                  <Border Classes="factsCard" Margin="0">
+                    <StackPanel>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Left-click" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Place the observer" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><TextBlock Classes="action" Text="left-click" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Place the target" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Drag a marker" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move it; the path follows" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Mouse wheel" /><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border><Border Classes="key"><TextBlock Text="+" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Zoom" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Right-drag" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move the zoomed map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Hover a marker" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Show its details" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Classes="heading" Text="Profile" />
+                  <Border Classes="factsCard" Margin="0">
+                    <StackPanel>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Mouse wheel" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Zoom along the path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Right-drag" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move along the path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Double-click" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Show the whole path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Click a legend entry" /></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Show or hide that line" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Classes="heading" Text="Keyboard" />
+                  <Border Classes="factsCard" Margin="0">
+                    <StackPanel>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="1" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move to the map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="2" /></Border><TextBlock Classes="keySeparator" Text="–" /><Border Classes="key"><TextBlock Text="5" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Open the Terrain, Line of Sight, Viewshed or About panel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="6" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Open the profile and move to it" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="F5" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Check the line of sight, or run the viewshed, in the open panel" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Esc" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Cancel a viewshed" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="O" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Open a tile" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Shift" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="C" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Copy the results" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Tab" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move between controls" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Classes="heading" Text="Keyboard on the Map" />
+                  <Border Classes="factsCard" Margin="0">
+                    <StackPanel>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move the crosshair; hold Shift for bigger steps" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Enter" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Enter" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Place the observer / the target at the crosshair" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Move the zoomed map" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Zoom" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Classes="heading" Text="Keyboard on the Profile" />
+                  <Border Classes="factsCard" Margin="0">
+                    <StackPanel>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Enter" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Show the reading cursor and move it; hold Shift for ten samples" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Zoom at the cursor" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Home" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Show the whole path" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="factRow" BorderThickness="0">
+                        <Grid ColumnDefinitions="175,*">
+                          <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Esc" /></Border></WrapPanel>
+                          <TextBlock Grid.Column="1" Text="Hide the cursor" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
                     </StackPanel>
                   </Border>
                 </StackPanel>
-              </StackPanel>
-            </ScrollViewer>
+              </ScrollViewer>
+            </Panel>
+          </Border>
+      </Grid>
+    </DockPanel>
 
-            <!-- Viewshed -->
-            <ScrollViewer Name="ViewshedPanel" IsVisible="{Binding IsViewshedTab}">
-              <StackPanel Margin="18,4,18,18">
-                <StackPanel Classes="headingRow">
-                  <TextBlock Classes="heading" Text="Observer" />
-                  <Border Classes="help" ToolTip.Tip="Left-click the map to place the observer, or type the coordinates. Drag the marker to move it."><TextBlock /></Border>
-                </StackPanel>
-                <views:NumberFieldView DataContext="{Binding Viewshed.ObserverLatitude}" />
-                <views:NumberFieldView DataContext="{Binding Viewshed.ObserverLongitude}" />
-                <views:NumberFieldView DataContext="{Binding Viewshed.ObserverHeight}" />
-
-                <TextBlock Classes="heading" Text="Parameters" />
-                <views:NumberFieldView DataContext="{Binding Viewshed.TargetHeight}" />
-                <views:NumberFieldView DataContext="{Binding Viewshed.RadiusKm}" />
-                <views:NumberFieldView DataContext="{Binding Viewshed.Spacing}" />
-                <views:NumberFieldView DataContext="{Binding Viewshed.RefractionK}" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
-                  <TextBlock Text="Interpolation" FontWeight="SemiBold" VerticalAlignment="Center" />
-                  <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.InterpolationExplanation}"><TextBlock /></Border>
-                </StackPanel>
-                <ComboBox ItemsSource="{Binding Viewshed.InterpolationChoices}" SelectedItem="{Binding Viewshed.Interpolation}"
-                          Margin="0,0,0,12" AutomationProperties.Name="Viewshed interpolation"
-                          AutomationProperties.HelpText="{x:Static p:PlainWords.InterpolationExplanation}" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
-                  <TextBlock Text="Algorithm" FontWeight="SemiBold" VerticalAlignment="Center" />
-                  <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.AlgorithmExplanation}"><TextBlock /></Border>
-                </StackPanel>
-                <ComboBox ItemsSource="{Binding Viewshed.AlgorithmChoices}" SelectedItem="{Binding Viewshed.Algorithm}"
-                          IsEnabled="{Binding Viewshed.IsAlgorithmChoiceEnabled}" Margin="0,0,0,12" AutomationProperties.Name="Algorithm"
-                          AutomationProperties.HelpText="{x:Static p:PlainWords.AlgorithmExplanation}" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
-                  <TextBlock Text="Compare With" FontWeight="SemiBold" VerticalAlignment="Center" />
-                  <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.ComparisonExplanation}"><TextBlock /></Border>
-                </StackPanel>
-                <ComboBox ItemsSource="{Binding Viewshed.ComparisonChoices}" SelectedIndex="{Binding Viewshed.ComparisonIndex}"
-                          IsEnabled="{Binding Viewshed.IsIdle}" Margin="0,0,0,12" AutomationProperties.Name="Compare with"
-                          AutomationProperties.HelpText="{x:Static p:PlainWords.ComparisonExplanation}" />
-
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                  <Button Name="RunViewshedButton" Classes="primary" Content="Run Viewshed" Command="{Binding Viewshed.RunCommand}"
-                          ToolTip.Tip="Compute which cells the observer can see (F5)" />
-                  <Button Name="CancelViewshedButton" Content="Cancel" Command="{Binding Viewshed.CancelCommand}" HotKey="Escape"
-                          ToolTip.Tip="Stop the running viewshed (Esc)" />
-                </StackPanel>
-
-                <StackPanel IsVisible="{Binding Viewshed.IsRunning}" Spacing="4" Margin="0,4,0,0">
-                  <TextBlock Text="{Binding Viewshed.ProgressText}" FontWeight="SemiBold" />
-                  <ProgressBar Minimum="0" Maximum="1" Value="{Binding Viewshed.Progress}" Height="10"
-                               AutomationProperties.Name="Viewshed progress" />
-                  <TextBlock Classes="muted" Text="{Binding Viewshed.Progress, Converter={x:Static views:Converters.Percent}}" />
-                </StackPanel>
-
-                <TextBlock Classes="error" Text="{Binding Viewshed.Error}" IsVisible="{Binding Viewshed.HasError}" TextWrapping="Wrap" Margin="0,6,0,0" />
-
-                <Border Name="RunAgainNote" Classes="factsCard" IsVisible="{Binding Viewshed.NeedsRunAgain}" Margin="0,10,0,0">
-                  <TextBlock Text="{Binding Viewshed.RunAgainText}" TextWrapping="Wrap" />
-                </Border>
-
-                <StackPanel Name="ViewshedResult" IsVisible="{Binding Viewshed.ShowResult}" Spacing="6" Margin="0,8,0,0">
-                  <TextBlock Name="ViewshedSummary" Text="{Binding Viewshed.Summary}" TextWrapping="Wrap" />
-                  <TextBlock Classes="heading" Text="Legend" />
-                  <Border Classes="factsCard" Margin="0" Padding="6,6">
-                    <ItemsControl Name="ViewshedLegend" ItemsSource="{Binding Viewshed.Legend}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:LegendRow">
-                          <Button Classes="legendRow" Classes.off="{Binding !IsShown}" Classes.empty="{Binding IsEmpty}"
-                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).Viewshed.ToggleLayerCommand}" CommandParameter="{Binding}"
-                                  ToolTip.Tip="Show or hide these cells on the map" AutomationProperties.Name="{Binding Name}">
-                            <Grid ColumnDefinitions="24,*,Auto">
-                              <Border Width="16" Height="16" CornerRadius="3" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1"
-                                      Background="{Binding Colour, Converter={x:Static views:Converters.RgbaToBrush}}" VerticalAlignment="Center" />
-                              <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
-                                <TextBlock Classes="muted" Text="None in this run" FontSize="11" IsVisible="{Binding IsEmpty}" />
-                              </StackPanel>
-                              <TextBlock Grid.Column="2" Text="{Binding Count}" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" />
-                            </Grid>
-                          </Button>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </Border>
-                  <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
-                             Text="Click an entry to hide or show its cells. Hiding one state leaves the others drawn, so its shape still shows: hide both, or set the opacity to 0, to see the bare terrain. The counts are the cells drawn on the map: inside the circle and on the tile." />
-
-                  <StackPanel Orientation="Horizontal" Margin="0,10,0,3">
-                    <TextBlock Text="Layer Opacity" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    <TextBlock Classes="muted" Text="{Binding Viewshed.OverlayOpacity, StringFormat='{}{0:0}%'}" Margin="8,0,0,0" VerticalAlignment="Center" />
-                  </StackPanel>
-                  <Slider Name="ViewshedOpacitySlider" Minimum="0" Maximum="100" Value="{Binding Viewshed.OverlayOpacity}" Width="240" HorizontalAlignment="Left"
-                          AutomationProperties.Name="Viewshed layer opacity" />
-                </StackPanel>
-              </StackPanel>
-            </ScrollViewer>
-
-            <!-- About -->
-            <ScrollViewer Name="AboutPanel" IsVisible="{Binding IsAboutTab}">
-              <StackPanel Margin="18,4,18,18">
-                <TextBlock Classes="heading" Text="TerrainBench" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="110,*">
-                        <TextBlock Classes="muted" Text="Version" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Name="AboutAppVersion" Text="{Binding About.AppVersion}" FontWeight="SemiBold" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="110,*">
-                        <TextBlock Classes="muted" Text="Engine" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="{Binding About.EngineVersion}" FontWeight="SemiBold" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="110,*,Auto">
-                        <TextBlock Classes="muted" Text="Commit" VerticalAlignment="Center" />
-                        <SelectableTextBlock Grid.Column="1" Name="AboutCommit" Text="{Binding About.EngineCommit}" FontWeight="SemiBold"
-                                             TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding About.EngineCommit}" />
-                        <Button Grid.Column="2" Name="CopyCommitButton" Content="Copy" Command="{Binding CopyCommitCommand}" Margin="8,0,0,0"
-                                Padding="10,3" FontSize="12" ToolTip.Tip="Copy the full engine commit" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-                <TextBlock Classes="muted" TextWrapping="Wrap" Margin="0,8,0,0"
-                           Text="Every number shown comes from the terrain engine, TerrainEngineApi.dll; the app lays the results out and colours them." />
-
-                <TextBlock Classes="heading" Text="Map" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Left-click" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Place the observer" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><TextBlock Classes="action" Text="left-click" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Place the target" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Drag a marker" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move it; the path follows" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Mouse wheel" /><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border><Border Classes="key"><TextBlock Text="+" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Zoom" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Right-drag" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move the zoomed map" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Hover a marker" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Show its details" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-                <TextBlock Classes="heading" Text="Profile" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Mouse wheel" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Zoom along the path" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Right-drag" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move along the path" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Double-click" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Show the whole path" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><TextBlock Classes="action" Text="Click a legend entry" /></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Show or hide that line" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-                <TextBlock Classes="heading" Text="Keyboard" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="1" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move to the map" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="2" /></Border><TextBlock Classes="keySeparator" Text="–" /><Border Classes="key"><TextBlock Text="5" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Open the Terrain, Line of Sight, Viewshed or About panel" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="6" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Open the profile and move to it" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="F5" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Check the line of sight, or run the viewshed, in the open panel" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Esc" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Cancel a viewshed" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="O" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Open a tile" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Shift" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="C" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Copy the results" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Tab" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move between controls" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-                <TextBlock Classes="heading" Text="Keyboard on the Map" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move the crosshair; hold Shift for bigger steps" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Enter" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="Enter" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Place the observer / the target at the crosshair" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Ctrl" /></Border><TextBlock Classes="keySeparator" Text="+" /><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="↑" /></Border><Border Classes="key"><TextBlock Text="↓" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Move the zoomed map" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Zoom" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-                <TextBlock Classes="heading" Text="Keyboard on the Profile" />
-                <Border Classes="factsCard" Margin="0">
-                  <StackPanel>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Enter" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="←" /></Border><Border Classes="key"><TextBlock Text="→" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Show the reading cursor and move it; hold Shift for ten samples" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="+" /></Border><TextBlock Classes="keySeparator" Text="/" /><Border Classes="key"><TextBlock Text="−" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Zoom at the cursor" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Home" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Show the whole path" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                    <Border Classes="factRow" BorderThickness="0">
-                      <Grid ColumnDefinitions="175,*">
-                        <WrapPanel VerticalAlignment="Center"><Border Classes="key"><TextBlock Text="Esc" /></Border></WrapPanel>
-                        <TextBlock Grid.Column="1" Text="Hide the cursor" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                </Border>
-              </StackPanel>
-            </ScrollViewer>
-          </Panel>
-        </Border>
-    </Grid>
-  </DockPanel>
+    <!-- First-run tour. MainWindow.axaml.cs lays it out over the control the page points at: the window
+         dimmed around a gap over that control, a ring around the gap, and the card with an arrow to it.
+         Only the gap takes clicks, so the page's own control is the one thing the mouse can use. -->
+    <Canvas Name="TourOverlay" IsVisible="{Binding Tour.IsOpen}">
+      <Path Name="TourScrim" Fill="{DynamicResource ScrimBrush}" />
+      <Border Name="TourRing" BorderBrush="{DynamicResource TourPointerBrush}" BorderThickness="3" CornerRadius="10" IsHitTestVisible="False" />
+      <Path Name="TourArrow" Stroke="{DynamicResource TourPointerBrush}" Fill="{DynamicResource TourPointerBrush}"
+            StrokeThickness="4" StrokeLineCap="Round" IsHitTestVisible="False" />
+      <Border Name="TourCard" Classes="tourCard" Width="400" AutomationProperties.Name="{Binding Tour.Current.Title}">
+        <StackPanel Spacing="8">
+          <TextBlock Name="TourProgress" Classes="overline" Text="{Binding Tour.Progress}" />
+          <TextBlock Name="TourTitle" Classes="heading" Text="{Binding Tour.Current.Title}" FontSize="19" Margin="0,0,0,2" />
+          <TextBlock Name="TourBody" Text="{Binding Tour.Current.Body}" TextWrapping="Wrap" LineHeight="21" />
+          <TextBlock Name="TourDoIt" Classes="muted" Text="Do this to continue." FontStyle="Italic" IsVisible="{Binding !Tour.HasNext}" />
+          <DockPanel Margin="0,12,0,0">
+            <Button Name="TourSkipButton" DockPanel.Dock="Left" Content="Skip the Tour" Command="{Binding Tour.CloseCommand}" Margin="0" />
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+              <Button Name="TourBackButton" Content="Back" Command="{Binding Tour.BackCommand}" Margin="0" />
+              <Button Name="TourNextButton" Classes="primary" Content="{Binding Tour.NextText}" Command="{Binding Tour.NextCommand}"
+                      IsVisible="{Binding Tour.HasNext}" Margin="0" />
+            </StackPanel>
+          </DockPanel>
+        </StackPanel>
+      </Border>
+    </Canvas>
+  </Panel>
 </Window>

@@ -44,6 +44,8 @@ public sealed class AppSettings
     public bool ProfileShowFresnel { get; set; } = true;
     public double ViewshedOpacity { get; set; } = 100;
     public bool[]? HiddenViewshedLayers { get; set; }
+    /// <summary>The first-run tour was closed once; absent in settings from before the tour, so those show it once too.</summary>
+    public bool TourSeen { get; set; }
 }
 
 public interface ISettingsStore

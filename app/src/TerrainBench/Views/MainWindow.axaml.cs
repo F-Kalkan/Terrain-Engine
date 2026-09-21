@@ -1,11 +1,15 @@
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
 using TerrainBench.Controls;
 using TerrainBench.ViewModels;
+using ShapePath = Avalonia.Controls.Shapes.Path;
 
 namespace TerrainBench.Views;
 
@@ -19,6 +23,9 @@ public partial class MainWindow : Window
 
     private readonly ColumnDefinition _panelColumn;
     private readonly RowDefinition _profileRow;
+    private readonly Canvas _tourOverlay;
+    private readonly Border _tourCard;
+    private (Size Window, Rect? Hole, TourLayout Layout)? _tourLaidOut;
     private MainViewModel? _subscribed;
 
     public MainWindow()
@@ -82,6 +89,19 @@ public partial class MainWindow : Window
         AddKey(Key.NumPad6, KeyModifiers.Control, focusProfile);
         AddKey(Key.F5, KeyModifiers.None, new AsyncRelayCommand(() => ViewModel?.RunActivePanelAsync() ?? Task.CompletedTask));
 
+        // Escape closes the tour, before whatever has the focus sees the key.
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key != Key.Escape || ViewModel?.Tour is not { IsOpen: true } tour) return;
+            tour.Close();
+            e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+
+        // The tour follows the control it points at as the window resizes, panels scroll and results appear.
+        _tourOverlay = this.FindControl<Canvas>("TourOverlay")!;
+        _tourCard = this.FindControl<Border>("TourCard")!;
+        LayoutUpdated += (_, _) => LayOutTour();
+
         this.FindControl<Button>("ZoomInButton")!.Click += (_, _) => map.ZoomIn();
         this.FindControl<Button>("ZoomOutButton")!.Click += (_, _) => map.ZoomOut();
 
@@ -104,10 +124,16 @@ public partial class MainWindow : Window
 
         DataContextChanged += (_, _) =>
         {
-            if (_subscribed is not null) _subscribed.PropertyChanged -= OnViewModelChanged;
+            if (_subscribed is not null)
+            {
+                _subscribed.PropertyChanged -= OnViewModelChanged;
+                _subscribed.Tour.PropertyChanged -= OnTourChanged;
+            }
             _subscribed = ViewModel;
             if (_subscribed is null) return;
             _subscribed.PropertyChanged += OnViewModelChanged;
+            _subscribed.Tour.PropertyChanged += OnTourChanged;
+            if (_subscribed.Tour.IsOpen) FocusTour();
             _panelColumn.MinWidth = MinPanelWidth;
             _panelColumn.Width = new GridLength(_subscribed.PanelWidth);
             ArrangeProfile();
@@ -122,6 +148,73 @@ public partial class MainWindow : Window
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainViewModel.IsProfileOpen)) ArrangeProfile();
+    }
+
+    private void OnTourChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(TourViewModel.IsOpen) or nameof(TourViewModel.Index)) || ViewModel is not { } vm) return;
+        if (vm.Tour.IsOpen) FocusTour();
+        else Dispatcher.UIThread.Post(() => this.FindControl<MapView>("Map")!.Focus(), DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// A new page: its control is scrolled into view and, if the page waits for it to be used, given the
+    /// focus, so Enter does what a click would; a page with a Next button focuses that.
+    /// </summary>
+    private void FocusTour() =>
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ViewModel?.Tour is not { IsOpen: true } tour) return;
+            var target = TourTarget();
+            target?.BringIntoView();
+            if (!tour.HasNext && target is { Focusable: true }) target.Focus(NavigationMethod.Tab);
+            else this.FindControl<Button>(tour.HasNext ? "TourNextButton" : "TourSkipButton")!.Focus(NavigationMethod.Tab);
+            LayOutTour();
+        }, DispatcherPriority.Loaded);
+
+    /// <summary>The control the current page points at, when it is on screen.</summary>
+    private Control? TourTarget() =>
+        ViewModel?.Tour.Current.Target is { } name && this.FindControl<Control>(name) is { IsEffectivelyVisible: true } target ? target : null;
+
+    /// <summary>Dims the window around the page's control, rings it, and places the card with its arrow.</summary>
+    private void LayOutTour()
+    {
+        if (ViewModel?.Tour is not { IsOpen: true }) return;
+        var window = _tourOverlay.Bounds.Size;
+        if (window.Width <= 0 || window.Height <= 0) return;
+
+        Rect? hole = null;
+        if (TourTarget() is { } target && target.TranslatePoint(default, _tourOverlay) is { } origin)
+            hole = new Rect(origin, target.Bounds.Size).Inflate(6).Intersect(new Rect(window));
+
+        _tourCard.Measure(new Size(_tourCard.Width, double.PositiveInfinity));
+        var layout = TourPlacement.Place(window, _tourCard.DesiredSize, hole);
+
+        // Setting what is already set would lay the window out again, and come straight back here.
+        if (_tourLaidOut == (window, hole, layout)) return;
+        _tourLaidOut = (window, hole, layout);
+
+        var full = new RectangleGeometry(new Rect(window));
+        this.FindControl<ShapePath>("TourScrim")!.Data = hole is { } gap
+            ? new CombinedGeometry(GeometryCombineMode.Exclude, full, new RectangleGeometry(gap))
+            : full;
+
+        var ring = this.FindControl<Border>("TourRing")!;
+        ring.IsVisible = hole is not null;
+        if (hole is { } around)
+        {
+            Canvas.SetLeft(ring, around.X - 3);
+            Canvas.SetTop(ring, around.Y - 3);
+            ring.Width = around.Width + 6;
+            ring.Height = around.Height + 6;
+        }
+
+        var arrow = this.FindControl<ShapePath>("TourArrow")!;
+        arrow.IsVisible = layout.ArrowFrom is not null;
+        if (layout is { ArrowFrom: { } from, ArrowTo: { } to }) arrow.Data = TourPlacement.Arrow(from, to);
+
+        Canvas.SetLeft(_tourCard, layout.Card.X);
+        Canvas.SetTop(_tourCard, layout.Card.Y);
     }
 
     /// <summary>An open profile takes its remembered height under the map; a closed one gives the map the room.</summary>

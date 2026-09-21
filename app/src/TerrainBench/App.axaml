@@ -52,6 +52,10 @@
           <SolidColorBrush x:Key="ChartSightLineBrush" Color="#1D5B8F" />
           <SolidColorBrush x:Key="ChartFresnelBrush" Color="#401D5B8F" />
           <SolidColorBrush x:Key="ChartBlockingBrush" Color="#A8322A" />
+          <!-- Dims the window behind the first-run tour -->
+          <SolidColorBrush x:Key="ScrimBrush" Color="#8C0D1A24" />
+          <!-- The tour's arrow and the ring around what it points at, bright over the dimmed window -->
+          <SolidColorBrush x:Key="TourPointerBrush" Color="#4FD1AE" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#0D141B" />
@@ -90,6 +94,8 @@
           <SolidColorBrush x:Key="ChartSightLineBrush" Color="#8CC3F0" />
           <SolidColorBrush x:Key="ChartFresnelBrush" Color="#408CC3F0" />
           <SolidColorBrush x:Key="ChartBlockingBrush" Color="#FF9A8F" />
+          <SolidColorBrush x:Key="ScrimBrush" Color="#B3000000" />
+          <SolidColorBrush x:Key="TourPointerBrush" Color="#5FDDBB" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>
@@ -448,6 +454,15 @@
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="Padding" Value="14,10" />
       <Setter Property="Margin" Value="0,10,0,0" />
+    </Style>
+    <!-- The first-run tour's card, over the dimmed window -->
+    <Style Selector="Border.tourCard">
+      <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="26,22,26,18" />
+      <Setter Property="BoxShadow" Value="0 12 32 0 #40000000" />
     </Style>
     <Style Selector="Border.factRow">
       <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />

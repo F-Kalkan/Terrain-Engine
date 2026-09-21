@@ -16,7 +16,9 @@ namespace TerrainBench.UI.Tests;
 /// <summary>A main window over the real engine, with the outside world (dialogs, clipboard, disk) faked.</summary>
 internal sealed class Harness : IDisposable
 {
-    public Harness(bool firstStart = true)
+    /// <param name="firstStart">Start the view model, as the app does on launch.</param>
+    /// <param name="tour">Leave the first-run tour open; otherwise it is closed, as by Skip, before the test clicks anything.</param>
+    public Harness(bool firstStart = true, bool tour = false)
     {
         Window = new MainWindow { Width = 1360, Height = 880 };
         Settings = new MemorySettings();
@@ -30,6 +32,7 @@ internal sealed class Harness : IDisposable
             Path.Combine(AppContext.BaseDirectory, "Samples", "N36W112.hgt"));
         Window.DataContext = ViewModel;
         if (firstStart) ViewModel.Start();
+        if (!tour) ViewModel.Tour.Close();
         Window.Show();
         Settle();
     }

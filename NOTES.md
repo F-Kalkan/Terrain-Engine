@@ -342,10 +342,12 @@ input may take it down.
   tests.
 - **Pinned build image.** CI and releases run on `windows-2025` rather than
   `windows-latest`, so a runner image update can't swap the Visual C++ toolset under a
-  release. Actions are pinned to commit SHAs.- **An installer beside the zip.** The portable zip stays; the MSI holds the same published
-  files, built by WiX Toolset 5 from `installer/TerrainBench.wxs`. It installs per user under
-  `%LOCALAPPDATA%\Programs\TerrainBench`: a tool for trying the engine shouldn't need an
-  administrator, and a per-user install can't touch anything outside the user's own profile.
+  release. Actions are pinned to commit SHAs.
+- **An installer beside the zip.** The portable zip stays; the MSI holds the same
+  published files, built by WiX Toolset 5 from `installer/TerrainBench.wxs`. It installs
+  per user under `%LOCALAPPDATA%\Programs\TerrainBench`: a tool for trying the engine
+  shouldn't need an administrator, and a per-user install can't touch anything outside
+  the user's own profile.
   WiX comes in as a local dotnet tool pinned in `.config/dotnet-tools.json`, so a build machine
   needs nothing more than the .NET SDK it already has; version 5 rather than 6, whose licence
   terms changed. The first build had no wizard at all -- a progress bar that vanished, with no
@@ -353,6 +355,19 @@ input may take it down.
   shortcut, off unless ticked, and a Finish page that starts the app, ticked. The desktop box
   has to come before the install, since the shortcut is one of the things installed. WiX's
   ready-made wizards all include a licence page or a folder choice, so the page order is
-  written out in the `.wxs` from WiX's own dialogs. The package's upgrade code is fixed, so installing a newer version replaces
-  the older one in place. CI builds the installer on every push, so a packaging break is red
-  before a tag finds it.
+  written out in the `.wxs` from WiX's own dialogs. The package's upgrade code is fixed,
+  so installing a newer version replaces the older one in place. CI builds the installer
+  on every push, so a packaging break is red before a tag finds it.
+- **A tour that has you do it.** The first version was six pages of text on a card in the
+  middle of the window, and reading about Ctrl + click is not the same as doing it. Each
+  page now points at a real control: the window dims around a gap over it, a ring and an
+  arrow mark it, and using it moves the tour on, so the first minute ends with a tile open,
+  a line of sight checked and a viewshed run. The dimming takes the clicks everywhere but
+  the gap, so a stray click can't lose the thread, while the keyboard stays free: the
+  control a page waits for has the focus, and the map's Enter places the observer as a
+  click does. Where the card goes is a small pure function beside the window code (beside
+  the control on the side with room, else below or above, else inside the map), tested
+  without a window. The pages and what each waits for live in a view model, tested
+  without one too; a page whose step already holds, like opening a tile when one is open,
+  is skipped, and whether the tour has been seen is one more remembered setting, absent
+  from settings written before the tour, so an existing user sees it once too.

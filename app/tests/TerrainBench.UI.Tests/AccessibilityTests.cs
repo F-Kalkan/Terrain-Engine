@@ -137,6 +137,37 @@ public class AccessibilityTests
         foreach (var (name, theme) in new[] { ("light", ThemeVariant.Light), ("dark", ThemeVariant.Dark) })
         {
             Application.Current!.RequestedThemeVariant = theme;
+
+            // The first-run tour, walked as a new user would, one picture a page: tour-1 to tour-9.
+            using (var first = new Harness(tour: true))
+            {
+                void Page()
+                {
+                    first.Settle();
+                    first.Window.CaptureRenderedFrame()!.Save(Path.Combine(folder, $"tour-{first.ViewModel.Tour.Index + 1}-{name}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+                }
+
+                var tour = first.ViewModel.Tour;
+                Page();
+                tour.Next();
+                Page();
+                first.ViewModel.OpenSampleTile();
+                Page();
+                first.ViewModel.OnMapClicked(36.3, -111.5);
+                Page();
+                first.ViewModel.OnMapClicked(36.35, -111.45, target: true);
+                Page();
+                tour.Next();
+                Page();
+                first.ViewModel.ShowTab(MainTab.Viewshed);
+                Page();
+                first.Click(first.Find<Button>("RunViewshedButton"));
+                first.WaitUntil(() => first.ViewModel.Viewshed.HasResult && !first.ViewModel.Viewshed.IsRunning, TimeSpan.FromSeconds(60), "the tour's viewshed");
+                Page();
+                tour.Next();
+                Page();
+            }
+
             using var app = new Harness();
             app.Click(app.Find<Button>("SamplePromptButton"));
             app.SelectTab(MainTab.LineOfSight);

@@ -44,6 +44,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         LineOfSight = new LineOfSightViewModel(() => Terrain.Tile);
         Viewshed = new ViewshedViewModel(() => Terrain.Tile);
         About = new AboutViewModel(appVersion, _engine?.Version ?? "unavailable", _engine?.Commit ?? "unavailable");
+        Tour = new TourViewModel
+        {
+            Holds = goal => goal switch
+            {
+                TourGoal.TileOpen => Terrain.IsLoaded,
+                TourGoal.ViewshedTab => SelectedTab == MainTab.Viewshed,
+                TourGoal.ViewshedResult => Viewshed.HasResult,
+                TourGoal.AboutTab => SelectedTab == MainTab.About,
+                _ => false,
+            },
+        };
+        Tour.Closed += (_, _) => _tourSeen = true;
 
         EngineError = engine.IsOk ? null : engine.Error!.Message;
 
@@ -53,6 +65,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Viewshed.OnTileChanged();
             ShowSamplePrompt = false;
             NotifyTileCommands();
+            if (Terrain.IsLoaded) Tour.Reached(TourGoal.TileOpen);
         };
         LineOfSight.PropertyChanged += (_, e) =>
         {
@@ -61,6 +74,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Viewshed.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ViewshedViewModel.Map)) ExportViewshedPngCommand.NotifyCanExecuteChanged();
+            if (e.PropertyName == nameof(ViewshedViewModel.IsRunning) && Viewshed is { IsRunning: false, HasResult: true }) Tour.Reached(TourGoal.ViewshedResult);
         };
     }
 
@@ -71,6 +85,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ViewshedViewModel Viewshed { get; }
 
     public AboutViewModel About { get; }
+
+    /// <summary>The first-run tour, over the window until it is closed.</summary>
+    public TourViewModel Tour { get; }
+
+    private bool _tourSeen;
 
     /// <summary>Set when TerrainEngineApi.dll couldn't be loaded; the app can then only explain why.</summary>
     public string? EngineError { get; }
@@ -145,10 +164,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public bool HasStatus => StatusMessage is not null;
 
-    /// <summary>Reads settings and reopens the last tile, or offers the sample tile.</summary>
+    /// <summary>Reads settings and reopens the last tile, or offers the sample tile; the first time, it opens the tour.</summary>
     public void Start()
     {
         var saved = _settings.Load();
+        _tourSeen = saved?.TourSeen ?? false;
+        if (!_tourSeen && _engine is not null) Tour.Open();
+
         if (saved is null)
         {
             ShowSamplePrompt = _engine is not null;
@@ -211,6 +233,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             HiddenViewshedLayers = Viewshed.HiddenLayers,
             ProfileHeight = ProfileHeight,
             PanelWidth = PanelWidth,
+            TourSeen = _tourSeen,
         });
     }
 
@@ -271,6 +294,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SelectedTab = MainTab.LineOfSight;
         if (target) LineOfSight.PlaceTarget(latitudeDeg, longitudeDeg);
         else LineOfSight.PlaceObserver(latitudeDeg, longitudeDeg);
+        Tour.Reached(target ? TourGoal.TargetPlaced : TourGoal.ObserverPlaced);
+    }
+
+    partial void OnSelectedTabChanged(MainTab value)
+    {
+        if (value == MainTab.Viewshed) Tour.Reached(TourGoal.ViewshedTab);
+        if (value == MainTab.About) Tour.Reached(TourGoal.AboutTab);
     }
 
     /// <summary>F5: checks the line of sight or runs the viewshed, whichever panel is open; on the others it does nothing.</summary>

@@ -13,6 +13,7 @@ from the DLL; the app lays results out and colours them.
 ![The map zoomed in, with the pointer resting on the blocking point, dark theme](screenshots/map-zoom-hover-dark.png)
 ![The profile zoomed in, reading the distance and elevation under the pointer, dark theme](screenshots/profile-hover-dark.png)
 ![A viewshed near the tile's west edge: the disc is drawn where it overlaps the tile, dark theme](screenshots/viewshed-edge-dark.png)
+![The first-run tour pointing at the line-of-sight answer, dark theme](screenshots/tour-5-dark.png)
 
 ## Download and run a release
 
@@ -29,11 +30,19 @@ engine's C runtime are inside.
   run `TerrainBench.exe`; delete the folder to remove it.
 
 The build isn't code signed, so Windows SmartScreen may say "Windows protected your PC" the
-first time. Choose **More info**, then **Run anyway**. On first start, choose **Open the
-Sample Tile** to load the bundled Grand Canyon tile.
+first time. Choose **More info**, then **Run anyway**. On first start, a short tour has you
+open the bundled Grand Canyon sample tile and try each tool on it.
 
 ## What it does
 
+- **First start.** A nine-page tour has the user try the app rather than read about it. The
+  window dims around one control at a time, ringed, with an arrow to it from a card that says
+  what it does: open the sample tile, click the map for the observer and Ctrl + click for the
+  target, read the answer, open the Viewshed panel, run it, read the colours, and find the
+  About panel. Using the control is what moves the tour on, and only that control takes a
+  click; the keyboard works throughout (the control a page waits for has the focus, so Enter
+  does it). A page whose step is already done is skipped. Skip the Tour or Escape ends it; it
+  shows once, and **Show the Tour Again** on the About panel brings it back.
 - **Terrain.** Open an `.hgt` tile; the south-west corner is read from the standard file
   name (`N36W112` is 36, -112) and can be edited. The tile is drawn north up, coloured by
   elevation, with a scale bar; the status bar reads the latitude, longitude and elevation
@@ -120,7 +129,8 @@ Besides the engine's own suite, `app/` has two test projects, both run by `build
 - `TerrainBench.UI.Tests` (Avalonia.Headless.XUnit): the main flows clicked through a real
   window over the real DLL, including a naive 30 km viewshed that reports progress, leaves
   the window working and cancels; keyboard reach and accessible names for every control;
-  4.5:1 text contrast in both themes. With `TERRAINBENCH_SCREENSHOTS` set to a folder, it
+  4.5:1 text contrast in both themes; the first-run tour walked by mouse and by keyboard, with
+  only its control taking clicks. With `TERRAINBENCH_SCREENSHOTS` set to a folder, it
   also renders the screenshots above.
 
 ## Build it yourself

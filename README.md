@@ -35,9 +35,9 @@ the map, and read the answer and the reason for it. Download it from this reposi
 
 Windows 10 or 11, x64; nothing else needs installing. The build isn't code signed, so
 SmartScreen may say "Windows protected your PC": choose **More info**, then **Run
-anyway**. On first start, choose **Open the Sample Tile** to load the bundled Grand
-Canyon tile. What the app does, and how it is built and tested:
-[docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
+anyway**. On first start, a short tour has you open the bundled Grand Canyon
+sample tile and try each tool on it. What the app does, and how it is built and
+tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
 
 ## At a glance
 
@@ -49,7 +49,7 @@ Canyon tile. What the app does, and how it is built and tested:
   (2000 × 2000 cells) about a second — some 310 times faster than checking every cell
   on its own. On real terrain the two disagree on under 4% of cells, on ridgelines, and
   a test holds that under 5%.
-- **Tested.** 53 hand-checkable engine tests and 104 app tests, all run by `build.ps1`
+- **Tested.** 53 hand-checkable engine tests and 116 app tests, all run by `build.ps1`
   and by CI on every push.
 
 ## What's in the repository

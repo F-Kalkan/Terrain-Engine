@@ -78,8 +78,8 @@ jobs:
             1. Download **TerrainBench-${{ steps.version.outputs.version }}-win-x64-portable.zip** and unzip it anywhere.
             2. Run **TerrainBench.exe**. The .NET runtime and the engine's C runtime are inside.
 
-            Both hold the same files. On first start, choose **Open the Sample Tile** to load the bundled
-            Grand Canyon tile.
+            Both hold the same files. On first start, a short tour has you open the bundled Grand Canyon
+            sample tile and try each tool on it.
 
             Windows x64 only (Windows 10 or 11).
 
