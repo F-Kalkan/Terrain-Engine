@@ -5,9 +5,13 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <mutex>
+#include <set>
+#include <thread>
 #include "IElevationSampler.h"
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
@@ -15,6 +19,7 @@
 #include "ViewshedAgreement.h"
 #include "MinimumVisibleHeight.h"
 #include "PreparedObserver.h"
+#include "LineOfSightPairs.h"
 #include "RealElevationSampler.h"
 #include "CliArguments.h"
 #include <string>
@@ -3066,4 +3071,190 @@ void TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals()
         && stopped.cancelled && reportsBeforeStopping == 1
         && QueryTarget(stopped, east(60.0), Agl(2.0)).state == CellVisibility::Degraded,
         "TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals");
+}
+
+// Two doubles with the same bits: equal numbers, and NaN matching NaN only if it is the same NaN.
+inline bool SameBits(double a, double b)
+{
+    return std::memcmp(&a, &b, sizeof a) == 0;
+}
+
+// Two line-of-sight answers the same to the bit, field by field.
+inline bool SameLineOfSight(const LineOfSightResult& a, const LineOfSightResult& b)
+{
+    bool samePoint = a.blockingPoint.has_value() == b.blockingPoint.has_value()
+        && (!a.blockingPoint || (SameBits(a.blockingPoint->latitudeDeg, b.blockingPoint->latitudeDeg) && SameBits(a.blockingPoint->longitudeDeg, b.blockingPoint->longitudeDeg)));
+    bool sameElevation = a.blockingElevationM.has_value() == b.blockingElevationM.has_value()
+        && (!a.blockingElevationM || SameBits(*a.blockingElevationM, *b.blockingElevationM));
+    return a.isVisible == b.isVisible && a.status == b.status && samePoint && sameElevation
+        && SameBits(a.clearanceDeficitM, b.clearanceDeficitM) && a.blockingFeature == b.blockingFeature && a.inputProblem == b.inputProblem;
+}
+
+// Observers and targets spread over the 1-arcsecond tile and a little past it, on the ground
+// and in the air, with one target that isn't on the Earth.
+inline void SpreadSightEnds(int observerCount, int targetCount, std::vector<SightEnd>& observers, std::vector<SightEnd>& targets)
+{
+    const double golden = 3.14159265358979323846 * (3.0 - std::sqrt(5.0));
+    const GeoPoint centre{ 36.5, -111.5 };
+    for (int i = 0; i < observerCount; i++)
+    {
+        observers.push_back({ GreatCircleDestination(centre, i * golden, 30000.0 * std::sqrt((i + 0.5) / observerCount)), Agl(2.0 + i % 3 * 10.0) });
+    }
+    for (int i = 0; i < targetCount; i++)
+    {
+        GeoPoint point = GreatCircleDestination(centre, i * golden, 62000.0 * std::sqrt((i + 0.5) / targetCount));
+        DatumHeight height = i % 3 == 0 ? DatumHeight{ 3000.0 + 20.0 * i, VerticalDatum::OrthometricMsl } : Agl(i % 7 * 5.0);
+        targets.push_back({ point, height });
+    }
+    targets.push_back({ GeoPoint{ std::nan(""), -111.5 }, Agl(2.0) });
+}
+
+// Reads through another sampler and notes which threads read it, so a test can see how many
+// threads really did the work.
+class ThreadRecordingSampler : public IElevationSampler
+{
+public:
+    explicit ThreadRecordingSampler(IElevationSampler& inner) : inner(inner) {}
+
+    std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            threads.insert(std::this_thread::get_id());
+        }
+        return inner.GetElevation(latitudeDeg, longitudeDeg);
+    }
+    VerticalDatum GetDatum() const override { return inner.GetDatum(); }
+
+    size_t ThreadsSeen() const { return threads.size(); }
+
+private:
+    IElevationSampler& inner;
+    std::mutex mutex;
+    std::set<std::thread::id> threads;
+};
+
+//TEST 73
+void TestLineOfSightPairsAreTheSameAtEveryThreadCount()
+{
+    // Eight observers against 241 targets on the 1-arcsecond tile -- on the ground, in the
+    // air, some past the tile's edge where there is no data, and one not on the Earth at all --
+    // answered on 1, 2, 3, 7 threads and one per hardware thread. Every answer at every thread
+    // count must be, to the bit, what ComputeBatchLineOfSight gives for the same pair on one
+    // thread: the verdict, the status, the blocking point, its elevation, the clearance
+    // deficit, the kind of feature and any refusal. It must say it ran on as many threads as
+    // asked -- worked out here, not by ThreadsFor -- and three threads asked for must be three
+    // threads reading the terrain. Prints the pairs answered a second.
+    RealElevationSampler sampler("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    if (!sampler.IsLoaded())
+    {
+        Skip("TestLineOfSightPairsAreTheSameAtEveryThreadCount", "DATA/SRTM1/N36W112.hgt not found from this working directory");
+        return;
+    }
+    std::vector<SightEnd> observers, targets;
+    SpreadSightEnds(8, 240, observers, targets);
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+
+    std::vector<BatchLineOfSightQuery> queries;
+    for (const auto& o : observers) for (const auto& t : targets) queries.push_back({ o.point, o.height, t.point, t.height });
+    std::vector<LineOfSightResult> oneByOne = ComputeBatchLineOfSight(queries, spacingDeg, sampler);
+
+    int kinds[4] = {}; // visible, blocked, no confident answer, refused
+    for (const auto& r : oneByOne) kinds[r.status == ComputationStatus::InvalidInput ? 3 : !IsOk(r.status) ? 2 : r.isVisible ? 0 : 1]++;
+
+    bool same = true, threadCountsRight = true;
+    const int allThreads = std::thread::hardware_concurrency() == 0 ? 1 : (int)std::thread::hardware_concurrency();
+    for (int threads : { 1, 2, 3, 7, 0 })
+    {
+        auto start = std::chrono::steady_clock::now();
+        LineOfSightPairs pairs = ComputeLineOfSightPairs(observers, targets, spacingDeg, sampler, 4.0 / 3.0, threads);
+        double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        std::cout << "  " << pairs.threadsUsed << " thread(s): " << pairs.results.size() / seconds << " pairs a second" << std::endl;
+        threadCountsRight = threadCountsRight && pairs.threadsUsed == (threads > 0 ? threads : allThreads)
+            && pairs.observerCount == 8 && pairs.targetCount == 241;
+        for (size_t i = 0; i < oneByOne.size(); i++) same = same && SameLineOfSight(pairs.results[i], oneByOne[i]);
+    }
+
+    // And the threads asked for really share the work: three of them read the terrain.
+    ThreadRecordingSampler recording(sampler);
+    LineOfSightPairs recorded = ComputeLineOfSightPairs(observers, targets, spacingDeg, recording, 4.0 / 3.0, 3);
+    for (size_t i = 0; i < oneByOne.size(); i++) same = same && SameLineOfSight(recorded.results[i], oneByOne[i]);
+    std::cout << "  asked for 3 threads, " << recording.ThreadsSeen() << " read the terrain" << std::endl;
+    threadCountsRight = threadCountsRight && recording.ThreadsSeen() == 3;
+    std::cout << "  " << oneByOne.size() << " pairs: " << kinds[0] << " visible, " << kinds[1] << " blocked, " << kinds[2]
+        << " without a confident answer, " << kinds[3] << " refused" << std::endl;
+
+    Expect(same && threadCountsRight && kinds[0] > 0 && kinds[1] > 0 && kinds[2] > 0 && kinds[3] == 8,
+        "TestLineOfSightPairsAreTheSameAtEveryThreadCount");
+}
+
+//TEST 74
+void TestLineOfSightPairsRefuseEachPairItCannotSample()
+{
+    // As the batch: a spacing it can't sample at refuses every pair, each with its reason; no
+    // observers, or no targets, is an empty answer; and an observer's i-th answer is its i-th
+    // target's, whatever the thread count.
+    LevelGroundSampler level(100.0);
+    std::vector<SightEnd> observers = { { { 36.5, -111.5 }, Agl(2.0) }, { { 36.6, -111.5 }, Agl(2.0) } };
+    std::vector<SightEnd> targets = { { { 36.52, -111.5 }, Agl(2.0) }, { { 91.0, -111.5 }, Agl(2.0) }, { { 36.5, -111.48 }, Agl(2.0) } };
+
+    // Every pair refused: for the spacing, or -- checked first, as CheckProfileRequest does -- a
+    // target past the pole.
+    LineOfSightPairs refused = ComputeLineOfSightPairs(observers, targets, 0.0, level, 4.0 / 3.0, 3);
+    bool allRefused = refused.results.size() == 6;
+    for (int o = 0; o < 2; o++)
+    {
+        for (int t = 0; t < 3; t++)
+        {
+            InputProblem expected = t == 1 ? InputProblem::LatitudeOutOfRange : InputProblem::SpacingNotPositive;
+            allRefused = allRefused && refused.At(o, t).status == ComputationStatus::InvalidInput && refused.At(o, t).inputProblem == expected;
+        }
+    }
+
+    LineOfSightPairs mixed = ComputeLineOfSightPairs(observers, targets, MetersToLatitudeDeg(30.0), level, 4.0 / 3.0, 4);
+    bool placed = IsOk(mixed.At(0, 0).status) && mixed.At(0, 0).isVisible
+        && mixed.At(1, 1).inputProblem == InputProblem::LatitudeOutOfRange && mixed.At(0, 1).status == ComputationStatus::InvalidInput
+        && IsOk(mixed.At(1, 2).status);
+
+    Expect(allRefused && placed
+        && ComputeLineOfSightPairs({}, targets, MetersToLatitudeDeg(30.0), level).results.empty()
+        && ComputeLineOfSightPairs(observers, {}, MetersToLatitudeDeg(30.0), level).results.empty(),
+        "TestLineOfSightPairsRefuseEachPairItCannotSample");
+}
+
+//TEST 75
+void TestReferenceGridsAreTheSameAtEveryThreadCount()
+{
+    // The naive viewshed and the exact minimum visible height, over 1 km on the 1-arcsecond
+    // tile, on 1, 2, 3 threads and one per hardware thread: the same grid to the bit every
+    // time. Progress is reported only on the calling thread, and a stop asked for at the first
+    // report stops every thread.
+    RealElevationSampler sampler("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    if (!sampler.IsLoaded())
+    {
+        Skip("TestReferenceGridsAreTheSameAtEveryThreadCount", "DATA/SRTM1/N36W112.hgt not found from this working directory");
+        return;
+    }
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.55861, -111.81361 };
+    const int size = (int)(2 * MetersToLatitudeDeg(1000.0) / spacingDeg);
+    const DatumHeight ground = Agl(0.0);
+
+    ViewshedResult naiveOne = ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, nullptr, ground, 1);
+    MinimumVisibleHeightResult heightsOne = ComputeMinimumVisibleHeightReference(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, nullptr, 1);
+
+    bool same = true, reportedHere = true;
+    const auto caller = std::this_thread::get_id();
+    for (int threads : { 2, 3, 0 })
+    {
+        auto progress = [&](double) { reportedHere = reportedHere && std::this_thread::get_id() == caller; return true; };
+        same = same && ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, progress, ground, threads).visible == naiveOne.visible
+            && SameMinimumVisibleHeights(ComputeMinimumVisibleHeightReference(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, progress, threads), heightsOne);
+    }
+
+    int reports = 0;
+    ViewshedResult stopped = ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0,
+        [&](double) { reports++; return false; }, ground, 0);
+
+    Expect(same && reportedHere && stopped.cancelled && reports == 1, "TestReferenceGridsAreTheSameAtEveryThreadCount");
 }

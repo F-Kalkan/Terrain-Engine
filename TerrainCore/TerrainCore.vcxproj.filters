@@ -27,6 +27,12 @@
     <ClInclude Include="MinimumVisibleHeight.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="LineOfSightPairs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Threads.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="PreparedObserver.h">
       <Filter>Header Files</Filter>
     </ClInclude>

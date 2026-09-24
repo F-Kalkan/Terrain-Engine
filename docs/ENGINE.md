@@ -123,7 +123,9 @@ only a demo/tooling one.
   standard for line-of-sight and radio-propagation calculations) is not validated
   beyond the ranges tested here, and neither model handles a path that crosses the
   antimeridian (±180° longitude).
-- No threading — determinism across thread counts is satisfied vacuously.
+- Threaded where the work is many independent lines of sight -- line of sight for many pairs,
+  the naive viewshed and the exact minimum visible height -- and bit-identical at every thread
+  count (see "Many pairs on every core" below); everything else runs on the calling thread.
 - **Inputs outside the domain are refused, by the library itself** -- not only by the DLL
   and the CLI in front of it, since code that links the library goes through neither.
   Each entry point answers such an input with a value naming the problem
@@ -165,7 +167,11 @@ only a demo/tooling one.
 - No fast-math: the actual compiler invocation uses `/fp:precise` in every
   configuration (confirmed directly from the `cl.exe` command line); `/fp:fast` is
   never enabled.
-- Not threaded, so no cross-thread-count claim is needed.
+- Bit-identical across thread counts: `ComputeLineOfSightPairs`, `ComputeViewshedNaive` and
+  `ComputeMinimumVisibleHeightReference` give the same answers, to the bit, on 1, 2, 3, 7
+  threads and one per hardware thread -- each pair or cell is its own computation, written to
+  its own place, with nothing summed or ordered across threads -- and the tests compare them
+  field by field (see "Many pairs on every core" below).
 
 ## Performance (measured on this machine)
 
@@ -539,6 +545,55 @@ so the ratio is the figure to read. Nothing is allocated per query:
 `TestPreparedObserverQueriesAllocateNothing` counts the executable's own `operator new` over
 10,000 queries of every kind -- seen, hidden, past the radius, without a confident answer and
 refused -- and finds none.
+
+## Many pairs on every core
+
+**The question.** Line of sight for N observers against M targets, on every core, with the
+same answer at any thread count.
+
+**The approach** (`LineOfSightPairs.h`, `Threads.h`). `ComputeLineOfSightPairs` gives each
+pair its own profile and its own `ComputeLineOfSight`, and writes the answer to that pair's
+own place in the result. Threads take pairs sixteen at a time from a shared counter, so one
+that draws short paths simply takes more; each keeps its own profile buffer; the calling
+thread is one of them. Nothing is summed, sorted or shared between pairs, so there is no
+order for a thread count to change: the answer is, field by field, what
+`ComputeBatchLineOfSight` gives on one thread. The naive viewshed and the exact minimum
+visible height take a thread count too and spread their rows the same way -- each cell is
+already its own line of sight -- reporting progress only on the calling thread, so a callback
+never runs on a thread its caller didn't start, and stopping every thread when it asks to
+stop. The samplers are read from every thread at once, which each of them allows once
+constructed. The DLL runs its naive viewshed and exact minimum visible height on one thread
+per hardware thread; the fast versions, under two seconds for 30 km, stay on one.
+
+**Bit-identical.** `TestLineOfSightPairsAreTheSameAtEveryThreadCount` answers 8 observers
+against 241 targets on the 1-arcsecond tile -- on the ground and in the air, some past the
+tile's edge, one not on the Earth -- on 1, 2, 3 and 7 threads and one per hardware thread, and
+compares every field of every answer with the one-thread batch to the bit.
+`TestReferenceGridsAreTheSameAtEveryThreadCount` does the same for the naive viewshed and the
+exact minimum visible height over 1 km, and checks that the threads asked for really read the
+terrain -- three asked for, three seen. Each defect put back is caught: a profile buffer shared
+by every thread, or one buffer for every thread of the reference, crashes the suite, the
+threads resizing it under each other; a pair's observer taken by the wrong index, progress
+reported from another thread, a stop that doesn't reach the others and a thread count quietly
+ignored each turn a test red.
+
+**Throughput** (the machine above, 8 cores and 16 threads; `TerrainEngine.exe benchmark pairs`,
+24 observers against 400 targets up to 75 km apart on the 1-arcsecond tile, half the targets
+2 m above the ground and half 5,000 m above sea level; each run checked against the
+one-thread run):
+
+| Threads | Time | Pairs a second | Speed-up |
+|---|---|---|---|
+| 1 | ~1.31-1.34 s | ~7,190-7,330 | 1x |
+| 2 | ~0.64-0.66 s | ~14,600-14,900 | 2.0x |
+| 4 | ~0.31-0.33 s | ~29,300-30,900 | 4.1x |
+| 8 | ~0.18-0.19 s | ~51,300-52,400 | 7.1x |
+| 16 | ~0.12 s | ~79,100-79,200 | 10.9x |
+
+Up to eight threads each core does its share; past eight, the second thread on each core adds
+about half as much again. The same benchmark's naive viewshed over 5 km goes from ~1.73-1.75 s
+on one thread to ~0.18 s on 16; over 30 km on the 3-arcsecond tile, in a benchmark-only
+program, from 240.3 s to 24.2 s.
 
 ## Void handling and degraded results
 

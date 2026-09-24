@@ -60,7 +60,7 @@ public static class PlainWords
         "How the elevation between posts is read. Nearest takes the closest post as it is; bilinear blends the four posts around the point into a smoother surface, and needs all four to have data.";
 
     public const string AlgorithmExplanation =
-        "Fast casts rays from the observer to the grid's edge and answers the cells along each ray. Naive checks every cell with its own line of sight: it's the reference, and takes minutes at 30 km.";
+        "Fast casts rays from the observer to the grid's edge and answers the cells along each ray. Naive checks every cell with its own line of sight, on every core: it's the reference, and takes about half a minute at 30 km on 8 cores.";
 
     public const string ShowExplanation =
         "Visibility marks which cells a target of the given height can be seen at. Minimum visible height colours every cell by how high above its ground a target there must stand to be seen: 0 where the ground itself is. It answers every target height at once, so the target height isn't used.";

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <vector>
 #include "LineOfSight.h"
+#include "Threads.h"
 #include <cmath>
 #include <functional>
 #include <optional>
@@ -74,6 +75,35 @@ inline InputProblem CheckViewshedRequest(GeoPoint observer, const DatumHeight& o
 // Reporting never changes a computed cell.
 using ViewshedProgress = std::function<bool(double fractionDone)>;
 
+// Runs rowWork(row, thread) once for every row in [0, gridRows), spread over
+// ThreadsFor(threadCount) threads, each taking the next row not yet taken. Progress is
+// reported on the calling thread only -- before each row it takes, with the fraction of rows
+// taken so far -- so a callback never runs on a thread its caller didn't start. A progress
+// report that returns false stops every thread before its next row, and false is returned.
+// At one thread this is a plain loop over the rows, reporting before each.
+//
+// Thread-safety: rowWork runs on several threads at once; it must write only its own row.
+template <class RowWork>
+bool ForEachRowOnThreads(int gridRows, int threadCount, const ViewshedProgress& progress, RowWork&& rowWork)
+{
+    std::atomic<int> nextRow{ 0 };
+    std::atomic<bool> stopped{ false };
+    RunOnThreads(ThreadsFor(threadCount), [&](int thread, const std::atomic<bool>& failed) {
+        while (!stopped.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed))
+        {
+            int row = nextRow.fetch_add(1, std::memory_order_relaxed);
+            if (row >= gridRows) return;
+            if (thread == 0 && progress && !progress((double)row / gridRows))
+            {
+                stopped = true;
+                return;
+            }
+            rowWork(row, thread);
+        }
+    });
+    return !stopped;
+}
+
 // === BATCH VIEWSHED PATH ===
 // Both viewsheds below are the batch path, not the frame-safe one: they own
 // the BATCH PATH overload of GetTerrainProfile (TerrainProfile.h), allocating a
@@ -88,18 +118,18 @@ using ViewshedProgress = std::function<bool(double fractionDone)>;
 // Complexity: O(gridRows * gridCols * samples per profile) -- one full
 // GetTerrainProfile + ComputeLineOfSight per cell. This is the exact-per-cell
 // oracle the fast viewshed is checked against, not a per-frame algorithm.
-// Thread-safety: single-thread-only, as written -- but unlike ComputeViewshedFast
-// below, it has no ordering hazard to fix first: each cell is written exactly
-// once, by its own independent GetTerrainProfile/ComputeLineOfSight call, so no
-// cell's result depends on any other cell's, or on visit order. It could be
-// parallelised across rows or cells with no change to its reduction; it simply
-// never has been, since nothing in this project calls it per frame either.
-// Progress (optional): reported before each grid row, then once at the end.
+// Threads (optional): threadCount rows at a time, 1 by default, 0 for one per hardware
+// thread (ForEachRowOnThreads). Each cell is written exactly once, by its own
+// GetTerrainProfile and ComputeLineOfSight, so no cell depends on any other or on the order
+// rows are taken in: the grid is the same, bit for bit, at any thread count. The sampler is
+// read from every thread at once and must allow it, as every sampler in this library does.
+// Progress (optional): reported on the calling thread before each row it takes, then once
+// at the end.
 // Target height (optional): every cell is asked whether a target that high can be seen -- a
 // person, a vehicle, a mast. Usually above the ground under each cell; any datum the terrain can be
 // put on works, as for the observer. 0 m above ground, the default, asks about the ground itself. A
 // target height that can't be put on the terrain's datum leaves every cell but the observer's Degraded.
-inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround })
+inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, int threadCount = 1)
 {
     ViewshedResult result;
 
@@ -124,14 +154,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
     bool observerKnown = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg).has_value()
         && CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
 
-    for (int row = 0; row < gridRows; row++)
-    {
-        if (progress && !progress((double)row / gridRows))
-        {
-            result.cancelled = true;
-            return result;
-        }
-
+    bool finished = ForEachRowOnThreads(gridRows, threadCount, progress, [&](int row, int) {
         for (int col = 0; col < gridCols; col++)
         {
             if (row == centerRow && col == centerCol)
@@ -155,6 +178,11 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
                 result.visible[row][col] = los.isVisible ? CellVisibility::Visible : CellVisibility::NotVisible;
             }
         }
+    });
+    if (!finished)
+    {
+        result.cancelled = true;
+        return result;
     }
 
     if (progress) progress(1.0);

@@ -78,17 +78,20 @@ constraints directly.
   O(gridRows × gridCols × samples per profile) and single-thread-only, and
   `GetTerrainProfile`'s scratch-buffer overload states its O(sample count) and the
   condition under which concurrent callers are safe.
-- **A stated threading position for the viewshed** — both viewsheds run on one
-  thread, and both are order-independent, so either could be threaded without
-  changing a cell. `ComputeViewshedNaive` writes each cell exactly once, from its own
-  independent line of sight. `ComputeViewshedFast` casts every boundary ray on its
-  own, keeping its horizon, and then answers every cell on its own from the finished
-  rays. (It once applied rays to the grid in a fixed order with the last ray to visit
+- **A stated threading position for the viewshed** — both viewsheds are
+  order-independent, so either can be threaded without changing a cell, and the naive one
+  now is: `ComputeViewshedNaive` (like the exact minimum visible height) takes a thread
+  count and spreads its rows over that many threads, writing each cell exactly once from its
+  own independent line of sight -- the grid is the same to the bit at any count
+  (`TestReferenceGridsAreTheSameAtEveryThreadCount`); many observers against many targets
+  run on every core through `ComputeLineOfSightPairs`, with the same guarantee.
+  `ComputeViewshedFast` casts every boundary ray on its own, keeping its horizon, and then
+  answers every cell on its own from the finished rays. (It once applied rays to the grid in a fixed order with the last ray to visit
   a cell winning, a reduction that was deterministic only because the order never
   varied; answering each cell from its own centre removed it -- see `NOTES.md`,
-  "A fast viewshed that asks naive's question".) There is no per-frame pressure to
-  thread either: a viewshed is a planning-time cost. The comment above each function
-  in `Viewshed.h` states its position.
+  "A fast viewshed that asks naive's question".) The fast viewshed stays on one thread:
+  it takes under two seconds for 30 km, and a viewshed is a planning-time cost. The comment
+  above each function in `Viewshed.h` states its position.
 - **A frame-safe line-of-sight path vs. a batch viewshed path, labelled in the
   headers** — the split already existed structurally (the scratch-buffer overload
   above is the frame-safe half; the viewsheds and `ComputeBatchLineOfSight` were

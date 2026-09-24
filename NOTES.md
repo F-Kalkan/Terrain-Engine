@@ -419,6 +419,35 @@ off the tile just before it -- which the test allows at fewer than 1 in 1,000 ra
 pretend it away. Telling "no data here" from "not given this data" is a question of its own,
 still open.
 
+## Update: many pairs on every core
+
+Line of sight for many observers against many targets now runs on every core
+(`ComputeLineOfSightPairs`), and so do the naive viewshed and the exact minimum visible
+height, with the same answer, to the bit, at any thread count. The design is mostly an
+absence: every pair or cell is its own profile and its own `ComputeLineOfSight`, written to
+its own place, and nothing is summed, sorted or combined across them. Floating-point results
+depend on the order operations run in, which is why parallel sums so often come out a last
+bit different; with no operation spanning two pairs there is no such order to vary. The
+threads take pairs sixteen at a time from a shared counter rather than a fixed share each,
+so one that draws long paths doesn't hold up the rest -- which thread answers a pair changes
+nothing, only how soon.
+
+Two things were less obvious. **Progress stays on the calling thread**: a viewshed's
+callback reaches the app's window, which mustn't be touched from a thread it didn't start,
+so only the calling thread reports -- before each row it takes -- and a stop it hears is
+passed to the others through a flag they check before their next row. **The test for "uses
+the threads" first proved nothing**: it compared the threads used with `ThreadsFor`, the
+function that chose them, so a `ThreadsFor` that always answered 1 kept it green. It now
+works out the expected count itself, and a sampler that records which threads read it shows
+that three threads asked for are three threads working.
+
+On this machine's 8 cores and 16 threads, 24 observers against 400 targets go from ~7,300
+pairs a second on one thread to ~79,000 on sixteen: twice as fast on two, four times on four,
+seven on eight, and the second thread on each core adds about half as much again. The DLL's
+naive viewshed runs on every core too, so TerrainBench's 30 km comparison of fast and naive
+takes tens of seconds instead of four minutes. The fast viewshed stays on one thread; at
+under two seconds for 30 km there is little to win.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

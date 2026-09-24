@@ -61,7 +61,10 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
   ground or up to 15 km in the air -- against some 5,000 a second by line of sight. At worst
   the two differ on 2.6% of the targets either sees, nearly all on the edge of what can be
   seen, and a query allocates nothing.
-- **Tested.** 72 engine tests and 141 app tests, all run by `build.ps1` and by CI on
+- **Every core, the same answer.** Many observers against many targets, and the exact
+  viewsheds, run on every core -- about eleven times as fast on 8 cores and 16 threads --
+  with the same answer, to the bit, as on one.
+- **Tested.** 75 engine tests and 141 app tests, all run by `build.ps1` and by CI on
   every push. Each fix was also checked the other way: the defect put back, and a test
   going red.
 
@@ -103,8 +106,8 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 72-case test suite + demo
-TerrainEngine.exe benchmark <profile|viewshed|minheight|observer> <hgtFile> <swLat> <swLon>
+TerrainEngine.exe # run the 75-case test suite + demo
+TerrainEngine.exe benchmark <profile|viewshed|minheight|observer|pairs> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
 TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]

@@ -572,12 +572,59 @@ int main(int argc, char* argv[])
                 return 0;
             }
 
-            std::cout << "Unknown benchmark mode. Use 'profile', 'viewshed', 'minheight' or 'observer'." << std::endl;
+            if (subMode == "pairs")
+            {
+                // 24 observers against 400 targets, spread over the tile, on the ground and in the air:
+                // the pairs answered a second at each thread count, each run checked against the
+                // one-thread run to the bit. Then the naive viewshed over 5 km on one thread and on all.
+                std::vector<SightEnd> observers, targets;
+                const double golden = 3.14159265358979323846 * (3.0 - std::sqrt(5.0));
+                GeoPoint centre{ swLat + 0.5, swLon + 0.5 };
+                for (int i = 0; i < 24; i++)
+                    observers.push_back({ GreatCircleDestination(centre, i * golden, 30000.0 * std::sqrt((i + 0.5) / 24)), DatumHeight{ 2.0, VerticalDatum::HeightAboveGround } });
+                for (int i = 0; i < 400; i++)
+                    targets.push_back({ GreatCircleDestination(centre, i * golden, 45000.0 * std::sqrt((i + 0.5) / 400)),
+                        i % 2 == 0 ? DatumHeight{ 2.0, VerticalDatum::HeightAboveGround } : DatumHeight{ 5000.0, VerticalDatum::OrthometricMsl } });
+
+                std::cout << "Line of sight pairs benchmark: 24 observers x 400 targets @ 30m spacing" << std::endl;
+                LineOfSightPairs first;
+                for (int threads : { 1, 2, 4, 8, 0 })
+                {
+                    auto start = std::chrono::high_resolution_clock::now();
+                    LineOfSightPairs pairs = ComputeLineOfSightPairs(observers, targets, spacingInDegrees, sampler, 4.0 / 3.0, threads);
+                    double seconds = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
+                    bool same = true;
+                    if (threads == 1) first = pairs;
+                    for (size_t i = 0; i < pairs.results.size(); i++)
+                    {
+                        const auto& a = pairs.results[i];
+                        const auto& b = first.results[i];
+                        same = same && a.isVisible == b.isVisible && a.status == b.status && a.clearanceDeficitM == b.clearanceDeficitM
+                            && a.blockingElevationM == b.blockingElevationM && a.blockingFeature == b.blockingFeature;
+                    }
+                    std::cout << pairs.threadsUsed << " thread(s): " << seconds * 1000 << " ms, " << pairs.results.size() / seconds
+                        << " pairs a second" << (same ? ", the same as on one thread" : ", DIFFERENT from one thread") << std::endl;
+                }
+
+                int grid = (int)(2 * 5000.0 / metersPerDegreeLat / spacingInDegrees);
+                DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
+                for (int threads : { 1, 0 })
+                {
+                    auto start = std::chrono::high_resolution_clock::now();
+                    ViewshedResult naive = ComputeViewshedNaive(centre, agl2m, grid, grid, spacingInDegrees, sampler, 4.0 / 3.0, nullptr,
+                        DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, threads);
+                    double seconds = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
+                    std::cout << "5km naive viewshed (" << grid << "x" << grid << ") on " << ThreadsFor(threads) << " thread(s): " << seconds * 1000 << " ms" << std::endl;
+                }
+                return 0;
+            }
+
+            std::cout << "Unknown benchmark mode. Use 'profile', 'viewshed', 'minheight', 'observer' or 'pairs'." << std::endl;
             return 1;
         }
 
         std::cout << "Usage:" << std::endl;
-        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed|minheight|observer> <hgtFile> <swLat> <swLon>" << std::endl;
+        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed|minheight|observer|pairs> <hgtFile> <swLat> <swLon>" << std::endl;
         std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]" << std::endl;
@@ -660,6 +707,9 @@ int main(int argc, char* argv[])
     TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets();
     TestPreparedObserverQueriesAllocateNothing();
     TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals();
+    TestLineOfSightPairsAreTheSameAtEveryThreadCount();
+    TestLineOfSightPairsRefuseEachPairItCannotSample();
+    TestReferenceGridsAreTheSameAtEveryThreadCount();
 
     std::cout << "-------------------------" << std::endl;
 

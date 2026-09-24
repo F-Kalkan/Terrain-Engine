@@ -1,6 +1,6 @@
 # The engine's test suite
 
-72 test functions, hand-checkable apart from the real-data comparisons, which hold the
+75 test functions, hand-checkable apart from the real-data comparisons, which hold the
 fast viewshed against naive, the fast minimum visible height against its reference and the
 prepared observer against the line of sight, at several observers:
 
@@ -150,6 +150,16 @@ terrain, decides every answer.
     the Earth (not a number, or past a pole) or with no height is refused with the reason, as
     is every target of a preparation refused for its spacing or radius; progress runs from 0
     to 1 without changing a ray, and a stop is honoured.
+- **Threads** (skipped without the 1-arcsecond tile, but for the refusals):
+  - *many pairs*: 8 observers against 241 targets -- on the ground and in the air, some past
+    the tile's edge, one not on the Earth -- answered on 1, 2, 3, 7 threads and one per
+    hardware thread, every field of every answer the same, to the bit, as the one-thread
+    batch; each run on as many threads as asked, and three threads asked for seen reading the
+    terrain; a spacing of zero refuses every pair with its reason, and no observers or no
+    targets is an empty answer;
+  - *the exact grids*: the naive viewshed and the exact minimum visible height over 1 km, the
+    same grid to the bit on 1, 2, 3 threads and one per hardware thread, progress reported on
+    the calling thread only, and a stop at the first report stopping every thread.
 - **1-arcsecond data** (skipped when `DATA/SRTM1/N36W112.hgt` isn't present): 200
   consecutive posts read through `GetTerrainProfile` at the tile's own spacing must
   each return exactly the value stored in the file at that row and column; and the 1-
@@ -202,7 +212,12 @@ check, the target's own sample let into its horizon, the bearing taken from the 
 quarter of the rays, a query that allocates, and a refused target answered each turn a test
 red; an unknown observer answered anyway crashes the suite, reading rays it never cast. Two
 design choices survive being taken out -- the blend of two rays and the half-spacing margin
--- and [ENGINE.md](ENGINE.md) says why neither is claimed to matter. A suite that stays green
-with the defect restored verifies nothing.
+-- and [ENGINE.md](ENGINE.md) says why neither is claimed to matter. And so were the threads:
+a pair's observer taken by the wrong index, progress reported from another thread, a stop
+that doesn't reach the other threads and a thread count quietly ignored each turn a test red,
+and a profile buffer shared by every thread crashes the suite. The thread count ignored first
+survived -- the test compared the threads used with the same function that picked them -- so
+it now works the number out itself and watches which threads read the terrain. A suite that
+stays green with the defect restored verifies nothing.
 
 All of the above pass identically in Debug and Release.

@@ -136,6 +136,11 @@ namespace
 
     const char* InvalidHandleMessage = "That tile isn't open: it was closed, or never opened.";
 
+    // The exact grids -- the naive viewshed and the exact minimum visible height -- run on one
+    // thread per hardware thread. Each cell is its own line of sight, so the answer is the same
+    // to the bit at any thread count; only the time changes.
+    constexpr int AllCores = 0;
+
     // ---- Validation ---------------------------------------------------------------
     // Each returns an empty string when the input is acceptable, or a message saying
     // what is allowed.
@@ -643,7 +648,7 @@ int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_ca
         DatumHeight targetHeight{ q.target_height_above_ground_m, VerticalDatum::HeightAboveGround };
         RealElevationSampler& sampler = request.tile->Sampler(q.interpolation);
         ViewshedResult viewshed = q.algorithm == TE_ALGORITHM_NAIVE
-            ? ComputeViewshedNaive(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, targetHeight)
+            ? ComputeViewshedNaive(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, targetHeight, AllCores)
             : ComputeViewshedFast(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, targetHeight);
         if (int32_t code = GridOutcome(viewshed.cancelled, viewshed.inputProblem, "viewshed"); code != TE_OK) return code;
 
@@ -668,7 +673,7 @@ int32_t te_minimum_visible_height(te_tile tile, const te_viewshed_query* query, 
 
         RealElevationSampler& sampler = request.tile->Sampler(q.interpolation);
         MinimumVisibleHeightResult heights = q.algorithm == TE_ALGORITHM_NAIVE
-            ? ComputeMinimumVisibleHeightReference(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report)
+            ? ComputeMinimumVisibleHeightReference(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, AllCores)
             : ComputeMinimumVisibleHeightFast(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report);
         if (int32_t code = GridOutcome(heights.cancelled, heights.inputProblem, "minimum visible height"); code != TE_OK) return code;
 

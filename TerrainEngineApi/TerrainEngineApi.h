@@ -281,8 +281,10 @@ typedef int32_t (*te_progress_callback)(double fraction_done, void* user_data);
 // TE_MAX_VIEWSHED_CELLS_PER_SIDE cells across.
 // Ownership: *out_cells belongs to the caller; release it with te_free.
 // Complexity: fast O(rows + cols) rays of O(radius / spacing) samples each; naive
-// O(rows * cols) paths of the same length -- minutes for 30 km at 30 m.
-// Thread-safety: safe to call concurrently; the callback runs on the calling thread.
+// O(rows * cols) paths of the same length, spread over one thread per hardware thread --
+// the same cells, to the bit, as on one; tens of seconds for 30 km at 30 m on 16 threads.
+// Thread-safety: safe to call concurrently; the callback runs on the calling thread only,
+// even while the naive algorithm's other threads work.
 TE_API int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells);
 
 // For every cell within radius_km of the observer, the lowest height above the cell's
@@ -299,7 +301,8 @@ TE_API int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_prog
 // the same algorithm. The same answer as an absolute height is the ground under the cell's
 // centre (te_tile_get_elevation, same interpolation) plus the height.
 // Ownership: *out_cells and *out_heights_m belong to the caller; release each with te_free.
-// Complexity: as te_viewshed, plus a few comparisons per hidden cell (fast); the reference
+// Complexity: as te_viewshed, plus a few comparisons per hidden cell (fast); the reference,
+// spread over every hardware thread as the naive viewshed is,
 // takes 1.0-1.6 times the naive viewshed's time. Thread-safety: as te_viewshed.
 TE_API int32_t te_minimum_visible_height(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells, double** out_heights_m);
 

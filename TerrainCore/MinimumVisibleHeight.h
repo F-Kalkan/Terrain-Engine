@@ -258,12 +258,12 @@ inline void LayOutMinimumVisibleHeightGrid(MinimumVisibleHeightResult& result, i
 //
 // Complexity: O(gridRows * gridCols * samples per profile), like ComputeViewshedNaive: one
 // line-of-sight pass for a cell whose ground is seen, a median of 10-16 for the rest,
-// each cheaper than building the profile. Measured, 1.0-1.6 times naive's time. One
-// profile buffer is reused for every cell.
-// Thread-safety: single-thread-only as written, but, like naive, each cell is answered
-// on its own and could be computed on any thread in any order without changing it.
-// Progress (optional): reported before each grid row, then once at the end.
-inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr)
+// each cheaper than building the profile. Measured, 1.0-1.6 times naive's time. Each
+// thread reuses one profile buffer for every cell it answers.
+// Threads (optional): as ComputeViewshedNaive -- 1 by default, 0 for one per hardware
+// thread; each cell is answered on its own, so the grid is the same at any thread count.
+// Progress (optional): as ComputeViewshedNaive.
+inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, int threadCount = 1)
 {
     MinimumVisibleHeightResult result;
 
@@ -284,15 +284,10 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint 
     auto observerGroundM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
     bool observerKnown = observerGroundM.has_value() && CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
 
-    std::vector<ProfileSample> profile;
-    for (int row = 0; row < gridRows; row++)
-    {
-        if (progress && !progress((double)row / gridRows))
-        {
-            result.cancelled = true;
-            return result;
-        }
-
+    // One profile buffer per thread, reused for every cell that thread answers.
+    std::vector<std::vector<ProfileSample>> profiles(ThreadsFor(threadCount));
+    bool finished = ForEachRowOnThreads(gridRows, threadCount, progress, [&](int row, int thread) {
+        std::vector<ProfileSample>& profile = profiles[thread];
         for (int col = 0; col < gridCols; col++)
         {
             if (row == centerRow && col == centerCol)
@@ -318,6 +313,11 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint 
             result.heightAboveGroundM[row][col] = answer.heightAboveGroundM;
             result.groundM[row][col] = answer.groundM;
         }
+    });
+    if (!finished)
+    {
+        result.cancelled = true;
+        return result;
     }
 
     if (progress) progress(1.0);
