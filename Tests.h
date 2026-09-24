@@ -566,8 +566,8 @@ void TestInterpolationModesDifferOnRidgeline()
 //TEST 18
 void TestProfileMatchesFrozenOracle()
 {
-    // The task asks for the naive profile's output to be frozen as the oracle
-    // everything after it is measured against. DATA/oracle_profile.csv freezes
+    // The naive profile's output, frozen as the oracle everything after it is
+    // measured against. DATA/oracle_profile.csv freezes
     // GetTerrainProfile's output for a real 2.9 km path across the included
     // Grand Canyon tile, sampled at the data's own ~90 m spacing: 33 samples, no
     // voids, elevations from 1287 m to 1709 m. This regenerates that profile and
@@ -2092,4 +2092,301 @@ void TestFastViewshedAgreesWithNaiveAtThreeObservers()
     CheckFastViewshedAgainstNaiveOnRealTerrain("DATA/N36W112.hgt", "3-arcsecond tile, ~90 m", FastViewshedOffEdgeToleranceCoarseTile, {
         { { 36.5, -111.5 }, 2.0 },
     });
+}
+
+// Ground at a constant height everywhere on the Earth, and none for a coordinate that
+// isn't one -- so a test can place a point anywhere, poles included.
+class LevelGroundSampler : public IElevationSampler
+{
+public:
+    explicit LevelGroundSampler(double groundM, double ridgeFromLatDeg = 1e9, double ridgeToLatDeg = 1e9, double ridgeM = 0.0)
+        : groundM(groundM), ridgeFromLatDeg(ridgeFromLatDeg), ridgeToLatDeg(ridgeToLatDeg), ridgeM(ridgeM) {}
+
+    std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
+    {
+        if (CheckPoint({ latitudeDeg, longitudeDeg }) != InputProblem::None) return std::nullopt;
+        return latitudeDeg >= ridgeFromLatDeg && latitudeDeg <= ridgeToLatDeg ? ridgeM : groundM;
+    }
+    VerticalDatum GetDatum() const override { return VerticalDatum::OrthometricMsl; }
+
+private:
+    double groundM, ridgeFromLatDeg, ridgeToLatDeg, ridgeM;
+};
+
+//TEST 58
+void TestTheLibraryRefusesASpacingItCannotSampleAt()
+{
+    // A 20 km path due north over level ground at 100 m, with a 400 m ridge 100 m deep
+    // across it halfway: at 30 m spacing the ridge blocks the view. Every other spacing
+    // below once gave a confident "visible" -- the two endpoints alone, nothing between.
+    // Now the path isn't sampled, the profile comes back empty with the reason, and no
+    // line of sight, Fresnel clearance or batch answer built on it is Ok.
+    const GeoPoint start{ 36.5, -111.5 };
+    const GeoPoint end{ 36.5 + MetersToLatitudeDeg(20000.0), -111.5 };
+    const double ridgeFrom = 36.5 + MetersToLatitudeDeg(9950.0);
+    const double ridgeTo = 36.5 + MetersToLatitudeDeg(10050.0);
+    LevelGroundSampler ground(100.0, ridgeFrom, ridgeTo, 400.0);
+
+    std::vector<ProfileSample> buffer;
+    bool sampledAt30m = GetTerrainProfile(start, end, MetersToLatitudeDeg(30.0), ground, buffer) == InputProblem::None;
+    LineOfSightResult at30m = ComputeLineOfSight(buffer, Agl(2.0), Agl(2.0));
+    bool blockedAt30m = sampledAt30m && buffer.size() == 668 && IsOk(at30m.status) && !at30m.isVisible;
+
+    struct Case { double spacingDeg; InputProblem expected; };
+    const Case cases[] = {
+        { 0.0, InputProblem::SpacingNotPositive },
+        { MetersToLatitudeDeg(-30.0), InputProblem::SpacingNotPositive },
+        { std::nan(""), InputProblem::SpacingNotPositive },
+        { INFINITY, InputProblem::SpacingNotPositive },
+        { MetersToLatitudeDeg(1e-6), InputProblem::SpacingTooFine }, // 2 x 10^10 intervals, past INT_MAX
+    };
+    bool allRefused = true;
+    for (const Case& c : cases)
+    {
+        GetTerrainProfile(start, end, MetersToLatitudeDeg(30.0), ground, buffer); // a full buffer, to see it emptied
+        InputProblem inPlace = GetTerrainProfile(start, end, c.spacingDeg, ground, buffer);
+        std::vector<ProfileSample> byValue = GetTerrainProfile(start, end, c.spacingDeg, ground);
+        LineOfSightResult los = ComputeLineOfSight(byValue, Agl(2.0), Agl(2.0));
+        FresnelClearanceResult fresnel = ComputeFresnelClearance(byValue, Agl(2.0), Agl(2.0), 2.4e9);
+        std::vector<LineOfSightResult> batch = ComputeBatchLineOfSight({ { start, Agl(2.0), end, Agl(2.0) } }, c.spacingDeg, ground);
+
+        allRefused = allRefused
+            && CheckProfileRequest(start, end, c.spacingDeg) == c.expected && inPlace == c.expected
+            && buffer.empty() && byValue.empty()
+            && los.status == ComputationStatus::EmptyOrSingleSampleProfile
+            && fresnel.status == ComputationStatus::EmptyOrSingleSampleProfile
+            && batch.size() == 1 && batch[0].status == ComputationStatus::InvalidInput && batch[0].inputProblem == c.expected;
+    }
+
+    Expect(blockedAt30m && allRefused, "TestTheLibraryRefusesASpacingItCannotSampleAt");
+}
+
+//TEST 59
+void TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth()
+{
+    // A latitude or longitude that isn't a finite number, or a latitude past a pole, is
+    // refused with the reason by every entry point that takes one. The samplers answer
+    // such a coordinate -- or a finite one wildly off their data -- with no elevation,
+    // never by casting it to an int, which would be undefined.
+    const double nan = std::nan("");
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint good{ 36.5, -111.5 };
+    const GeoPoint nearby{ 36.51, -111.5 };
+    LevelGroundSampler ground(100.0);
+
+    bool pointsChecked = CheckPoint({ nan, -111.5 }) == InputProblem::CoordinateNotFinite
+        && CheckPoint({ 36.5, INFINITY }) == InputProblem::CoordinateNotFinite
+        && CheckPoint({ 91.0, -111.5 }) == InputProblem::LatitudeOutOfRange
+        && CheckPoint({ -90.0, 0.0 }) == InputProblem::None
+        && CheckPoint({ 36.5, 540.0 }) == InputProblem::None; // any finite longitude names a meridian
+
+    std::vector<ProfileSample> buffer;
+    bool profilesRefused = GetTerrainProfile(good, { nan, -111.5 }, spacingDeg, ground, buffer) == InputProblem::CoordinateNotFinite
+        && buffer.empty()
+        && GetTerrainProfile({ 91.0, -111.5 }, good, spacingDeg, ground, buffer) == InputProblem::LatitudeOutOfRange;
+
+    // One bad query in a batch is refused on its own; the others are still answered.
+    std::vector<LineOfSightResult> batch = ComputeBatchLineOfSight({
+        { good, Agl(2.0), nearby, Agl(2.0) },
+        { { nan, nan }, Agl(2.0), nearby, Agl(2.0) },
+    }, spacingDeg, ground);
+    bool batchAnswersTheRest = batch.size() == 2 && IsOk(batch[0].status)
+        && batch[1].status == ComputationStatus::InvalidInput && batch[1].inputProblem == InputProblem::CoordinateNotFinite;
+
+    ViewshedResult naive = ComputeViewshedNaive({ nan, -111.5 }, Agl(2.0), 5, 5, spacingDeg, ground);
+    ViewshedResult fast = ComputeViewshedFast({ 36.5, -INFINITY }, Agl(2.0), 5, 5, spacingDeg, ground);
+    bool viewshedsRefused = naive.visible.empty() && naive.inputProblem == InputProblem::CoordinateNotFinite
+        && fast.visible.empty() && fast.inputProblem == InputProblem::CoordinateNotFinite;
+
+    // Every sampler, at a coordinate that is no number, an infinite one, and a finite one far off its data.
+    const std::string path = "coordinate_test_tile.hgt";
+    {
+        std::ofstream file(path, std::ios::binary);
+        const unsigned char posts[8] = { 0, 100, 0, 100, 0, 100, 0, 100 }; // 2x2, 100 m each
+        file.write((const char*)posts, sizeof posts);
+    }
+    RealElevationSampler realNearest(path, 36.0, -112.0);
+    RealElevationSampler realBilinear(path, 36.0, -112.0, InterpolationMode::Bilinear);
+    std::remove(path.c_str());
+    FakeElevationSampler fake({ { 1, 2 }, { 3, 4 } }, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
+    FakeElevationSampler fakeBilinear({ { 1, 2 }, { 3, 4 } }, InterpolationMode::Bilinear, VerticalDatum::OrthometricMsl);
+    FakeElevationSampler empty({}, InterpolationMode::Nearest, VerticalDatum::OrthometricMsl);
+    RasterBlockElevationSampler raster = MakeViewshedAlignedRaster(MakeFlatCells(3, 10.0), good, spacingDeg);
+    MultiTileElevationSampler tiles;
+    tiles.AddTile(36.0, -112.0, realNearest);
+
+    IElevationSampler* samplers[] = { &realNearest, &realBilinear, &fake, &fakeBilinear, &empty, &raster, &tiles };
+    const double badCoordinates[] = { nan, INFINITY, -INFINITY, 1e300, -1e300 };
+    bool samplersSafe = realNearest.IsLoaded() && realNearest.GetElevation(36.5, -111.5) == 100.0 && empty.GetElevation(0, 0) == std::nullopt;
+    for (IElevationSampler* sampler : samplers)
+    {
+        for (double bad : badCoordinates)
+        {
+            samplersSafe = samplersSafe
+                && !sampler->GetElevation(bad, -111.5).has_value()
+                && !sampler->GetElevation(36.5, bad).has_value();
+        }
+    }
+
+    Expect(pointsChecked && profilesRefused && batchAnswersTheRest && viewshedsRefused && samplersSafe,
+        "TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth");
+}
+
+//TEST 60
+void TestTheLibraryRefusesHeightsThatAreNotNumbers()
+{
+    // A height, or its geoid undulation, that isn't a finite number is refused as that --
+    // not taken for a datum problem, and never compared: NaN makes every comparison
+    // false, which once read as "nothing blocks the view".
+    const double nan = std::nan("");
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint a{ 36.5, -111.5 };
+    const GeoPoint b{ 36.51, -111.5 };
+    LevelGroundSampler ground(100.0);
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacingDeg, ground);
+
+    const DatumHeight badHeights[] = {
+        Agl(nan),
+        Agl(INFINITY),
+        DatumHeight{ 150.0, VerticalDatum::EllipsoidalHae, nan },  // an undulation that is no number
+        DatumHeight{ -INFINITY, VerticalDatum::OrthometricMsl },
+    };
+    bool refused = true;
+    for (const DatumHeight& bad : badHeights)
+    {
+        LineOfSightResult asObserver = ComputeLineOfSight(profile, bad, Agl(2.0));
+        LineOfSightResult asTarget = ComputeLineOfSight(profile, Agl(2.0), bad);
+        FresnelClearanceResult fresnel = ComputeFresnelClearance(profile, bad, Agl(2.0), 2.4e9);
+        ViewshedResult naive = ComputeViewshedNaive(a, bad, 5, 5, spacingDeg, ground);
+        ViewshedResult fast = ComputeViewshedFast(a, Agl(2.0), 5, 5, spacingDeg, ground, 4.0 / 3.0, nullptr, bad);
+        refused = refused
+            && asObserver.status == ComputationStatus::InvalidInput && asObserver.inputProblem == InputProblem::HeightNotFinite
+            && asTarget.status == ComputationStatus::InvalidInput && asTarget.inputProblem == InputProblem::HeightNotFinite
+            && fresnel.status == ComputationStatus::InvalidInput && fresnel.inputProblem == InputProblem::HeightNotFinite
+            && naive.visible.empty() && naive.inputProblem == InputProblem::HeightNotFinite
+            && fast.visible.empty() && fast.inputProblem == InputProblem::HeightNotFinite;
+    }
+
+    // The datum helpers underneath convert such a value to nothing, not to NaN.
+    bool helpersRefuse = !ConvertHeightBetweenDatums(nan, VerticalDatum::EllipsoidalHae, VerticalDatum::OrthometricMsl, 30.0).has_value()
+        && !ConvertHeightBetweenDatums(150.0, VerticalDatum::EllipsoidalHae, VerticalDatum::OrthometricMsl, nan).has_value()
+        && !EyeHeightInTerrainDatum(Agl(nan), 100.0, VerticalDatum::OrthometricMsl).has_value()
+        && EyeHeightInTerrainDatum(Agl(2.0), 100.0, VerticalDatum::OrthometricMsl) == 102.0;
+
+    Expect(refused && helpersRefuse && IsOk(ComputeLineOfSight(profile, Agl(2.0), Agl(2.0)).status),
+        "TestTheLibraryRefusesHeightsThatAreNotNumbers");
+}
+
+//TEST 61
+void TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse()
+{
+    // k divides the Earth's radius: zero divides by zero, a negative k bends the Earth
+    // the wrong way, and NaN turns every comparison false. A frequency of zero or less
+    // has no wavelength. Each is refused by name; a huge k -- curvature switched off, as
+    // the suite's own curvature tests do -- is still a k.
+    const double nan = std::nan("");
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint a{ 36.5, -111.5 };
+    const GeoPoint b{ 36.51, -111.5 };
+    LevelGroundSampler ground(100.0);
+    std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacingDeg, ground);
+
+    bool kRefused = true;
+    const double unusableK[] = { 0.0, -4.0 / 3.0, nan, (double)INFINITY };
+    for (double k : unusableK)
+    {
+        LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), k);
+        FresnelClearanceResult fresnel = ComputeFresnelClearance(profile, Agl(2.0), Agl(2.0), 2.4e9, k);
+        std::vector<LineOfSightResult> batch = ComputeBatchLineOfSight({ { a, Agl(2.0), b, Agl(2.0) } }, spacingDeg, ground, k);
+        ViewshedResult naive = ComputeViewshedNaive(a, Agl(2.0), 5, 5, spacingDeg, ground, k);
+        ViewshedResult fast = ComputeViewshedFast(a, Agl(2.0), 5, 5, spacingDeg, ground, k);
+        kRefused = kRefused
+            && los.status == ComputationStatus::InvalidInput && los.inputProblem == InputProblem::CurvatureFactorNotPositive
+            && fresnel.inputProblem == InputProblem::CurvatureFactorNotPositive
+            && batch[0].inputProblem == InputProblem::CurvatureFactorNotPositive
+            && naive.inputProblem == InputProblem::CurvatureFactorNotPositive && naive.visible.empty()
+            && fast.inputProblem == InputProblem::CurvatureFactorNotPositive && fast.visible.empty();
+    }
+
+    bool frequencyRefused = true;
+    const double unusableFrequency[] = { 0.0, -2.4e9, nan, (double)INFINITY };
+    for (double hz : unusableFrequency)
+    {
+        FresnelClearanceResult fresnel = ComputeFresnelClearance(profile, Agl(2.0), Agl(2.0), hz);
+        frequencyRefused = frequencyRefused
+            && fresnel.status == ComputationStatus::InvalidInput && fresnel.inputProblem == InputProblem::FrequencyNotPositive;
+    }
+
+    Expect(kRefused && frequencyRefused
+        && IsOk(ComputeLineOfSight(profile, Agl(2.0), Agl(2.0), 1e12).status)
+        && ComputeViewshedFast(a, Agl(2.0), 5, 5, spacingDeg, ground, 1e12).inputProblem == InputProblem::None,
+        "TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse");
+}
+
+//TEST 62
+void TestAViewshedGridThatWouldReachAPoleIsRefused()
+{
+    // A viewshed lays out its columns along each row's latitude, dividing by its cosine:
+    // at a pole there is no longitude to lay them along. A grid is refused when any row
+    // would reach a pole, and laid out when every row stays short of one -- however close.
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const int thirtyKm = (int)(2 * MetersToLatitudeDeg(30000.0) / spacingDeg);   // 2000 cells, 0.27 degrees each way
+    LevelGroundSampler ground(0.0);
+
+    auto refusedAt = [&](GeoPoint observer, int grid) {
+        ViewshedResult naive = ComputeViewshedNaive(observer, Agl(2.0), grid, grid, spacingDeg, ground);
+        ViewshedResult fast = ComputeViewshedFast(observer, Agl(2.0), grid, grid, spacingDeg, ground);
+        return naive.inputProblem == InputProblem::GridBeyondPole && naive.visible.empty()
+            && fast.inputProblem == InputProblem::GridBeyondPole && fast.visible.empty();
+    };
+
+    bool refused = refusedAt({ 90.0, 0.0 }, 1)          // at the pole itself, even a single cell
+        && refusedAt({ 89.8, 10.0 }, thirtyKm)            // 0.2 degrees short, rows reaching 0.27 degrees north
+        && refusedAt({ -89.8, 10.0 }, thirtyKm);          // and the same in the south
+
+    ViewshedResult near = ComputeViewshedFast({ 89.5, 10.0 }, Agl(2.0), 67, 67, spacingDeg, ground); // 1 km: rows stay short of it
+    bool laidOutNearIt = near.inputProblem == InputProblem::None && near.visible.size() == 67 && CountCells(near, CellVisibility::Visible) == 67 * 67;
+
+    Expect(refused && laidOutNearIt
+        && ComputeViewshedNaive({ 91.0, 0.0 }, Agl(2.0), 5, 5, spacingDeg, ground).inputProblem == InputProblem::LatitudeOutOfRange
+        && ComputeViewshedFast({ 36.5, -111.5 }, Agl(2.0), 5, 5, 0.0, ground).inputProblem == InputProblem::SpacingNotPositive
+        && ComputeViewshedFast({ 36.5, -111.5 }, Agl(2.0), 0, 5, spacingDeg, ground).inputProblem == InputProblem::None,
+        "TestAViewshedGridThatWouldReachAPoleIsRefused");
+}
+
+//TEST 63
+void TestRealElevationSamplerBilinearMatchesAHandWorkedValue()
+{
+    // The .hgt reader's own bilinear interpolation, against a value worked by hand. Test
+    // 49 reads a point in the middle of four posts, where the row and column fractions
+    // are both 1/2 and swapping them changes nothing -- so a reader that swapped them
+    // passed. This point is off the middle.
+    //
+    // A 3x3 tile over one degree: posts half a degree apart, row 0 the northern edge.
+    // The north-west square's corners are 100 (north-west), 140 (north-east), 180
+    // (south-west) and 260 (south-east). At (36.625, -111.875) the point is 3/4 of the
+    // way south across the square and 1/4 of the way east:
+    //   north edge   100 + 1/4 * (140 - 100) = 110
+    //   south edge   180 + 1/4 * (260 - 180) = 200
+    //   between them 110 + 3/4 * (200 - 110) = 177.5
+    // With the fractions swapped it would read 157.5; nearest rounds to the 180 post.
+    const std::string path = "bilinear_known_value_tile.hgt";
+    const int16_t posts[9] = { 100, 140, 0, 180, 260, 0, 0, 0, 0 };
+    {
+        std::ofstream file(path, std::ios::binary);
+        for (int16_t value : posts)
+        {
+            unsigned char bytes[2] = { (unsigned char)((value >> 8) & 0xFF), (unsigned char)(value & 0xFF) };
+            file.write((const char*)bytes, 2);
+        }
+    }
+    RealElevationSampler bilinear(path, 36.0, -112.0, InterpolationMode::Bilinear);
+    RealElevationSampler nearest(path, 36.0, -112.0, InterpolationMode::Nearest);
+    std::remove(path.c_str());
+
+    Expect(bilinear.IsLoaded() && bilinear.PostsPerSide() == 3
+        && bilinear.GetElevation(36.625, -111.875) == 177.5
+        && nearest.GetElevation(36.625, -111.875) == 180.0
+        && bilinear.GetElevation(36.5, -112.0) == 180.0,  // on a post, bilinear reads the post itself
+        "TestRealElevationSamplerBilinearMatchesAHandWorkedValue");
 }

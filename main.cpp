@@ -109,6 +109,16 @@ bool ReadPositiveNumberArg(char* argv[], int index, const char* name, double& ou
     return true;
 }
 
+// The library refuses a path it can't sample -- a latitude past a pole, a spacing so fine
+// the sample count overflows. Say why and stop, rather than print an answer about nothing.
+bool PathCanBeSampled(GeoPoint a, GeoPoint b, double spacing)
+{
+    InputProblem problem = CheckProfileRequest(a, b, spacing);
+    if (problem == InputProblem::None) return true;
+    std::cout << "Error: " << InputProblemToString(problem) << std::endl;
+    return false;
+}
+
 bool ReadPositiveIntArg(char* argv[], int index, const char* name, int& out)
 {
     std::optional<int> value = ParseInt(argv[index]);
@@ -149,6 +159,7 @@ int main(int argc, char* argv[])
             }
             GeoPoint a{ aLat, aLon };
             GeoPoint b{ bLat, bLon };
+            if (!PathCanBeSampled(a, b, spacing)) return 1;
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
 
             for (const auto& sample : profile)
@@ -190,6 +201,7 @@ int main(int argc, char* argv[])
                 return 1;
             }
             GeoPoint b{ bLat, bLon };
+            if (!PathCanBeSampled(a, b, spacing)) return 1;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
             DatumHeight hADatum{ hA, VerticalDatum::HeightAboveGround };
@@ -239,6 +251,11 @@ int main(int argc, char* argv[])
             DatumHeight heightDatum{ height, VerticalDatum::HeightAboveGround };
 
             ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k, nullptr, DatumHeight{ targetHeight, VerticalDatum::HeightAboveGround });
+            if (result.inputProblem != InputProblem::None)
+            {
+                std::cout << "Error: " << InputProblemToString(result.inputProblem) << std::endl;
+                return 1;
+            }
             WriteViewshedPGM(result, "cli_viewshed_output.pgm");
 
             std::cout << "Viewshed written to cli_viewshed_output.pgm" << std::endl;
@@ -269,6 +286,7 @@ int main(int argc, char* argv[])
             }
             GeoPoint a{ aLat, aLon };
             GeoPoint b{ bLat, bLon };
+            if (!PathCanBeSampled(a, b, spacing)) return 1;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
             DatumHeight hADatum{ hA, VerticalDatum::HeightAboveGround };
@@ -384,7 +402,9 @@ int main(int argc, char* argv[])
             {
                 std::cout << "Query " << i << ": Visible=" << (results[i].isVisible ? "YES" : "NO")
                     << ", ClearanceDeficit=" << results[i].clearanceDeficitM
-                    << ", Status=" << ComputationStatusToString(results[i].status) << std::endl;
+                    << ", Status=" << ComputationStatusToString(results[i].status);
+                if (results[i].status == ComputationStatus::InvalidInput) std::cout << " (" << InputProblemToString(results[i].inputProblem) << ")";
+                std::cout << std::endl;
             }
             return 0;
         }
@@ -528,6 +548,12 @@ int main(int argc, char* argv[])
     TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere();
     TestViewshedAgreementRefusesGridsOfDifferentSizes();
     TestFastViewshedAgreesWithNaiveAtThreeObservers();
+    TestTheLibraryRefusesASpacingItCannotSampleAt();
+    TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth();
+    TestTheLibraryRefusesHeightsThatAreNotNumbers();
+    TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse();
+    TestAViewshedGridThatWouldReachAPoleIsRefused();
+    TestRealElevationSamplerBilinearMatchesAHandWorkedValue();
 
     std::cout << "-------------------------" << std::endl;
 

@@ -294,6 +294,38 @@ defects put back one at a time -- one answer everywhere, no blending, no half-ce
 margin, curvature left out, target height ignored, voids ignored, one ray used twice, a
 horizon over the whole ray -- each turn at least one check red.
 
+## Update: the library refuses what it can't answer
+
+`docs/ENGINE.md` listed a spacing of zero or less as "divides by zero" and left it there,
+because the CLI and the DLL never pass one. But code that links the library goes through
+neither, and what a zero spacing actually did was quieter than a crash: the sample count
+came out as infinity, the cast to `int` turned that into a negative number, the "at
+least one interval" floor turned it into one, and the profile was the two endpoints
+alone -- a confident "visible" straight through a ridge that blocks the view at 30 m. A
+spacing so fine that the count passed `INT_MAX` did the same.
+
+Every entry point now checks its own inputs and answers one it can't use with a value
+naming the problem (`InputProblem`): a spacing that isn't a positive finite number or
+is too fine to count; a coordinate that isn't a finite number or a latitude past a pole;
+a height or undulation that isn't a finite number; a k or frequency that isn't a
+positive finite number; a viewshed grid whose rows would reach a pole. Two choices
+worth recording:
+
+- **The profile stays a plain vector.** Giving `GetTerrainProfile` a status would have
+  changed its return type everywhere it is used. It returns an empty profile instead,
+  which the line of sight and Fresnel already answer as `EmptyOrSingleSampleProfile`,
+  never Ok; the in-place overload, which had returned nothing, now returns the reason,
+  and `CheckProfileRequest` gives it for either. The batch, which knows the spacing,
+  reports `InvalidInput` itself.
+- **The samplers check before they cast.** Each read a coordinate by flooring or
+  rounding it into an `int`, which is undefined for NaN, infinity or 10^300. On MSVC it
+  happens to come out as `INT_MIN` and lands outside the grid, so no test could have
+  seen it; the range is now checked as a double first, and the fake grid's old
+  `grid[0]` on an empty grid went with it.
+
+Taking the viewshed's spacing check back out doesn't make a test fail politely: the suite
+crashes, laying out a grid at a spacing of zero. That is the case for the check.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <optional>
 
 // A closed set of vertical reference frames a height or elevation might be
@@ -38,6 +39,8 @@ struct DatumHeight
 // call concurrently from any number of threads.
 inline std::optional<double> ConvertHeightBetweenDatums(double valueM, VerticalDatum from, VerticalDatum to, double geoidUndulationM)
 {
+    // A height or undulation that isn't a finite number converts to nothing, not to NaN.
+    if (!std::isfinite(valueM) || !std::isfinite(geoidUndulationM)) return std::nullopt;
     if (from == to) return valueM;
 
     if (from == VerticalDatum::OrthometricMsl && to == VerticalDatum::EllipsoidalHae)
@@ -71,6 +74,7 @@ inline bool IsTerrainElevationDatum(VerticalDatum datum)
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline std::optional<double> EyeHeightInTerrainDatum(const DatumHeight& height, double groundElevationM, VerticalDatum terrainDatum)
 {
+    if (!std::isfinite(height.valueM) || !std::isfinite(groundElevationM)) return std::nullopt;
     if (!IsTerrainElevationDatum(terrainDatum)) return std::nullopt;
     if (height.datum == VerticalDatum::HeightAboveGround) return groundElevationM + height.valueM;
     if (!IsTerrainElevationDatum(height.datum)) return std::nullopt;

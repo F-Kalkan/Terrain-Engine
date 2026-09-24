@@ -14,9 +14,10 @@ the ground between two points:
 1. **Terrain profile** — ground elevation along a path between two geodetic points,
    sampled at a stated spacing.
 2. **Line of sight** — can an observer at point A see a target at point B, each at a
-   stated height (above the ground, above mean sea level, or above the ellipsoid)?
-   If blocked, the position, elevation, and clearance deficit of the blocking point,
-   and what kind of terrain it is.
+   stated height? If blocked, the position, elevation, and clearance deficit of the
+   blocking point, and what kind of terrain it is. The library takes each height above
+   the ground, above mean sea level, or above the ellipsoid with its geoid undulation;
+   the DLL, the command line and TerrainBench take heights above the ground for now.
 3. **Viewshed** — from one observer, which cells within a radius are visible, as a
    raster mask, for the ground itself or for a target of a given height.
 
@@ -44,13 +45,15 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
 - **Real data.** SRTM `.hgt` tiles at 3 arcseconds (~90 m) and 1 arcsecond (~30 m); a
   3-arcsecond tile of the Grand Canyon is included in `DATA/`.
 - **Honest answers.** Missing data is never read as sea level: a path that crosses a
-  void is reported as "no confident answer", not as visible.
+  void is reported as "no confident answer", not as visible. An input the library
+  can't answer — a spacing of zero, a coordinate or height that isn't a number, a grid
+  at a pole — is refused with the reason, by the library itself.
 - **Fast, and measured against exact.** A 50 km profile takes under half a millisecond;
   a 30 km-radius viewshed (2000 × 2000 cells) under two seconds — some 180 times
-  faster than checking every cell on its own. Over the cells either one finds visible, the two
-  differ on at most 26% at three test observers, almost all of it the boundary of the
-  visible region drawn one cell off; under 2% is off that boundary.
-- **Tested.** 57 engine tests and 116 app tests, all run by `build.ps1` and by CI on
+  faster than checking every cell on its own. Over the cells either one finds visible,
+  the two differ on at most 26% at three test observers, almost all of it the boundary
+  of the visible region drawn one cell off; under 2% is off that boundary.
+- **Tested.** 63 engine tests and 117 app tests, all run by `build.ps1` and by CI on
   every push.
 
 ## What's in the repository
@@ -91,7 +94,7 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 57-case test suite + demo
+TerrainEngine.exe # run the 63-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
@@ -111,8 +114,9 @@ The answer, and if blocked, exactly where and by how much. The spacing is in deg
 0.0002697964817756191° is exactly the 30 m TerrainBench samples at, so the app and the
 CLI answer this query identically. Every numeric argument is checked before anything
 runs: text that isn't a whole, finite number, or a spacing, `k`, frequency or grid size
-that isn't greater than zero, is reported by the argument's name with exit code 1. A
-`batch` queries file is a positive spacing followed by six numbers per query
+that isn't greater than zero, is reported by the argument's name with exit code 1, and
+so is a path or grid the library itself refuses -- a latitude past a pole, a spacing too
+fine to count -- with the library's reason. A `batch` queries file is a positive spacing followed by six numbers per query
 (`aLat aLon bLat bLon hA hB`); a word where a number belongs, or a query cut short at
 the end of the file, is reported the same way rather than silently skipped.
 

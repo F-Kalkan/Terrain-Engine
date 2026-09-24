@@ -57,6 +57,7 @@ public enum ComputationStatus
     VoidInProfile = 3,
     DatumRejected = 4,
     NothingEvaluated = 5,
+    InvalidInput = 6,
 }
 
 public enum TerrainFeature

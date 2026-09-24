@@ -72,7 +72,8 @@ enum class ComputationStatus
     EndpointMissing,            // the observer's or target's own elevation is void
     VoidInProfile,              // some interior sample along the path is void
     DatumRejected,              // a height and the terrain can't be put on one common datum -- see EyeHeightInTerrainDatum
-    NothingEvaluated            // Fresnel only: no interior sample existed to test at all
+    NothingEvaluated,           // Fresnel only: no interior sample existed to test at all
+    InvalidInput                // an input outside the function's domain; the result's inputProblem says which
 };
 
 // The one datum every sample's elevation is expressed in, if there is exactly
@@ -107,8 +108,40 @@ inline std::string ComputationStatusToString(ComputationStatus status)
     case ComputationStatus::VoidInProfile: return "void encountered in profile";
     case ComputationStatus::DatumRejected: return "datum rejected";
     case ComputationStatus::NothingEvaluated: return "nothing evaluated";
+    case ComputationStatus::InvalidInput: return "invalid input";
     default: return "unknown";
     }
+}
+
+// A height a query can use: its value, and its undulation when it carries one, finite.
+// Whether its datum suits the terrain is a separate question -- EyeHeightInTerrainDatum.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline InputProblem CheckHeight(const DatumHeight& height)
+{
+    if (!std::isfinite(height.valueM)) return InputProblem::HeightNotFinite;
+    if (height.geoidUndulationM.has_value() && !std::isfinite(*height.geoidUndulationM)) return InputProblem::HeightNotFinite;
+    return InputProblem::None;
+}
+
+// A refraction factor k the curvature model can use: positive and finite. Zero divides
+// by zero, a negative k bends the Earth the wrong way, and NaN turns every comparison
+// false -- each once an answer, never a refusal.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline InputProblem CheckCurvatureFactor(double k)
+{
+    return std::isfinite(k) && k > 0.0 ? InputProblem::None : InputProblem::CurvatureFactorNotPositive;
+}
+
+// The first problem with a line of sight's heights and k, or None.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline InputProblem CheckLineOfSightInputs(const DatumHeight& observerHeight, const DatumHeight& targetHeight, double k)
+{
+    if (InputProblem height = CheckHeight(observerHeight); height != InputProblem::None) return height;
+    if (InputProblem height = CheckHeight(targetHeight); height != InputProblem::None) return height;
+    return CheckCurvatureFactor(k);
 }
 
 // The path geometry below is written once and shared by ComputeLineOfSight,
@@ -157,6 +190,7 @@ struct LineOfSightResult
     std::optional<double> blockingElevationM;
     double clearanceDeficitM = 0.0;
     TerrainFeatureType blockingFeature = TerrainFeatureType::Unknown;
+    InputProblem inputProblem = InputProblem::None; // set with status InvalidInput
 };
 
 // === FRAME-SAFE LINE-OF-SIGHT PATH ===
@@ -173,7 +207,9 @@ struct LineOfSightResult
 // datum is read from the profile's own samples rather than passed separately,
 // so a profile and the datum describing it cannot drift apart. Anything that
 // can't be put on one common datum is rejected as a value (status =
-// DatumRejected), never silently guessed.
+// DatumRejected), never silently guessed. A height that isn't a finite number, or a k
+// that isn't a positive finite one, is refused first: status InvalidInput, with
+// inputProblem saying which (CheckLineOfSightInputs).
 //
 // Complexity: O(profile.size()) -- one pass over the samples, no allocation of
 // its own (the caller-owned profile is taken by const&).
@@ -186,6 +222,14 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
     result.isVisible = true;
     result.clearanceDeficitM = 0;
     double worstDeficitM = -999999;
+
+    // A height or k it can't use is refused, never answered.
+    result.inputProblem = CheckLineOfSightInputs(observerHeight, targetHeight, k);
+    if (result.inputProblem != InputProblem::None)
+    {
+        result.status = ComputationStatus::InvalidInput;
+        return result;
+    }
 
     if (profile.size() < 2)
     {
@@ -254,6 +298,7 @@ struct FresnelClearanceResult
     double minClearanceFraction = 0.0;
     std::optional<GeoPoint> worstPoint;
     ComputationStatus status = ComputationStatus::Ok;
+    InputProblem inputProblem = InputProblem::None; // set with status InvalidInput
 };
 
 // === FRAME-SAFE LINE-OF-SIGHT PATH ===
@@ -271,6 +316,18 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
 
     FresnelClearanceResult result;
     double bestKnownFraction = 1e18;
+
+    // Heights, k and the frequency: any it can't use is refused, never answered.
+    result.inputProblem = CheckLineOfSightInputs(observerHeight, targetHeight, k);
+    if (result.inputProblem == InputProblem::None && !(std::isfinite(frequencyHz) && frequencyHz > 0.0))
+    {
+        result.inputProblem = InputProblem::FrequencyNotPositive;
+    }
+    if (result.inputProblem != InputProblem::None)
+    {
+        result.status = ComputationStatus::InvalidInput;
+        return result;
+    }
 
     if (profile.size() < 2)
     {
@@ -372,6 +429,17 @@ inline std::vector<LineOfSightResult> ComputeBatchLineOfSight(const std::vector<
     results.reserve(queries.size());
     for (const auto& q : queries)
     {
+        // A query whose path can't be sampled -- a coordinate or the spacing -- is refused
+        // on its own; the rest of the batch is answered.
+        InputProblem pathProblem = CheckProfileRequest(q.observer, q.target, spacingDeg);
+        if (pathProblem != InputProblem::None)
+        {
+            LineOfSightResult refused;
+            refused.status = ComputationStatus::InvalidInput;
+            refused.inputProblem = pathProblem;
+            results.push_back(refused);
+            continue;
+        }
         std::vector<ProfileSample> profile = GetTerrainProfile(q.observer, q.target, spacingDeg, sampler);
         results.push_back(ComputeLineOfSight(profile, q.observerHeight, q.targetHeight, k));
     }

@@ -13,6 +13,7 @@ public static class PlainWords
         ComputationStatus.EmptyOrSingleSampleProfile => "The path has no length to sample.",
         ComputationStatus.DatumRejected => "The heights couldn't be put on the terrain's vertical datum.",
         ComputationStatus.NothingEvaluated => "The path is too short to have any point between its ends to evaluate.",
+        ComputationStatus.InvalidInput => "One of the inputs isn't a number the engine can use.",
         _ => "The engine reported no confident answer.",
     };
 

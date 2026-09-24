@@ -4,7 +4,7 @@ using Xunit;
 namespace TerrainBench.Tests.Interop;
 
 /// <summary>
-/// Every input the task names as dangerous, through the real DLL: each must come back as an error
+/// Every kind of input that can hurt a native library, through the real DLL: each must come back as an error
 /// a person can read, and none may take the test process down.
 /// </summary>
 public class BadInputTests : IDisposable
@@ -91,6 +91,16 @@ public class BadInputTests : IDisposable
     {
         using var polar = _engine.OpenTile(RepositoryFiles.SampleTile, 89, -112).Value;
         AssertError(polar.Viewshed(View1() with { ObserverLatitudeDeg = 90 }, null, default).Error, EngineErrorKind.InvalidArgument, "pole");
+    }
+
+    [Fact]
+    public void A_viewshed_whose_grid_would_reach_the_pole_is_refused()
+    {
+        // The observer is 0.2 degrees from the pole, allowed on its own; a 30 km radius
+        // is 0.27 degrees, so the grid's northern rows would reach past it. The engine
+        // refuses that grid, and the DLL says so instead of reading an empty answer.
+        using var polar = _engine.OpenTile(RepositoryFiles.SampleTile, 89, -112).Value;
+        AssertError(polar.Viewshed(View1() with { ObserverLatitudeDeg = 89.8, RadiusKm = 30 }, null, default).Error, EngineErrorKind.InvalidArgument, "pole");
     }
 
     [Fact]

@@ -582,6 +582,13 @@ int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_ca
 
         if (viewshed.cancelled) return Fail(TE_ERROR_CANCELLED, "The viewshed was cancelled.");
 
+        // The checks above leave one refusal to the engine: a grid whose rows would reach
+        // a pole, which depends on the observer, the radius and the spacing together.
+        if (viewshed.inputProblem == InputProblem::GridBeyondPole)
+            return Fail(TE_ERROR_INVALID_ARGUMENT, "That viewshed would reach the pole, where lines of longitude meet. Use a smaller radius, or an observer further from the pole.");
+        if (viewshed.inputProblem != InputProblem::None)
+            return Fail(TE_ERROR_INVALID_ARGUMENT, std::string("The viewshed can't be computed: ") + InputProblemToString(viewshed.inputProblem) + ".");
+
         int center = gridSize / 2;
         double colStepDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
         uint8_t* cells = AllocateArray<uint8_t>((size_t)gridSize * (size_t)gridSize);

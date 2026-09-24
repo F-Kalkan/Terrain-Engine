@@ -121,16 +121,32 @@ only a demo/tooling one.
   beyond the ranges tested here, and neither model handles a path that crosses the
   antimeridian (±180° longitude).
 - No threading — determinism across thread counts is satisfied vacuously.
-- **Unvalidated inputs, not exercised by any test or CLI path today:**
-  - `spacingDeg <= 0` passed to `GetTerrainProfile` divides by zero
-    (`sampleCount = totalDistanceM / (spacingDeg * metersPerDegree)`). The CLI
-    refuses a non-positive spacing before calling it, and no test passes one.
-  - `FakeElevationSampler` constructed with an empty grid (`{}`) would index `grid[0]` out of
-    bounds in its bilinear path. Every test and demo grid is non-empty; this is a latent
-    fragility in test-only code, not a path real data goes through.
-  - `LongitudeSpacingForLatitude` divides by `cos(latitude)`, which is zero exactly at the poles
-    (±90°) — a viewshed centred exactly on a pole would divide by zero when laying
-    out its grid columns. No test or CLI path ever places an observer there.
+- **Inputs outside the domain are refused, by the library itself** -- not only by the DLL
+  and the CLI in front of it, since code that links the library goes through neither.
+  Each entry point answers such an input with a value naming the problem
+  (`InputProblem`, `TerrainProfile.h`), never a confident answer and never undefined
+  behaviour:
+  - **Spacing** that is zero, negative, NaN or infinite, or so fine that the path's
+    interval count won't fit in an `int`. `GetTerrainProfile` returns an empty profile
+    (its in-place overload also returns the reason; `CheckProfileRequest` says it for
+    either), on which `ComputeLineOfSight` and `ComputeFresnelClearance` report
+    `EmptyOrSingleSampleProfile`. A spacing of zero or less once came back as a
+    two-sample profile -- the endpoints alone -- and a confident "visible" across
+    terrain that blocks the view at 30 m.
+  - **Coordinates** that are NaN or infinite, or a latitude beyond ±90° (`CheckPoint`).
+    Every sampler answers such a coordinate, or a finite one far off its data, with no
+    elevation, checked before anything is cast to an `int`.
+  - **Heights** that are NaN or infinite, or carry such an undulation; **k** that is zero,
+    negative, NaN or infinite; a **Fresnel frequency** likewise. The line of sight and
+    Fresnel clearance report `ComputationStatus::InvalidInput` with the reason in
+    `inputProblem`; `ComputeBatchLineOfSight` does the same per query, answering the rest.
+    A very large k -- curvature switched off -- is still a k.
+  - **A viewshed grid that would reach a pole**: `LongitudeSpacingForLatitude` divides by
+    `cos(latitude)`, and a row at or past a pole has no longitude to lay its columns
+    along. Both viewsheds, like for every other problem above, return an empty grid with
+    `ViewshedResult::inputProblem` set (`CheckViewshedRequest`).
+  One test per class of input, through the library rather than the DLL, in
+  [TESTS.md](TESTS.md).
 
 ## What it deliberately does not model
 
@@ -322,8 +338,10 @@ elevation, so `ComputeLineOfSight(profile, observerHeight, targetHeight, k)` and
 no separate terrain-datum argument that could disagree with the profile. A query that
 can't be put on one datum is rejected as a value
 (`LineOfSightResult::status == ComputationStatus::DatumRejected`), not silently
-computed or thrown. A viewshed asked for a grid with no rows or no columns returns an
-empty `ViewshedResult`. Both viewsheds take an optional progress callback that can stop
+computed or thrown, and an input outside a function's domain likewise, as
+`ComputationStatus::InvalidInput` with an `InputProblem` saying which -- see "Validity
+envelope" above. A viewshed asked for a grid with no rows or no columns returns an
+empty `ViewshedResult`, with no problem: it simply has no cells. Both viewsheds take an optional progress callback that can stop
 them early, which marks the result `cancelled`; without one they run exactly as before.
 Nothing in `TerrainCore` or `TerrainReader` throws across its
 own boundary, other than the standard library's `std::bad_alloc` if memory runs out.

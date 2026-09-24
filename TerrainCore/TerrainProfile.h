@@ -3,6 +3,8 @@
 #include "IElevationSampler.h"
 #include <cmath>
 #include <optional>
+#include <algorithm>
+#include <climits>
 
 
 struct GeoPoint
@@ -27,6 +29,50 @@ struct ProfileSample
 inline constexpr double EarthRadiusM = 6371000.0;
 
 inline constexpr double DegToRad = 3.14159265358979323846 / 180.0;
+
+// Why an entry point refused its input: the value that says a question was outside
+// the function's domain, instead of a confident answer to it or undefined behaviour.
+enum class InputProblem
+{
+    None,
+    SpacingNotPositive,         // a spacing that is zero, negative, NaN or infinite
+    SpacingTooFine,             // a spacing so fine the path's sample count won't fit in an int
+    CoordinateNotFinite,        // a latitude or longitude that is NaN or infinite
+    LatitudeOutOfRange,         // a latitude beyond +-90 degrees
+    HeightNotFinite,            // a height, or its geoid undulation, that is NaN or infinite
+    CurvatureFactorNotPositive, // a refraction factor k that is zero, negative, NaN or infinite
+    FrequencyNotPositive,       // a Fresnel frequency that is zero, negative, NaN or infinite
+    GridBeyondPole,             // a viewshed grid whose rows would reach a pole or past it
+};
+
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline const char* InputProblemToString(InputProblem problem)
+{
+    switch (problem)
+    {
+    case InputProblem::None: return "none";
+    case InputProblem::SpacingNotPositive: return "spacing is not a positive finite number";
+    case InputProblem::SpacingTooFine: return "spacing is too fine: the sample count would overflow";
+    case InputProblem::CoordinateNotFinite: return "a coordinate is not a finite number";
+    case InputProblem::LatitudeOutOfRange: return "a latitude is beyond 90 degrees";
+    case InputProblem::HeightNotFinite: return "a height or its undulation is not a finite number";
+    case InputProblem::CurvatureFactorNotPositive: return "k is not a positive finite number";
+    case InputProblem::FrequencyNotPositive: return "the frequency is not a positive finite number";
+    case InputProblem::GridBeyondPole: return "the viewshed grid would reach a pole";
+    }
+    return "unknown";
+}
+
+// A point on the Earth: both coordinates finite, the latitude within +-90 degrees.
+// Longitude is not range-checked: any finite longitude names a meridian.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline InputProblem CheckPoint(GeoPoint point)
+{
+    if (!std::isfinite(point.latitudeDeg) || !std::isfinite(point.longitudeDeg)) return InputProblem::CoordinateNotFinite;
+    if (std::abs(point.latitudeDeg) > 90.0) return InputProblem::LatitudeOutOfRange;
+    return InputProblem::None;
+}
 
 // Great-circle (haversine) distance between two geodetic points, in metres,
 // over EarthRadiusM's sphere.
@@ -81,6 +127,37 @@ inline GeoPoint GreatCircleInterpolate(GeoPoint a, GeoPoint b, double t, double 
     return result;
 }
 
+// The number of intervals a path is sampled in: the distance over the spacing,
+// rounded UP so the effective spacing never exceeds the request, and at least one.
+// Floor used to drop a sample whenever the count came out as 999.9999..., which a
+// viewshed's axis rays hit by construction (floating-point noise, and a great
+// circle a few mm shorter than the parallel) -- leaving a cell on the ray
+// unvisited. The (1 - 1e-9) factor stops that noise adding a spurious extra sample
+// instead. Infinite for a spacing that isn't positive; beyond INT_MAX for one too fine.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double ProfileIntervals(GeoPoint startPoint, GeoPoint endPoint, double spacingDeg)
+{
+    double intervalsNeeded = GreatCircleDistanceM(startPoint, endPoint) / (spacingDeg * EarthRadiusM * DegToRad);
+    return (std::max)(1.0, ceil(intervalsNeeded * (1.0 - 1e-9)));
+}
+
+// Whether GetTerrainProfile can sample this path: both ends on the Earth
+// (CheckPoint), and a spacing that is a positive finite number of degrees, coarse
+// enough that the interval count fits in an int. A spacing of zero or less once
+// came back as a confident two-sample profile -- the endpoints alone, as if nothing
+// stood between them.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline InputProblem CheckProfileRequest(GeoPoint startPoint, GeoPoint endPoint, double spacingDeg)
+{
+    if (InputProblem point = CheckPoint(startPoint); point != InputProblem::None) return point;
+    if (InputProblem point = CheckPoint(endPoint); point != InputProblem::None) return point;
+    if (!std::isfinite(spacingDeg) || spacingDeg <= 0.0) return InputProblem::SpacingNotPositive;
+    if (!(ProfileIntervals(startPoint, endPoint, spacingDeg) <= (double)INT_MAX - 1)) return InputProblem::SpacingTooFine;
+    return InputProblem::None;
+}
+
 // === FRAME-SAFE LINE-OF-SIGHT PATH ===
 // Fills outProfile in place instead of returning a freshly allocated vector.
 // outProfile.clear() drops its elements but keeps its underlying storage, so a
@@ -111,23 +188,19 @@ inline GeoPoint GreatCircleInterpolate(GeoPoint a, GeoPoint b, double t, double 
 // threads as long as each call passes its own outProfile and sampler is safe
 // for concurrent GetElevation calls (IElevationSampler makes no guarantee of
 // its own -- see each implementation).
-inline void GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spacingDeg, IElevationSampler& sampler, std::vector<ProfileSample>& outProfile)
+// A request CheckProfileRequest refuses leaves outProfile empty and returns why;
+// ComputeLineOfSight and ComputeFresnelClearance answer an empty profile with
+// EmptyOrSingleSampleProfile, never Ok. Otherwise returns InputProblem::None.
+inline InputProblem GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spacingDeg, IElevationSampler& sampler, std::vector<ProfileSample>& outProfile)
 {
     outProfile.clear();
 
+    InputProblem problem = CheckProfileRequest(startPoint, endPoint, spacingDeg);
+    if (problem != InputProblem::None) return problem;
+
     double totalDistanceM = GreatCircleDistanceM(startPoint, endPoint);
     double centralAngleRad = totalDistanceM / EarthRadiusM;
-    double metersPerDegree = EarthRadiusM * DegToRad;
-
-    // Round the interval count UP so effective spacing never exceeds the request.
-    // Floor used to drop a sample whenever the count came out as 999.9999...,
-    // which a viewshed's axis rays hit by construction (floating-point noise, and
-    // a great circle a few mm shorter than the parallel) -- leaving a cell on the
-    // ray unvisited. The (1 - 1e-9) factor stops that noise adding a spurious
-    // extra sample instead.
-    double intervalsNeeded = totalDistanceM / (spacingDeg * metersPerDegree);
-    int sampleCount = (int)ceil(intervalsNeeded * (1.0 - 1e-9));
-    if (sampleCount < 1) sampleCount = 1;
+    int sampleCount = (int)ProfileIntervals(startPoint, endPoint, spacingDeg);
 
     for (int i = 0; i <= sampleCount; i++)
     {
@@ -142,6 +215,7 @@ inline void GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spa
 
         outProfile.push_back(sample);
     }
+    return InputProblem::None;
 }
 
 // === BATCH PATH ===
@@ -156,6 +230,7 @@ inline void GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spa
 // overload -- this is a two-line wrapper that owns its own buffer instead of
 // reusing one.
 // Thread-safety: caller-synchronised, same conditions as the in-place overload.
+// A request CheckProfileRequest refuses comes back empty; that function says why.
 inline std::vector<ProfileSample> GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, double spacingDeg, IElevationSampler& sampler)
 {
     std::vector<ProfileSample> result;

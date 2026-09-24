@@ -104,6 +104,10 @@ public:
         double rowF = (topLat - latitudeDeg) * (size - 1);
         double colF = (longitudeDeg - swLon) * (size - 1);
 
+        // Off the tile by more than a post -- or not a number at all -- names no post.
+        // Checked as doubles: casting such a value to an int would be undefined.
+        if (!(rowF > -2.0 && rowF < size + 1.0 && colF > -2.0 && colF < size + 1.0)) return std::nullopt;
+
         if (mode == InterpolationMode::Bilinear)
         {
             int row0 = (int)floor(rowF);

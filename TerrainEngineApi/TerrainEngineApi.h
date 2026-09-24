@@ -61,6 +61,8 @@ extern "C" {
 #define TE_STATUS_VOID_IN_PROFILE                3  // the path crosses missing data
 #define TE_STATUS_DATUM_REJECTED                 4
 #define TE_STATUS_NOTHING_EVALUATED              5  // Fresnel only: no point between the ends to evaluate
+#define TE_STATUS_INVALID_INPUT                  6  // an input outside the engine's domain; the functions here refuse
+                                                    // those with TE_ERROR_INVALID_ARGUMENT first, so it isn't returned
 
 // Kind of terrain feature at a blocking point
 #define TE_FEATURE_UNKNOWN          0

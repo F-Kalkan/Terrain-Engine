@@ -1,6 +1,6 @@
 # The engine's test suite
 
-57 test functions, hand-checkable apart from the real-data comparisons, which hold the
+63 test functions, hand-checkable apart from the real-data comparisons, which hold the
 fast viewshed against naive at several observers on each tile:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
@@ -53,9 +53,12 @@ terrain, decides every answer.
   isn't a whole square of posts (empty, one post, a post short, an odd byte, a post
   too many) refused rather than read past their end; a tile's own facts (posts per
   side, void count, south-west corner) reported for a file whose name holds a non-ASCII
-  character, and reported as zero for a file that didn't load; one loaded tile answering in the other
-  interpolation mode exactly as a fresh load in that mode would; and the in-place profile
-  overload reusing a caller-owned buffer without growing it.
+  character, and reported as zero for a file that didn't load; one loaded tile answering
+  in the other interpolation mode exactly as a fresh load in that mode would; the
+  reader's bilinear interpolation against a value worked by hand (177.5 m), at a point
+  off the middle of its four posts -- in the middle the row and column fractions are
+  equal, and swapping them goes unseen; and the in-place profile overload reusing a
+  caller-owned buffer without growing it.
 - **Viewshed target height** (the wall scene of the fast/naive test): straight east of a
   2 m observer, a target 180 m out behind a 50 m wall 90 m out clears it once its height
   reaches 98 m, worked by hand -- both viewsheds hide it at 97.9 m and show it at 98.1 m, and
@@ -77,6 +80,28 @@ terrain, decides every answer.
 - **Command line**: the number parser behind every CLI argument accepting real
   numbers and refusing text, trailing characters, `nan`, `inf` and out-of-range
   values, instead of throwing.
+- **Inputs the library refuses** (one test per class, called on the library directly,
+  not through the DLL or the CLI):
+  - *spacing*: a 20 km path over level ground with a ridge across it halfway is blocked
+    at 30 m; at a spacing of 0, -30 m, NaN, infinity and 1 x 10^-6 m (2 x 10^10
+    intervals) the profile comes back empty with the reason -- a buffer filled
+    beforehand is emptied -- and the line of sight, Fresnel clearance and batch built on
+    it are not Ok, where each once answered "visible";
+  - *coordinates*: NaN, infinite and past-the-pole points are refused by the profile, the
+    batch (answering its other queries) and both viewsheds, and every sampler -- the
+    `.hgt` reader in both interpolation modes, the fake grid (an empty one too), the
+    raster block and the multi-tile one -- answers NaN, infinite and ±10^300
+    coordinates with no elevation;
+  - *heights*: NaN and infinite heights and undulations are refused as that, not as a
+    datum problem, by the line of sight at either end, Fresnel clearance and both
+    viewsheds, and the datum helpers convert them to nothing;
+  - *k and frequency*: k of 0, -4/3, NaN and infinity, and a Fresnel frequency of 0,
+    negative, NaN or infinite, are refused by name everywhere they are taken, while
+    k = 10^12 (curvature off) is still answered;
+  - *a grid at a pole*: a viewshed grid is refused at a pole even as one cell, and 0.2
+    degrees from either pole when its rows would reach 0.27 degrees, and laid out 0.5
+    degrees from it when they wouldn't; a latitude of 91 and a spacing of 0 are refused,
+    and a grid with no rows is still simply empty.
 - **1-arcsecond data** (skipped when `DATA/SRTM1/N36W112.hgt` isn't present): 200
   consecutive posts read through `GetTerrainProfile` at the tile's own spacing must
   each return exactly the value stored in the file at that row and column; and the 1-
@@ -112,7 +137,11 @@ everywhere, answering from the nearest ray alone, letting the target's own cell 
 horizon, leaving curvature out of its slope, ignoring the target height or the voids on
 its rays, reading one ray twice, or reading a ray's horizon over its whole length; and a
 measure counted over every cell, taking every difference for an edge one, or taking a
-neighbour with no confident answer for an edge. A suite that stays green with the defect
-restored verifies nothing.
+neighbour with no confident answer for an edge. So were the refusals: each check on
+spacing, sample count, latitude, height, undulation, k, frequency, the batch's per-query
+path and the grid at a pole taken out in turn, and the datum conversion let take NaN,
+turns a test red -- and a viewshed with its spacing check taken out crashes the suite
+outright, laying out a grid at a spacing of zero. A suite that stays green with the
+defect restored verifies nothing.
 
 All of the above pass identically in Debug and Release.

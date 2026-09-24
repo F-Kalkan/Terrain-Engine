@@ -44,7 +44,28 @@ struct ViewshedResult
     // True when a progress callback asked the computation to stop. The cells are then
     // only partly computed and must not be read as an answer.
     bool cancelled = false;
+
+    // Set when an input was outside the viewshed's domain (CheckViewshedRequest); the
+    // grid is then empty. None otherwise, an empty grid for no rows or no columns included.
+    InputProblem inputProblem = InputProblem::None;
 };
+
+// Whether a viewshed can be computed: an observer on the Earth, heights and k a line
+// of sight can use, a positive finite spacing, and a grid whose every row stays short
+// of the poles -- LongitudeSpacingForLatitude divides by cos(latitude), and a row at or
+// past a pole has no longitude to lay its columns along. A grid with no rows or no
+// columns is not a problem: it has no cells to answer for.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline InputProblem CheckViewshedRequest(GeoPoint observer, const DatumHeight& observerHeight, int gridRows, double spacingDeg, double k, const DatumHeight& targetHeight)
+{
+    if (InputProblem point = CheckPoint(observer); point != InputProblem::None) return point;
+    if (InputProblem inputs = CheckLineOfSightInputs(observerHeight, targetHeight, k); inputs != InputProblem::None) return inputs;
+    if (!std::isfinite(spacingDeg) || spacingDeg <= 0.0) return InputProblem::SpacingNotPositive;
+    int rowsFromCentre = gridRows <= 0 ? 0 : (std::max)(gridRows / 2, gridRows - 1 - gridRows / 2);
+    if (!(std::abs(observer.latitudeDeg) + rowsFromCentre * spacingDeg < 90.0)) return InputProblem::GridBeyondPole;
+    return InputProblem::None;
+}
 
 // Optional progress reporting for a long viewshed. Called with the fraction of the
 // work done so far -- 0 before the first unit of work, 1 once all of it is done.
@@ -85,6 +106,10 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
     // A grid with no rows or no columns has no cells to answer for, not even the
     // observer's own: return it empty rather than writing into it.
     if (gridRows <= 0 || gridCols <= 0) return result;
+
+    // An input it can't use is refused, with the reason, rather than laid out into a grid.
+    result.inputProblem = CheckViewshedRequest(observer, observerHeight, gridRows, spacingDeg, k, targetHeight);
+    if (result.inputProblem != InputProblem::None) return result;
 
     result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
@@ -188,6 +213,10 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
 
     // Same as naive: a grid with no rows or no columns comes back empty.
     if (gridRows <= 0 || gridCols <= 0) return result;
+
+    // An input it can't use is refused, with the reason, rather than laid out into a grid.
+    result.inputProblem = CheckViewshedRequest(observer, observerHeight, gridRows, spacingDeg, k, targetHeight);
+    if (result.inputProblem != InputProblem::None) return result;
 
     // Naive delegates these checks to ComputeLineOfSight per cell; fast does its
     // own curvature math and never calls it, so it checks here. An observer whose

@@ -47,6 +47,11 @@ public:
     // multiple threads are safe as long as no thread is concurrently mutating
     // the public grid field itself.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg) {
+        // No grid, or a coordinate off it by more than a cell -- or not a number at all --
+        // names no cell. Checked as doubles: casting such a value to an int would be undefined.
+        if (grid.empty() || grid[0].empty()) return std::nullopt;
+        if (!(latitudeDeg > -2.0 && latitudeDeg < grid.size() + 1.0 && longitudeDeg > -2.0 && longitudeDeg < grid[0].size() + 1.0)) return std::nullopt;
+
         if (mode == InterpolationMode::Bilinear)
         {
             int row0 = (int)floor(latitudeDeg);
@@ -169,10 +174,13 @@ inline std::optional<size_t> RasterBlockCellIndex(const RasterBlockGeometry& geo
 {
     if (geometry.rowStepDeg == 0.0 || geometry.colStepDeg == 0.0) return std::nullopt;
 
-    int row = (int)round((latitudeDeg - geometry.originCellCentreLatitudeDeg) / geometry.rowStepDeg);
-    int col = (int)round((longitudeDeg - geometry.originCellCentreLongitudeDeg) / geometry.colStepDeg);
+    // Rounded as doubles and range-checked before any cast: a coordinate that is NaN,
+    // infinite or far outside the block would otherwise be cast to an int it doesn't
+    // fit, which is undefined.
+    double row = round((latitudeDeg - geometry.originCellCentreLatitudeDeg) / geometry.rowStepDeg);
+    double col = round((longitudeDeg - geometry.originCellCentreLongitudeDeg) / geometry.colStepDeg);
 
-    if (row < 0 || row >= geometry.rows || col < 0 || col >= geometry.cols) return std::nullopt;
+    if (!(row >= 0 && row < geometry.rows && col >= 0 && col < geometry.cols)) return std::nullopt;
 
     return (size_t)row * (size_t)geometry.cols + (size_t)col;
 }
