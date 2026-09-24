@@ -12,6 +12,24 @@
 #include "ImageWriter.h"
 #include "CliArguments.h"
 #include <fstream>
+#include <cstdlib>
+#include <new>
+
+// Every allocation this executable makes through operator new goes through here and is
+// counted, so a test can show that a call allocates nothing (Tests.h, g_heapAllocations).
+std::atomic<long long> g_heapAllocations{ 0 };
+
+void* operator new(std::size_t size)
+{
+    g_heapAllocations++;
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return operator new(size); }
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
 
 // Times a 50 km profile, a 30 km-radius fast viewshed and fast minimum visible height,
 // and fast against naive on a 2 km viewshed, over one real tile. How far fast is from
@@ -503,12 +521,63 @@ int main(int argc, char* argv[])
                 return 0;
             }
 
-            std::cout << "Unknown benchmark mode. Use 'profile', 'viewshed' or 'minheight'." << std::endl;
+            if (subMode == "observer")
+            {
+                // A fixed observer 2 m up at the tile's centre, prepared out to 50 km; then a million
+                // queries over targets spread evenly across the disc on the tile, alternately 2 m above
+                // the ground and 5,000 m above sea level; then direct lines of sight 50 km long, due
+                // north and south within 20 degrees so that they stay on the tile, for comparison.
+                GeoPoint observer{ swLat + 0.5, swLon + 0.5 };
+                DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
+                const double pi = 3.14159265358979323846;
+
+                auto start = std::chrono::high_resolution_clock::now();
+                PreparedObserver prepared = PrepareObserver(observer, agl2m, 50000.0, spacingInDegrees, sampler);
+                std::chrono::duration<double, std::milli> prepareTime = std::chrono::high_resolution_clock::now() - start;
+                PROCESS_MEMORY_COUNTERS pmc;
+                GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+                double peakMB = pmc.PeakWorkingSetSize / (1024.0 * 1024.0);
+
+                std::vector<std::pair<GeoPoint, DatumHeight>> targets;
+                for (int i = 0; targets.size() < 10000; i++)
+                {
+                    GeoPoint target = GreatCircleDestination(observer, i * pi * (3.0 - std::sqrt(5.0)), 50000.0 * std::sqrt((i + 0.5) / 12000.0));
+                    bool onTile = target.latitudeDeg > swLat && target.latitudeDeg < swLat + 1 && target.longitudeDeg > swLon && target.longitudeDeg < swLon + 1;
+                    if (onTile) targets.push_back({ target, i % 2 == 0 ? agl2m : DatumHeight{ 5000.0, VerticalDatum::OrthometricMsl } });
+                }
+                long long seen = 0;
+                start = std::chrono::high_resolution_clock::now();
+                for (int round = 0; round < 100; round++)
+                {
+                    for (const auto& [target, height] : targets) seen += QueryTarget(prepared, target, height).state == CellVisibility::Visible ? 1 : 0;
+                }
+                double queriesPerSecond = 1e6 / std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
+
+                std::vector<ProfileSample> buffer;
+                start = std::chrono::high_resolution_clock::now();
+                for (int i = 0; i < 1000; i++)
+                {
+                    double bearing = (i % 2 == 0 ? 0.0 : pi) + (i / 2 % 41 - 20) * pi / 180.0;
+                    GetTerrainProfile(observer, GreatCircleDestination(observer, bearing, 50000.0), spacingInDegrees, sampler, buffer);
+                    seen += ComputeLineOfSight(buffer, agl2m, agl2m).isVisible ? 1 : 0;
+                }
+                double directMicroseconds = std::chrono::duration<double, std::micro>(std::chrono::high_resolution_clock::now() - start).count() / 1000;
+
+                std::cout << "Prepared observer benchmark: 50km radius @ 30m data, " << prepared.rayCount << " rays" << std::endl;
+                std::cout << "Preparation wall time: " << prepareTime.count() << " ms" << std::endl;
+                std::cout << "Peak memory after preparation: " << peakMB << " MB" << std::endl;
+                std::cout << "Queries per second (one core, 1,000,000 queries): " << queriesPerSecond << std::endl;
+                std::cout << "Direct line of sight at 50 km: " << directMicroseconds << " us each (" << 1e6 / directMicroseconds << " a second)" << std::endl;
+                std::cout << "(" << seen << " seen)" << std::endl;
+                return 0;
+            }
+
+            std::cout << "Unknown benchmark mode. Use 'profile', 'viewshed', 'minheight' or 'observer'." << std::endl;
             return 1;
         }
 
         std::cout << "Usage:" << std::endl;
-        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed|minheight> <hgtFile> <swLat> <swLon>" << std::endl;
+        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed|minheight|observer> <hgtFile> <swLat> <swLon>" << std::endl;
         std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]" << std::endl;
@@ -587,6 +656,10 @@ int main(int argc, char* argv[])
     TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight();
     TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals();
     TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers();
+    TestPreparedObserverAnswersTheWallAndTheAirAsTheLineOfSightDoes();
+    TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets();
+    TestPreparedObserverQueriesAllocateNothing();
+    TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals();
 
     std::cout << "-------------------------" << std::endl;
 

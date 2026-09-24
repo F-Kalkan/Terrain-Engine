@@ -1,5 +1,7 @@
 #pragma once
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -12,11 +14,16 @@
 #include "Viewshed.h"
 #include "ViewshedAgreement.h"
 #include "MinimumVisibleHeight.h"
+#include "PreparedObserver.h"
 #include "RealElevationSampler.h"
 #include "CliArguments.h"
 #include <string>
 
 inline int g_testFailureCount = 0;
+
+// Every allocation the test executable makes through operator new, counted by main.cpp, so a
+// test can show that a call makes none.
+extern std::atomic<long long> g_heapAllocations;
 
 inline void Expect(bool condition, const std::string& testName)
 {
@@ -2767,4 +2774,296 @@ void TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers()
         Expect(onEdge, "MinimumVisibleHeightFastDifferencesLieOnTheReferencesEdge at " + where.str());
         Expect(oneAnswerFails, "MinimumVisibleHeightOneAnswerEverywhereFailsTheTolerance at " + where.str());
     }
+}
+
+//TEST 69
+void TestPreparedObserverAnswersTheWallAndTheAirAsTheLineOfSightDoes()
+{
+    // The wall scene of test 51, prepared once out to 300 m. Straight east of the 2 m
+    // observer, a target 180 m out clears the 50 m wall once it stands 98.00095 m tall
+    // (test 64 works it by hand): hidden at 97.9 m, seen at 98.1 m. In front of the wall the
+    // ground is seen; an aircraft 10 km up is seen from anywhere; a target below the ground
+    // under it is hidden, as ComputeLineOfSight answers it -- 1 m under the wall's top as well,
+    // where its slope alone would clear everything in front of it; a target past the prepared radius
+    // has no answer from these rays at all (NotCovered). Heights are taken in any datum the
+    // terrain can be put on.
+    const int size = 21;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    RasterBlockElevationSampler scene = MakeWallScene(observer, spacingDeg, size, center + 3);
+    PreparedObserver prepared = PrepareObserver(observer, Agl(2.0), 300.0, spacingDeg, scene);
+
+    auto east = [&](double metres) { return GreatCircleDestination(observer, 3.14159265358979323846 / 2, metres); };
+    auto state = [&](GeoPoint target, DatumHeight height) { return QueryTarget(prepared, target, height).state; };
+    const DatumHeight tenKilometresUp{ 10000.0, VerticalDatum::OrthometricMsl };
+    const DatumHeight belowTheGround{ -10.0, VerticalDatum::OrthometricMsl };
+
+    Expect(prepared.inputProblem == InputProblem::None && prepared.observerKnown
+        && prepared.rayCount == RaysForRadius(300.0, 30.0) && prepared.samplesPerRay == 10
+        && state(east(180.0), Agl(97.9)) == CellVisibility::NotVisible
+        && state(east(180.0), Agl(98.1)) == CellVisibility::Visible
+        && state(east(180.0), DatumHeight{ 98.1, VerticalDatum::OrthometricMsl }) == CellVisibility::Visible
+        && state(east(60.0), Agl(0.0)) == CellVisibility::Visible
+        && state(east(150.0), Agl(0.0)) == CellVisibility::NotVisible
+        && state(east(250.0), tenKilometresUp) == CellVisibility::Visible
+        && state(GreatCircleDestination(observer, 4.0, 200.0), tenKilometresUp) == CellVisibility::Visible
+        && state(east(60.0), belowTheGround) == CellVisibility::NotVisible
+        && state(east(90.0), DatumHeight{ 51.0, VerticalDatum::OrthometricMsl }) == CellVisibility::Visible
+        && state(east(90.0), DatumHeight{ 49.0, VerticalDatum::OrthometricMsl }) == CellVisibility::NotVisible
+        && state(east(400.0), tenKilometresUp) == CellVisibility::NotCovered,
+        "TestPreparedObserverAnswersTheWallAndTheAirAsTheLineOfSightDoes");
+}
+
+// Direct line of sight from an observer 2 m above the ground to one target, as a cell state.
+inline CellVisibility DirectLineOfSightState(GeoPoint observer, GeoPoint target, const DatumHeight& height, double spacingDeg, IElevationSampler& sampler, std::vector<ProfileSample>& buffer)
+{
+    GetTerrainProfile(observer, target, spacingDeg, sampler, buffer);
+    LineOfSightResult los = ComputeLineOfSight(buffer, Agl(2.0), height);
+    if (!IsOk(los.status)) return CellVisibility::Degraded;
+    return los.isVisible ? CellVisibility::Visible : CellVisibility::NotVisible;
+}
+
+// The listed targets' agreement with the reference, counted as CompareViewsheds counts a
+// grid: over the targets both answer with confidence, each direction apart, and each
+// difference placed on the reference's edge when the reference answers a target moved 30 m
+// north, east, south or west the other way. onEdge(i) is asked only for targets that differ.
+template <class OnEdge>
+ViewshedAgreement CompareTargetAnswers(const std::vector<CellVisibility>& approximate, const std::vector<CellVisibility>& reference, OnEdge&& onEdge)
+{
+    ViewshedAgreement a;
+    a.sameGrid = approximate.size() == reference.size();
+    if (!a.sameGrid) return a;
+    for (size_t i = 0; i < reference.size(); i++)
+    {
+        if (!IsConfident(approximate[i]) || !IsConfident(reference[i])) continue;
+        a.comparedCells++;
+        bool seenByReference = reference[i] == CellVisibility::Visible;
+        bool seenByApproximate = approximate[i] == CellVisibility::Visible;
+        if (seenByReference) a.referenceVisible++;
+        if (seenByApproximate) a.approximateVisible++;
+        if (seenByReference == seenByApproximate) continue;
+        if (seenByApproximate) a.approximateOnlyVisible++;
+        else a.referenceOnlyVisible++;
+        if (onEdge(i)) a.differingOnEdge++;
+    }
+    return a;
+}
+
+//TEST 70
+void TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets()
+{
+    // DATA/prepared_observer_targets.csv lists 15,000 seeded targets for each of the three
+    // observers of the fast/naive comparison, over a 50 km disc on the 1-arcsecond tile: a
+    // third 0-10 m above the ground, a third 10-500 m above it, a third up to 15,000 m above
+    // mean sea level. Each is answered by QueryTarget and by ComputeLineOfSight along its own
+    // line at 30 m, and the two are compared by height class to the fast viewshed's
+    // tolerances: under 30% of the targets either sees, under 2% off the reference's edge, at
+    // least 80% of the differences on it; a prepared observer that answers every target the
+    // same way fails them. A target may be confident in one answer only -- a ray beside its
+    // line leaving the tile, 5 m inside its edge, just before the target does -- but for
+    // fewer than 1 in 1,000. Queries must run at 100,000 a second or more. Prints the counts,
+    // the preparation's time and memory, and the query rate.
+    const std::string path = "DATA/prepared_observer_targets.csv";
+    RealElevationSampler sampler("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    std::ifstream file(path);
+    if (!sampler.IsLoaded() || !file.is_open())
+    {
+        Skip("TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets", "DATA/SRTM1/N36W112.hgt or " + path + " not found from this working directory");
+        return;
+    }
+
+    struct ListedTarget { GeoPoint point; DatumHeight height; int heightClass; };
+    const GeoPoint observers[] = { { 36.5, -111.5 }, { 36.86361, -111.30861 }, { 36.55861, -111.81361 } };
+    std::vector<ListedTarget> targets[3];
+    std::string line;
+    int perObserver[3] = {};
+    bool parsed = true;
+    while (std::getline(file, line))
+    {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream fields(line);
+        std::string observerText, latText, lonText, heightText, datumText;
+        std::getline(fields, observerText, ',');
+        std::getline(fields, latText, ',');
+        std::getline(fields, lonText, ',');
+        std::getline(fields, heightText, ',');
+        std::getline(fields, datumText, ',');
+        if (!datumText.empty() && datumText.back() == '\r') datumText.pop_back();
+        auto index = ParseInt(observerText.c_str());
+        auto lat = ParseFiniteDouble(latText.c_str()), lon = ParseFiniteDouble(lonText.c_str()), height = ParseFiniteDouble(heightText.c_str());
+        if (!index || *index < 0 || *index > 2 || !lat || !lon || !height || (datumText != "agl" && datumText != "msl"))
+        {
+            parsed = false;
+            break;
+        }
+        DatumHeight datumHeight{ *height, datumText == "agl" ? VerticalDatum::HeightAboveGround : VerticalDatum::OrthometricMsl };
+        targets[*index].push_back({ GeoPoint{ *lat, *lon }, datumHeight, perObserver[*index]++ % 3 });
+    }
+    Expect(parsed && targets[0].size() == 15000 && targets[1].size() == 15000 && targets[2].size() == 15000, "PreparedObserverTargetListReads");
+    if (!parsed) return;
+
+    const char* classNames[] = { "0-10 m above ground", "10-500 m above ground", "up to 15,000 m above sea level" };
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    std::vector<ProfileSample> buffer;
+    for (int o = 0; o < 3; o++)
+    {
+        auto start = std::chrono::steady_clock::now();
+        PreparedObserver prepared = PrepareObserver(observers[o], Agl(2.0), 50000.0, spacingDeg, sampler);
+        double prepareS = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+
+        start = std::chrono::steady_clock::now();
+        long long queries = 0, seen = 0;
+        for (int rep = 0; rep < 20; rep++)
+        {
+            for (const auto& target : targets[o]) seen += QueryTarget(prepared, target.point, target.height).state == CellVisibility::Visible ? 1 : 0;
+            queries += targets[o].size();
+        }
+        double perSecond = queries / std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+
+        std::ostringstream where;
+        where << "(" << observers[o].latitudeDeg << ", " << observers[o].longitudeDeg << "), 50 km";
+        std::cout << "  " << where.str() << ": prepared " << prepared.rayCount << " rays in " << prepareS << " s, "
+            << (prepared.horizon.size() * sizeof(float) + prepared.firstVoidM.size() * sizeof(float)) / 1048576.0 << " MB; "
+            << perSecond << " queries a second (" << seen << " seen)" << std::endl;
+        Expect(perSecond >= 100000.0, "PreparedObserverAnswers100000TargetsASecond at " + where.str());
+
+        for (int heightClass = 0; heightClass < 3; heightClass++)
+        {
+            std::vector<const ListedTarget*> chosen;
+            for (const auto& target : targets[o]) if (target.heightClass == heightClass) chosen.push_back(&target);
+            std::vector<CellVisibility> reference(chosen.size()), fast(chosen.size());
+            for (size_t i = 0; i < chosen.size(); i++)
+            {
+                reference[i] = DirectLineOfSightState(observers[o], chosen[i]->point, chosen[i]->height, spacingDeg, sampler, buffer);
+                fast[i] = QueryTarget(prepared, chosen[i]->point, chosen[i]->height).state;
+            }
+
+            // Whether the reference answers a target 30 m away the other way; worked out once, when first asked.
+            std::vector<signed char> edge(chosen.size(), -1);
+            auto onEdge = [&](size_t i) {
+                if (edge[i] < 0)
+                {
+                    edge[i] = 0;
+                    for (int n = 0; n < 4 && edge[i] == 0; n++)
+                    {
+                        GeoPoint moved = GreatCircleDestination(chosen[i]->point, n * 3.14159265358979323846 / 2, 30.0);
+                        CellVisibility there = DirectLineOfSightState(observers[o], moved, chosen[i]->height, spacingDeg, sampler, buffer);
+                        if (IsConfident(there) && there != reference[i]) edge[i] = 1;
+                    }
+                }
+                return edge[i] == 1;
+            };
+
+            ViewshedAgreement a = CompareTargetAnswers(fast, reference, onEdge);
+            int confidentMismatch = 0;
+            for (size_t i = 0; i < chosen.size(); i++) confidentMismatch += IsConfident(fast[i]) != IsConfident(reference[i]) ? 1 : 0;
+
+            std::string label = where.str() + ", " + classNames[heightClass];
+            std::cout << "    " << classNames[heightClass] << ": " << a.comparedCells << " compared; line of sight sees " << a.referenceVisible
+                << ", prepared " << a.approximateVisible << "; prepared only " << a.approximateOnlyVisible << ", line of sight only "
+                << a.referenceOnlyVisible << "; differ on " << (100.0 * a.DisagreementRate()) << "% of " << a.VisibleInEither() << ", "
+                << (100.0 * a.OffEdgeRate()) << "% off the edge; " << confidentMismatch << " confident in one only" << std::endl;
+
+            auto oneAnswer = [&](CellVisibility answer) {
+                std::vector<CellVisibility> same = reference;
+                for (auto& s : same) if (IsConfident(s)) s = answer;
+                return CompareTargetAnswers(same, reference, onEdge);
+            };
+            Expect(WithinFastViewshedTolerance(a) && a.OnEdgeFraction() >= FastViewshedMinimumOnEdge && confidentMismatch * 1000 < (int)chosen.size(),
+                "PreparedObserverWithinTolerance at " + label);
+            Expect(!WithinFastViewshedTolerance(oneAnswer(CellVisibility::NotVisible)) && !WithinFastViewshedTolerance(oneAnswer(CellVisibility::Visible)),
+                "PreparedObserverOneAnswerEverywhereFailsTheTolerance at " + label);
+        }
+    }
+}
+
+//TEST 71
+void TestPreparedObserverQueriesAllocateNothing()
+{
+    // After the preparation, answering a target allocates nothing, whatever the answer: seen,
+    // hidden, past the radius, with no confident answer, or refused. Counted over 10,000
+    // queries by the executable's own operator new.
+    const int size = 21;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    ElevationCells cells = MakeFlatCells(size, 0.0);
+    for (auto& row : cells) row[size / 2 + 3] = 50.0;
+    cells[3][17] = std::nullopt;
+    RasterBlockElevationSampler scene = MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+    PreparedObserver prepared = PrepareObserver(observer, Agl(2.0), 300.0, spacingDeg, scene);
+
+    int states[4] = {};
+    long long before = g_heapAllocations.load();
+    for (int i = 0; i < 10000; i++)
+    {
+        GeoPoint target = GreatCircleDestination(observer, i * 0.61803, 5.0 + (i % 80) * 5.0);
+        DatumHeight height = i % 7 == 0 ? DatumHeight{ std::nan(""), VerticalDatum::HeightAboveGround } : Agl((i % 13) * 10.0);
+        states[(int)QueryTarget(prepared, target, height).state]++;
+    }
+    long long allocations = g_heapAllocations.load() - before;
+    std::cout << "  10,000 queries: " << allocations << " allocations; visible " << states[(int)CellVisibility::Visible] << ", hidden "
+        << states[(int)CellVisibility::NotVisible] << ", no confident answer " << states[(int)CellVisibility::Degraded] << ", past the radius "
+        << states[(int)CellVisibility::NotCovered] << std::endl;
+
+    Expect(allocations == 0 && states[0] > 0 && states[1] > 0 && states[2] > 0 && states[3] > 0,
+        "TestPreparedObserverQueriesAllocateNothing");
+}
+
+//TEST 72
+void TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals()
+{
+    // As the viewsheds: a target whose rays cross a void, or which stands on one, has no
+    // confident answer; an observer standing on a void, or a target height that can't be put
+    // on the terrain's datum, leaves nothing known. A target that isn't on the Earth -- not a
+    // number, or past a pole, a finite distance away and still no place -- or whose height
+    // isn't a number, is refused with the reason; so is every target of a preparation that
+    // was refused, a radius or a spacing of zero among them. And the preparation reports its
+    // progress from 0 to 1 without changing a ray, and stops when asked.
+    const int size = 21;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    ElevationCells cells = MakeFlatCells(size, 0.0);
+    cells[center][center + 4] = std::nullopt;   // 120 m east
+    RasterBlockElevationSampler scene = MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+    PreparedObserver prepared = PrepareObserver(observer, Agl(2.0), 300.0, spacingDeg, scene);
+    auto east = [&](double metres) { return GreatCircleDestination(observer, 3.14159265358979323846 / 2, metres); };
+
+    ElevationCells holed = MakeFlatCells(size, 0.0);
+    holed[center][center] = std::nullopt;
+    RasterBlockElevationSampler onVoid = MakeViewshedAlignedRaster(holed, observer, spacingDeg);
+    PreparedObserver blind = PrepareObserver(observer, Agl(2.0), 300.0, spacingDeg, onVoid);
+
+    TargetAnswer notOnEarth = QueryTarget(prepared, GeoPoint{ std::nan(""), -111.5 }, Agl(2.0));
+    TargetAnswer pastThePole = QueryTarget(prepared, GeoPoint{ 91.0, -111.5 }, Agl(2.0)); // a finite distance, but no place
+    TargetAnswer noHeight = QueryTarget(prepared, east(60.0), Agl(INFINITY));
+    PreparedObserver refused = PrepareObserver(observer, Agl(2.0), 300.0, 0.0, scene);
+    TargetAnswer fromRefused = QueryTarget(refused, east(60.0), Agl(2.0));
+    PreparedObserver noRadius = PrepareObserver(observer, Agl(2.0), 0.0, spacingDeg, scene);
+
+    std::vector<double> fractions;
+    PreparedObserver reported = PrepareObserver(observer, Agl(2.0), 300.0, spacingDeg, scene, 4.0 / 3.0, 0,
+        [&](double fraction) { fractions.push_back(fraction); return true; });
+    bool inOrder = fractions.size() >= 2 && fractions.front() == 0.0 && fractions.back() == 1.0;
+    for (size_t i = 1; i < fractions.size(); i++) inOrder = inOrder && fractions[i] >= fractions[i - 1];
+    int reportsBeforeStopping = 0;
+    PreparedObserver stopped = PrepareObserver(observer, Agl(2.0), 300.0, spacingDeg, scene, 4.0 / 3.0, 0,
+        [&](double) { reportsBeforeStopping++; return false; });
+
+    Expect(QueryTarget(prepared, east(90.0), Agl(2.0)).state == CellVisibility::Visible
+        && QueryTarget(prepared, east(180.0), Agl(2.0)).state == CellVisibility::Degraded
+        && QueryTarget(prepared, east(120.0), Agl(2.0)).state == CellVisibility::Degraded
+        && QueryTarget(prepared, east(90.0), DatumHeight{ 10.0, VerticalDatum::EllipsoidalHae }).state == CellVisibility::Degraded
+        && !blind.observerKnown && QueryTarget(blind, east(90.0), Agl(2.0)).state == CellVisibility::Degraded
+        && notOnEarth.state == CellVisibility::Degraded && notOnEarth.inputProblem == InputProblem::CoordinateNotFinite
+        && pastThePole.state == CellVisibility::Degraded && pastThePole.inputProblem == InputProblem::LatitudeOutOfRange
+        && noHeight.state == CellVisibility::Degraded && noHeight.inputProblem == InputProblem::HeightNotFinite
+        && refused.inputProblem == InputProblem::SpacingNotPositive && refused.horizon.empty()
+        && noRadius.inputProblem == InputProblem::RadiusNotPositive && noRadius.horizon.empty()
+        && fromRefused.state == CellVisibility::Degraded && fromRefused.inputProblem == InputProblem::SpacingNotPositive
+        && inOrder && reported.horizon == prepared.horizon && !reported.cancelled
+        && stopped.cancelled && reportsBeforeStopping == 1
+        && QueryTarget(stopped, east(60.0), Agl(2.0)).state == CellVisibility::Degraded,
+        "TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals");
 }

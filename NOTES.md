@@ -383,6 +383,42 @@ reads a pixel: it took the frame's channels the wrong way round, red for blue. E
 test that used it compared purple or total brightness, which don't change when red and blue
 swap, so nothing had shown it; it now reads the order from the frame.
 
+## Update: many answers per second from a fixed observer
+
+A ground observer answering moving targets on every update asks the same question of the
+same terrain over and over: a direct line of sight at 50 km re-reads 1,667 samples each
+time, ~170-190 µs, about 5,000-6,000 answers a second. The prepared observer
+(`PreparedObserver.h`) reads them once. It is the fast viewshed turned inside out: instead of
+rays to a grid's boundary answering the grid's cells, rays in every direction answering any
+target at all -- on a cell centre or between them, on the ground or 15 km up. Three choices
+worth recording.
+
+**Rays by bearing, as many as the radius needs.** Evenly spaced bearings, so a target's two
+rays are found by arithmetic rather than a search, and enough of them -- 2 pi times the
+radius over the spacing, 10,472 at 50 km and 30 m -- that neighbouring rays are one sample
+spacing apart at the far edge. That costs 67 MB and 1.7 s of preparation per observer. A
+quarter as many rays was tried and turns tests red; the blend of the two rays and the
+half-spacing margin were tried out and don't (docs/ENGINE.md has the numbers): with rays this
+dense, two neighbours rarely see differently. They stay, to answer as the fast viewshed
+does, and are not claimed to matter.
+
+**The comparison needed a target list in the repository.** `std::mt19937` is specified to
+the bit, but the distributions that turn its output into coordinates are not, so a list
+generated in the test could differ between standard libraries. The 45,000 targets are
+written out once, in `DATA/prepared_observer_targets.csv`, and read back. They are split by
+height, because counted together the aircraft -- nearly all visible, nearly all agreed on --
+would dilute the ground-level disagreement the measure is there to show. The edge that
+places a difference is the viewshed measure's, moved off the grid: the line of sight answers
+the target moved 30 m north, east, south or west the other way.
+
+**"Allocates nothing" is counted, not argued.** The test executable replaces the global
+`operator new` with one that counts, and 10,000 queries of every kind leave the count where
+it was; a query given a scratch vector turns that test red. One target in 45,000 is confident
+in one answer only -- it stands 5 m inside the tile's edge, and a ray beside its line runs
+off the tile just before it -- which the test allows at fewer than 1 in 1,000 rather than
+pretend it away. Telling "no data here" from "not given this data" is a question of its own,
+still open.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

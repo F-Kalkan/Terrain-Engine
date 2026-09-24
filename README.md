@@ -56,7 +56,12 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
   faster than checking every cell on its own. Over the cells either one finds visible,
   the two differ on at most 26% at three test observers, almost all of it the boundary
   of the visible region drawn one cell off; under 2% is off that boundary.
-- **Tested.** 68 engine tests and 141 app tests, all run by `build.ps1` and by CI on
+- **Many targets from one place.** Prepared once per observer (1.7 s, 67 MB for 50 km),
+  it answers about six million targets a second on one core -- anywhere within 50 km, on the
+  ground or up to 15 km in the air -- against some 5,000 a second by line of sight. At worst
+  the two differ on 2.6% of the targets either sees, nearly all on the edge of what can be
+  seen, and a query allocates nothing.
+- **Tested.** 72 engine tests and 141 app tests, all run by `build.ps1` and by CI on
   every push. Each fix was also checked the other way: the defect put back, and a test
   going red.
 
@@ -98,8 +103,8 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 68-case test suite + demo
-TerrainEngine.exe benchmark <profile|viewshed|minheight> <hgtFile> <swLat> <swLon>
+TerrainEngine.exe # run the 72-case test suite + demo
+TerrainEngine.exe benchmark <profile|viewshed|minheight|observer> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
 TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]

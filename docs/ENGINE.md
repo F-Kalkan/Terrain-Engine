@@ -11,7 +11,9 @@ in-memory implementations of it (`FakeElevationSampler`, a tiny index-addressed 
 `RasterBlockElevationSampler` — see
 [INTEGRATION.md](INTEGRATION.md)), the three algorithms (`GetTerrainProfile`,
 `ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`), the minimum visible
-height built on them (`MinimumVisibleHeight.h`, see "Minimum visible height" below), and
+height built on them (`MinimumVisibleHeight.h`, see "Minimum visible height" below), the
+prepared observer that answers many targets a second from one place (`PreparedObserver.h`,
+see "Many answers per second from a fixed observer" below), and
 `CompareViewsheds` (`ViewshedAgreement.h`), which measures an approximate viewshed
 against its exact reference -- see "Fast vs. naive viewshed" below. It has no
 include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
@@ -449,6 +451,94 @@ naive viewshed took 240 s there. With both answers held at once the program peak
 3.13% off the edge -- just past the 3% the tests hold the 3-arcsecond tile to at 2 km. That
 is the fast viewshed's own figure at 30 km on the coarser tile, which the tests don't run:
 the reference takes six minutes there.
+
+## Many answers per second from a fixed observer
+
+**The question.** A ground observer stays put while its targets move on every update: a
+few dozen observers against a few hundred targets, several times a second, each target
+anywhere within 50 km and at any height up to 15,000 m above mean sea level. One direct line
+of sight at 50 km costs ~170-190 µs from the CLI here, 5,000-6,000 a second, and re-reads the
+same terrain every time.
+
+**The approach** (`PreparedObserver.h`). `PrepareObserver` reads the terrain once: rays from
+the observer in evenly spaced directions -- as many as it takes for neighbouring rays to be
+one sample spacing apart at the radius, 10,472 for 50 km at 30 m -- each keeping its horizon,
+the running maximum of the curvature-adjusted slope `s(d)`, one float per sample.
+`QueryTarget` then answers a target the way the fast viewshed answers a cell: the target's
+bearing picks the two rays either side of it and its distance the sample in front of it; the
+two horizons are blended by the bearing between them, the last half spacing in front of the
+target left out as in the fast viewshed; and the target is seen when its own slope is at
+least that horizon. A target below the ground under it is hidden, as `ComputeLineOfSight`
+answers it. A distance, a bearing, a ground read, two table reads and a comparison: no
+allocation, and nothing that grows with the distance. Heights may be given in any datum the
+terrain can be put on; a target has the viewshed's no-answer states -- `Degraded` for a void
+on either ray before it or under it, or a height that can't be put on the terrain's datum,
+`NotCovered` beyond the prepared radius -- and one the query refuses says why, in
+`TargetAnswer::inputProblem`. `ComputeLineOfSight` stays in the API as the reference.
+
+**Measured against the line of sight.** `DATA/prepared_observer_targets.csv` lists 15,000
+seeded targets for each of the fast/naive comparison's three observers on the 1-arcsecond
+tile, uniform over the 50 km disc within the tile: a third 0-10 m above the ground, a third
+10-500 m above it, a third up to 15,000 m above mean sea level (the list is written out,
+rather than regenerated, because the standard library fixes the random engine but not the
+distributions). Each is answered by `QueryTarget` and by `ComputeLineOfSight` along its own
+line at 30 m, and compared by height class with `CompareViewsheds`' measure: over the
+targets either one sees, each direction apart, a difference on the reference's edge when the
+line of sight answers the same target moved 30 m north, east, south or west the other way.
+Every figure is printed by `TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets`:
+
+| Observer, targets | Line of sight sees | Prepared only | Line of sight only | Differ, of targets either sees | Off the edge |
+|---|---|---|---|---|---|
+| (36.5, -111.5), 0-10 m above ground | 6 | 0 | 0 | 0% | 0% |
+| (36.5, -111.5), 10-500 m above ground | 327 | 1 | 0 | 0.30% | 0% |
+| (36.5, -111.5), up to 15,000 m | 3,961 | 1 | 0 | 0.03% | 0% |
+| (36.86361, -111.30861), 0-10 m above ground | 1,515 | 17 | 21 | 2.48% | 0.13% |
+| (36.86361, -111.30861), 10-500 m above ground | 4,073 | 1 | 1 | 0.05% | 0% |
+| (36.86361, -111.30861), up to 15,000 m | 4,424 | 0 | 0 | 0% | 0% |
+| (36.55861, -111.81361), 0-10 m above ground | 605 | 8 | 8 | 2.61% | 0% |
+| (36.55861, -111.81361), 10-500 m above ground | 1,958 | 3 | 3 | 0.31% | 0% |
+| (36.55861, -111.81361), up to 15,000 m | 4,265 | 0 | 0 | 0% | 0% |
+
+5,000 targets per row. The observer at (36.5, -111.5) sees little of the ground around it (5%
+of its 2 km viewshed), so its first row is small.
+
+Every run is within the fast viewshed's tolerances, by a wide margin. Near the ground the
+two differ on the same kind of cell the viewsheds do, the edge of what can be seen; in the
+air there is almost nothing in front of a target for two neighbouring rays to see
+differently. One target in 45,000 is confident in one answer only: it stands 5 m inside the
+tile's western edge, and a ray beside its line leaves the tile -- runs out of data -- 1.5 m
+before reaching it. The test allows fewer than 1 in 1,000.
+
+Two design choices were measured and neither turned out load-bearing. Leaving the last half
+spacing out of the horizon, as the fast viewshed does, lowers the worst ground-level
+disagreement from 3.02% to 2.56% and the part off the edge from 0.59% to 0.26% (a scratch
+program over the same three observers); blending the two rays against taking the nearer one
+moves a handful of targets either way (2.49% against 2.56% at worst, 0.53% against 0.26% off
+the edge). With rays one sample spacing apart at the radius, and closer everywhere inside it,
+two neighbouring rays rarely see differently. Both are kept, for the numbers and to answer a
+target the way the fast viewshed answers a cell -- but taking either out keeps the tests
+green, and they aren't claimed to be more than that.
+
+**Performance** (the machine above, Release build; `TerrainEngine.exe benchmark observer`,
+three runs on each tile, one process per run): an observer 2 m above the tile's centre,
+prepared out to 50 km at 30 m; a million queries over 10,000 targets spread evenly over the
+disc on the tile, alternately 2 m above the ground and 5,000 m above sea level; and, for
+comparison, 1,000 direct lines of sight 50 km long.
+
+| Tile | Preparation | Peak memory after it | Queries a second, one core | Direct line of sight at 50 km |
+|---|---|---|---|---|
+| 1-arcsecond | ~1.72 s | ~96.3 MB | ~5.93 million | ~190 µs (~5,270 a second) |
+| 3-arcsecond | ~1.70-1.72 s | ~74.2-74.3 MB | ~6.32-6.39 million | ~167-168 µs (~5,950 a second) |
+
+The prepared observer holds 66.6 MB of horizons (10,472 rays of 1,667 floats); the rest of the
+peak is the tile. A query costs ~160-170 ns, whatever the target's distance, against
+~170-190 µs for a line of sight at 50 km: some 1,100 times as many answers a second, and about
+sixty times the 100,000 asked for. Both figures come from the same CLI process, which (see
+Performance above) runs the library somewhat slower than a program built for nothing else,
+so the ratio is the figure to read. Nothing is allocated per query:
+`TestPreparedObserverQueriesAllocateNothing` counts the executable's own `operator new` over
+10,000 queries of every kind -- seen, hidden, past the radius, without a confident answer and
+refused -- and finds none.
 
 ## Void handling and degraded results
 

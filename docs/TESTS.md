@@ -1,8 +1,8 @@
 # The engine's test suite
 
-68 test functions, hand-checkable apart from the real-data comparisons, which hold the
-fast viewshed against naive, and the fast minimum visible height against its reference, at
-several observers:
+72 test functions, hand-checkable apart from the real-data comparisons, which hold the
+fast viewshed against naive, the fast minimum visible height against its reference and the
+prepared observer against the line of sight, at several observers:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
   on disk): flat plateau, wall, curvature, void, determinism,
@@ -129,6 +129,27 @@ terrain, decides every answer.
     targets of 0, 2, 10, 30 and 100 m are within the fast viewshed's tolerances, with at
     least 80% of differences on the reference's edge, and one answer everywhere fails; each
     run prints its counts and how far the heights are apart.
+- **A prepared observer** (`PrepareObserver` and `QueryTarget`):
+  - *by hand*: in the wall scene, a target 180 m out is hidden at 97.9 m and seen at 98.1 m,
+    above the ground or above sea level; the ground in front of the wall is seen and behind
+    it hidden; an aircraft 10 km up is seen in any direction; a target below the ground is
+    hidden, 1 m under the wall's top too, where its slope alone would clear everything; a
+    target past the prepared radius has no answer;
+  - *the listed targets* (skipped without the 1-arcsecond tile): `DATA/prepared_observer_targets.csv`,
+    15,000 seeded targets for each of three observers over a 50 km disc -- a third near the
+    ground, a third 10-500 m up, a third up to 15,000 m above sea level -- answered by the
+    prepared observer and by the line of sight along each target's own line, within the fast
+    viewshed's tolerances for every observer and height class, with at least 80% of the
+    differences on the edge (a target moved 30 m is answered the other way), fewer than 1 in
+    1,000 confident in one answer only, and one answer everywhere failing; and at least
+    100,000 queries a second;
+  - *no allocation*: 10,000 queries of every kind -- seen, hidden, past the radius, without a
+    confident answer and refused -- make no call to the executable's `operator new`;
+  - *no answer, and refusals*: a void on the rays before a target or under it, an observer on
+    a void and a height with no datum to put it on leave no confident answer; a target not on
+    the Earth (not a number, or past a pole) or with no height is refused with the reason, as
+    is every target of a preparation refused for its spacing or radius; progress runs from 0
+    to 1 without changing a ray, and a stop is honoured.
 - **1-arcsecond data** (skipped when `DATA/SRTM1/N36W112.hgt` isn't present): 200
   consecutive posts read through `GetTerrainProfile` at the tile's own spacing must
   each return exactly the value stored in the file at that row and column; and the 1-
@@ -175,7 +196,13 @@ fast version leaving curvature out of the target's slope, the reference calling 
 answered cell hidden, either version taking the observer's ground for the cell's,
 thresholding with "above" instead of "at or above", the reference's refusal, its observer
 cell's height, its progress reports or its no-answer state taken out, and the refusal of a
-target below the ground taken out. A suite that stays green with the defect restored
-verifies nothing.
+target below the ground taken out. And so was the prepared observer: curvature left out of a
+target's slope, the voids on its rays ignored, a target below the ground allowed, no radius
+check, the target's own sample let into its horizon, the bearing taken from the target, a
+quarter of the rays, a query that allocates, and a refused target answered each turn a test
+red; an unknown observer answered anyway crashes the suite, reading rays it never cast. Two
+design choices survive being taken out -- the blend of two rays and the half-spacing margin
+-- and [ENGINE.md](ENGINE.md) says why neither is claimed to matter. A suite that stays green
+with the defect restored verifies nothing.
 
 All of the above pass identically in Debug and Release.
