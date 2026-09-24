@@ -8,8 +8,8 @@ This library answers that question against real elevation data, accounting for h
 far the ground actually drops away due to Earth's curvature — a flat map alone gets
 this wrong past a few kilometres.
 
-A C++17 library, command-line tool and Windows DLL that answer three questions about
-the ground between two points:
+A C++17 library, command-line tool and Windows DLL that answer four questions about
+the ground between points:
 
 1. **Terrain profile** — ground elevation along a path between two geodetic points,
    sampled at a stated spacing.
@@ -20,6 +20,9 @@ the ground between two points:
    the DLL, the command line and TerrainBench take heights above the ground for now.
 3. **Viewshed** — from one observer, which cells within a radius are visible, as a
    raster mask, for the ground itself or for a target of a given height.
+4. **Minimum visible height** — from one observer, for every cell within a radius, how
+   high above the ground a target there must stand to be seen: 0 where the ground itself
+   is. Asked for any one height, it gives exactly that height's viewshed.
 
 ![TerrainBench checking a line of sight: the map, the blocking point, the profile and the answer](docs/screenshots/line-of-sight-dark.png)
 
@@ -53,8 +56,9 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
   faster than checking every cell on its own. Over the cells either one finds visible,
   the two differ on at most 26% at three test observers, almost all of it the boundary
   of the visible region drawn one cell off; under 2% is off that boundary.
-- **Tested.** 63 engine tests and 117 app tests, all run by `build.ps1` and by CI on
-  every push.
+- **Tested.** 68 engine tests and 141 app tests, all run by `build.ps1` and by CI on
+  every push. Each fix was also checked the other way: the defect put back, and a test
+  going red.
 
 ## What's in the repository
 
@@ -94,8 +98,8 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 63-case test suite + demo
-TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
+TerrainEngine.exe # run the 68-case test suite + demo
+TerrainEngine.exe benchmark <profile|viewshed|minheight> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
 TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]
@@ -123,7 +127,8 @@ the end of the file, is reported the same way rather than silently skipped.
 ## Documentation
 
 - [docs/ENGINE.md](docs/ENGINE.md) — the geometric model and its assumptions, the
-  validity envelope, determinism, performance, fast vs. naive viewshed accuracy, voids,
+  validity envelope, determinism, performance, fast vs. naive viewshed accuracy, the
+  minimum visible height and its derivation, voids,
   the API contract, the rendered output, and Fresnel clearance, batch queries, tile
   boundaries and the "why" answer.
 - [docs/TESTS.md](docs/TESTS.md) — the engine's test suite, case by case.

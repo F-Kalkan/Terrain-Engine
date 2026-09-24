@@ -143,6 +143,53 @@ public class PresentationTests
         Assert.Equal(PixelOf(MapPixels.DegradedColour), image[0..4]);
     }
 
+    [Fact]
+    public void A_minimum_visible_height_map_is_coloured_by_its_band_and_a_hidden_band_is_left_out()
+    {
+        // Engine row 0 (the image's bottom): the ground seen, and 12.5 m. Row 1: no confident
+        // answer, and a cell no height makes visible.
+        var map = new ViewshedMap(2, 2, 1, 1, 0.00027, 0.00034, 36.5, -111.5,
+            [CellState.Visible, CellState.NotVisible, CellState.Degraded, CellState.NotVisible],
+            [0, 12.5, double.NaN, double.PositiveInfinity]);
+        var hidden = new bool[MapPixels.LayerCount];
+
+        var image = MapPixels.Viewshed(map, hidden: hidden);
+
+        Assert.Equal(PixelOf(MapPixels.HeightBands[0].Colour), image[8..12]);
+        Assert.Equal(PixelOf(MapPixels.HeightBands[3].Colour), image[12..16]);
+        Assert.Equal(PixelOf(MapPixels.DegradedColour), image[0..4]);
+        Assert.Equal(PixelOf(MapPixels.HeightBands[^1].Colour), image[4..8]);
+
+        hidden[MapPixels.FirstHeightLayer + 3] = true;
+        Assert.Equal(new byte[4], MapPixels.Viewshed(map, hidden: hidden)[12..16]);
+    }
+
+    [Theory]
+    [InlineData(0.0, 0)]
+    [InlineData(1e-9, 1)]
+    [InlineData(2.0, 1)]
+    [InlineData(2.0000001, 2)]
+    [InlineData(10.0, 2)]
+    [InlineData(30.0, 3)]
+    [InlineData(100.0, 4)]
+    [InlineData(300.0, 5)]
+    [InlineData(300.5, 6)]
+    [InlineData(1e6, 6)]
+    [InlineData(double.PositiveInfinity, 7)]
+    [InlineData(double.NaN, -1)]
+    public void A_height_falls_in_the_first_band_whose_limit_it_is_at_most(double heightM, int band)
+    {
+        Assert.Equal(band, MapPixels.HeightBand(heightM));
+    }
+
+    [Fact]
+    public void The_height_legend_is_in_metres()
+    {
+        Assert.Equal(
+            ["Ground Seen (0 m)", "Up to 2 m", "2 to 10 m", "10 to 30 m", "30 to 100 m", "100 to 300 m", "Over 300 m", "Not Seen at Any Height"],
+            MapPixels.HeightBands.Select(b => b.Name));
+    }
+
     private static byte[] PixelOf(Rgba colour)
     {
         float a = colour.A / 255f;

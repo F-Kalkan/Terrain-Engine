@@ -326,6 +326,63 @@ worth recording:
 Taking the viewshed's spacing check back out doesn't make a test fail politely: the suite
 crashes, laying out a grid at a spacing of zero. That is the case for the check.
 
+## Update: the minimum visible height
+
+The viewshed answers "is a target this high seen?" for one height. The minimum visible
+height answers it for all of them: per cell, the lowest height above the ground at which a
+target is seen, 0 where the ground itself is (`MinimumVisibleHeight.h`; the model and its
+derivation are in `docs/ENGINE.md`). Three decisions.
+
+**The formula is only the estimate.** Turned round, the line-of-sight test gives the answer
+in one line: `T = eye + D * S + D^2 / 2kR`, with `S` the steepest curvature-adjusted slope in
+front of the target. My first thought was to return that. But `ComputeLineOfSight` doesn't
+compare slopes; it compares a sight line with the terrain, and in doubles the two part in
+the last bits. A cell whose answer came out 98.0009535 could then be hidden from a naive
+viewshed asked about a target of exactly 98.0009535 m, and "thresholding gives exactly the
+naive viewshed" would be true almost everywhere, which is to say not true. So the answer is
+decided by `ComputeLineOfSight` itself. Whether a target is seen can only change from no to
+yes as it rises -- each step from its height to the verdict keeps order, rounding included
+-- so there is one smallest double at which it first says yes. `SmallestHeightSeen` finds
+it: non-negative doubles are ordered like their bit patterns, so it walks up or down from
+the estimate a double at a time, doubling the step, then halves the gap it has found. I
+expected the estimate to be a double or two off; measured, it is usually some hundreds,
+because its terms are large and cancel, and a hidden cell takes a median of 10 to 16
+line-of-sight calls. That sounded expensive until I timed it: building the profile costs
+more than all of them, and the reference takes 1.0-1.6 times naive's time. Putting the
+formula back in its place turns a test red at the double just below each answer.
+
+**The fast version shares the fast viewshed's rays rather than having its own.** The ray
+casting and the blend of two rays moved out of `ComputeViewshedFast` into
+`AnswerEachCellFromFastHorizons`, which hands each cell its ground, distance and horizon and
+lets the caller ask its question. The fast viewshed asks "is this target above the horizon?"
+and the minimum visible height "how high must it stand to be?", the second settled by the
+first's own test, so thresholding it is `ComputeViewshedFast` exactly. Moving the code
+changed no answer: three CLI viewsheds before and after -- both tiles, both interpolation
+modes, target heights of 0, 3 and 25 m -- are the same files to the byte. One consequence is that the fast
+version's agreement with the reference at 0 m is the fast viewshed's agreement with naive,
+already measured, so the question was only how it behaves above 0 m. It gets better:
+measured at 0, 2, 10, 30 and 100 m, the worst disagreement falls from 25.5% to 11%, 3.8%,
+1.7% and 1.3%.
+
+**A height is above the ground, and the ground travels with it.** The answer could have been
+an absolute height, but "how much higher than the ground must it be" is the question a
+target placed on a map asks, and 0 has a meaning there that an absolute height doesn't.
+Each cell also keeps the ground it was computed on, so the absolute answer is that ground
+plus the height, on the same terrain. Asking for the viewshed at a target height below the
+ground is refused, a new `InputProblem`, rather than answered: it isn't a target.
+
+**In TerrainBench it is a way of showing the viewshed, not a panel of its own.** It takes
+the viewshed's observer, radius, spacing, k, interpolation and algorithm, over the same grid,
+so it is a **Show** choice on the Viewshed panel, and the DLL's `te_minimum_visible_height`
+takes the viewshed's query. What it doesn't use is set aside rather than hidden: the target
+height, since it answers every height, and Compare With, since the comparisons mark cells
+whose visibility differs. The legend is banded in metres rather than a continuous ramp, so
+it can count cells and hide a band the way the viewshed's legend does for its states.
+Writing the test that looks at the painted map turned up a fault in the test helper that
+reads a pixel: it took the frame's channels the wrong way round, red for blue. Every earlier
+test that used it compared purple or total brightness, which don't change when red and blue
+swap, so nothing had shown it; it now reads the order from the frame.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

@@ -11,6 +11,7 @@
 #include "LineOfSight.h"
 #include "Viewshed.h"
 #include "ViewshedAgreement.h"
+#include "MinimumVisibleHeight.h"
 #include "RealElevationSampler.h"
 #include "CliArguments.h"
 #include <string>
@@ -2389,4 +2390,381 @@ void TestRealElevationSamplerBilinearMatchesAHandWorkedValue()
         && nearest.GetElevation(36.625, -111.875) == 180.0
         && bilinear.GetElevation(36.5, -112.0) == 180.0,  // on a post, bilinear reads the post itself
         "TestRealElevationSamplerBilinearMatchesAHandWorkedValue");
+}
+
+// Two minimum-visible-height grids with the same answer in every cell: the same state,
+// and the same height and ground to the bit, NaN matching NaN where a cell has none.
+inline bool SameMinimumVisibleHeights(const MinimumVisibleHeightResult& a, const MinimumVisibleHeightResult& b)
+{
+    auto same = [](const std::vector<std::vector<double>>& x, const std::vector<std::vector<double>>& y) {
+        if (x.size() != y.size()) return false;
+        for (size_t row = 0; row < x.size(); row++)
+        {
+            if (x[row].size() != y[row].size()) return false;
+            for (size_t col = 0; col < x[row].size(); col++)
+            {
+                double p = x[row][col], q = y[row][col];
+                if (!(p == q || (std::isnan(p) && std::isnan(q)))) return false;
+            }
+        }
+        return true;
+    };
+    return a.state == b.state && same(a.heightAboveGroundM, b.heightAboveGroundM) && same(a.groundM, b.groundM)
+        && a.terrainDatum == b.terrainDatum && a.inputProblem == b.inputProblem && a.cancelled == b.cancelled;
+}
+
+// Every finite height in the grid other than 0, once each, in order.
+inline std::vector<double> DistinctMinimumVisibleHeights(const MinimumVisibleHeightResult& result)
+{
+    std::vector<double> heights;
+    for (const auto& row : result.heightAboveGroundM)
+    {
+        for (double heightM : row)
+        {
+            if (std::isfinite(heightM) && heightM > 0.0) heights.push_back(heightM);
+        }
+    }
+    std::sort(heights.begin(), heights.end());
+    heights.erase(std::unique(heights.begin(), heights.end()), heights.end());
+    return heights;
+}
+
+//TEST 64
+void TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight()
+{
+    // The wall scene of test 51: a 2 m observer, 0 m ground, a 50 m wall 90 m east. A
+    // target D metres east is seen once the sight line to it clears the wall's top, raised
+    // by the Earth's curvature d (D - d) / 2kR at d = 90 m. The line to a target of eye
+    // height T passes the wall at 2 + (T - 2) * 90 / D, so the lowest T is
+    //     T = 2 + (50 + 90 (D - 90) / 2kR - 2) * D / 90
+    // 120 m east, just behind the wall: 2 + 48 * 4/3 = 66 m, plus 3600 / 2kR -- 66.000212 m.
+    // 180 m east, the cell test 51 asks about: 2 + 48 * 2 = 98 m, plus 16200 / 2kR -- 98.000954 m.
+    // In front of the wall (60 m) and on it (90 m) the ground itself is seen: 0.
+    // Both versions give these; the fast one keeps its horizon as floats, so to 10^-5 m.
+    // Each cell carries its own ground, the wall's top on the wall -- not the observer's.
+    const int size = 21;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    RasterBlockElevationSampler scene = MakeWallScene(observer, spacingDeg, size, center + 3);
+
+    const double twoKR = 2 * (4.0 / 3.0) * EarthRadiusM;
+    const double behindWallM = 66.0 + 3600.0 / twoKR;
+    const double twiceAsFarM = 98.0 + 16200.0 / twoKR;
+
+    bool right = true;
+    for (bool fast : { false, true })
+    {
+        MinimumVisibleHeightResult result = fast
+            ? ComputeMinimumVisibleHeightFast(observer, Agl(2.0), size, size, spacingDeg, scene)
+            : ComputeMinimumVisibleHeightReference(observer, Agl(2.0), size, size, spacingDeg, scene);
+        const auto& east = result.heightAboveGroundM[center];
+        double tolerance = fast ? 1e-5 : 1e-9;
+        right = right && east[center + 2] == 0.0 && east[center + 3] == 0.0
+            && std::abs(east[center + 4] - behindWallM) < tolerance
+            && std::abs(east[center + 6] - twiceAsFarM) < tolerance
+            && result.state[center][center + 2] == CellVisibility::Visible
+            && result.state[center][center + 6] == CellVisibility::NotVisible
+            && result.groundM[center][center + 3] == 50.0 && result.groundM[center][center + 6] == 0.0
+            && MinimumVisibleAbsoluteHeightM(result, center, center + 3) == 50.0;
+    }
+
+    Expect(right, "TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight");
+}
+
+//TEST 65
+void TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm()
+{
+    // Level ground at 0 m everywhere: only the Earth's curvature hides anything. An eye h
+    // above the ground sees it out to the horizon d_h = sqrt(2kR h); a target D beyond that
+    // must stand (D - d_h)^2 / 2kR above the ground to be seen, and inside it, 0. Derived in
+    // docs/ENGINE.md, "Minimum visible height".
+    //
+    // The engine finds the horizon among its samples, not at d_h itself: the sample
+    // nearest d_h is at most half a spacing s from it, and there s(d) is lower than its
+    // peak by at most 1/2 |s''| (s/2)^2, where s''(d) = -2h / d^3. The answer is D times
+    // that. Along a single path at 30 m, from a 10 m eye (d_h = 13.0 km) out to 50 km:
+    // 50000 * 1/2 * 9.0e-12 * 15^2 = 5.1e-5 m -- held to 10^-4 m.
+    //
+    // Over a 101 x 101 grid of 300 m cells, both versions, every cell: a target beyond
+    // the horizon can have its nearest counted sample up to one spacing away (the target's
+    // own isn't counted), and the fast version, which leaves out the last half cell, one
+    // and a half: 21.2 km * 1/2 * 9.0e-12 * 450^2 = 0.019 m for the farthest cell -- held
+    // to 0.03 m. Inside the horizon every answer must be exactly 0.
+    const double twoKR = 2 * (4.0 / 3.0) * EarthRadiusM;
+    const GeoPoint observer{ 36.5, -111.5 };
+    LevelGroundSampler level(0.0);
+    auto closedForm = [&](double eyeM, double dM) {
+        double horizonM = std::sqrt(twoKR * eyeM);
+        return dM <= horizonM ? 0.0 : (dM - horizonM) * (dM - horizonM) / twoKR;
+    };
+
+    bool pathsRight = true;
+    struct Range { double eyeM, dM; };
+    for (Range range : { Range{ 10, 5000 }, Range{ 10, 12000 }, Range{ 10, 13500 }, Range{ 10, 15000 }, Range{ 10, 20000 },
+                         Range{ 10, 30000 }, Range{ 10, 50000 }, Range{ 100, 30000 }, Range{ 100, 45000 }, Range{ 100, 50000 } })
+    {
+        GeoPoint target{ observer.latitudeDeg + MetersToLatitudeDeg(range.dM), observer.longitudeDeg };
+        std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, MetersToLatitudeDeg(30.0), level);
+        MinimumVisibleHeightAnswer answer = MinimumVisibleHeightAlongProfile(profile, Agl(range.eyeM));
+        double expectedM = closedForm(range.eyeM, profile.back().distanceFromStartM);
+        pathsRight = pathsRight && IsOk(answer.status) && answer.groundM == 0.0
+            && (expectedM == 0.0 ? answer.heightAboveGroundM == 0.0 : std::abs(answer.heightAboveGroundM - expectedM) < 1e-4);
+    }
+
+    const int size = 101;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(300.0);
+    const double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
+    bool gridsRight = true;
+    int beyondTheHorizon = 0;
+    for (bool fast : { false, true })
+    {
+        MinimumVisibleHeightResult result = fast
+            ? ComputeMinimumVisibleHeightFast(observer, Agl(10.0), size, size, spacingDeg, level)
+            : ComputeMinimumVisibleHeightReference(observer, Agl(10.0), size, size, spacingDeg, level);
+        for (int row = 0; row < size; row++)
+        {
+            for (int col = 0; col < size; col++)
+            {
+                GeoPoint centre{ observer.latitudeDeg + (row - center) * spacingDeg, observer.longitudeDeg + (col - center) * lonSpacingDeg };
+                double expectedM = closedForm(10.0, GreatCircleDistanceM(observer, centre));
+                double gotM = result.heightAboveGroundM[row][col];
+                if (expectedM == 0.0) gridsRight = gridsRight && gotM == 0.0;
+                else
+                {
+                    gridsRight = gridsRight && std::abs(gotM - expectedM) < 0.03;
+                    beyondTheHorizon++;
+                }
+            }
+        }
+    }
+
+    Expect(pathsRight && gridsRight && beyondTheHorizon > 1000, "TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm");
+}
+
+//TEST 66
+void TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight()
+{
+    // Asking the reference "which cells does a target H above the ground see?" must give
+    // exactly the cells ComputeViewshedNaive gives for a target of height H -- and the fast
+    // version exactly ComputeViewshedFast's. Asked at every height the grid holds and at
+    // the double just below each, where a rounding in either direction would show, as
+    // well as at round heights.
+    //
+    // The wall scene with a void beyond the wall, on a 25 x 25 grid over 21 x 21 cells of
+    // data: the outer ring has no data under it, so no confident answer either. Then the
+    // 1-arcsecond tile at the observer with the most uneven view, over a 1 km radius.
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    ElevationCells cells = MakeFlatCells(21, 0.0);
+    for (auto& row : cells) row[13] = 50.0;
+    cells[4][17] = std::nullopt;
+    RasterBlockElevationSampler scene = MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+
+    auto agreesAtEveryHeight = [&](GeoPoint from, int size, IElevationSampler& sampler, size_t everyNth, bool fast) {
+        MinimumVisibleHeightResult result = fast
+            ? ComputeMinimumVisibleHeightFast(from, Agl(2.0), size, size, spacingDeg, sampler)
+            : ComputeMinimumVisibleHeightReference(from, Agl(2.0), size, size, spacingDeg, sampler);
+        std::vector<double> heights = { 0.0, 2.0, 10.0, 30.0, 97.9, 98.1, 120.0, 1000.0 };
+        std::vector<double> held = DistinctMinimumVisibleHeights(result);
+        for (size_t i = 0; i < held.size(); i += everyNth)
+        {
+            heights.push_back(held[i]);
+            heights.push_back(std::nextafter(held[i], 0.0));
+        }
+        for (double heightM : heights)
+        {
+            ViewshedResult direct = fast
+                ? ComputeViewshedFast(from, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, nullptr, Agl(heightM))
+                : ComputeViewshedNaive(from, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, nullptr, Agl(heightM));
+            if (ViewshedAtTargetHeight(result, heightM).visible != direct.visible) return false;
+        }
+        return held.size() > 20;
+    };
+
+    MinimumVisibleHeightResult sceneResult = ComputeMinimumVisibleHeightReference(observer, Agl(2.0), 25, 25, spacingDeg, scene);
+    bool sceneHasNoAnswerCells = CountCells(ViewshedAtTargetHeight(sceneResult, 0.0), CellVisibility::Degraded) > 25 * 25 - 21 * 21;
+    bool sceneAgrees = agreesAtEveryHeight(observer, 25, scene, 1, false) && agreesAtEveryHeight(observer, 25, scene, 1, true);
+
+    RealElevationSampler tile("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    if (!tile.IsLoaded())
+    {
+        Skip("TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight (1-arcsecond part)", "DATA/SRTM1/N36W112.hgt not found from this working directory");
+        Expect(sceneHasNoAnswerCells && sceneAgrees, "TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight");
+        return;
+    }
+    const GeoPoint uneven{ 36.55861, -111.81361 };
+    int size = (int)(2 * MetersToLatitudeDeg(1000.0) / spacingDeg);
+    bool tileAgrees = agreesAtEveryHeight(uneven, size, tile, 200, false) && agreesAtEveryHeight(uneven, size, tile, 200, true);
+
+    Expect(sceneHasNoAnswerCells && sceneAgrees && tileAgrees, "TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight");
+}
+
+//TEST 67
+void TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals()
+{
+    // Where the viewshed has no confident answer, neither has this, for the same reason:
+    // an observer standing on a void leaves every cell Degraded, as in both viewsheds, with
+    // no height and no ground. An observer whose eye is below the ground under it sees
+    // nothing at any height: every other cell needs an infinite height -- and a target
+    // 1 km up is still hidden, as naive says. The absolute answer is the ground the height
+    // was computed on plus the height. The inputs the viewsheds refuse are refused, with the
+    // same reason; a target height below the ground or not a number is refused by
+    // ViewshedAtTargetHeight. And progress is reported from 0 to 1 without changing a cell,
+    // and a stop request honoured.
+    const int size = 7;
+    const int center = size / 2;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+
+    ElevationCells holed = MakeFlatCells(size, 100.0);
+    holed[center][center] = std::nullopt;
+    RasterBlockElevationSampler onVoid = MakeViewshedAlignedRaster(holed, observer, spacingDeg);
+    RasterBlockElevationSampler flat = MakeViewshedAlignedRaster(MakeFlatCells(size, 100.0), observer, spacingDeg);
+    LevelGroundSampler level(0.0);
+    const DatumHeight belowGround{ 50.0, VerticalDatum::OrthometricMsl };
+
+    bool right = true;
+    for (bool fast : { false, true })
+    {
+        auto compute = [&](GeoPoint from, DatumHeight height, int rows, double spacing, IElevationSampler& sampler, double k, const ViewshedProgress& progress) {
+            return fast ? ComputeMinimumVisibleHeightFast(from, height, rows, rows, spacing, sampler, k, progress)
+                        : ComputeMinimumVisibleHeightReference(from, height, rows, rows, spacing, sampler, k, progress);
+        };
+        auto viewshed = [&](GeoPoint from, DatumHeight height, IElevationSampler& sampler) {
+            return fast ? ComputeViewshedFast(from, height, size, size, spacingDeg, sampler)
+                        : ComputeViewshedNaive(from, height, size, size, spacingDeg, sampler);
+        };
+
+        MinimumVisibleHeightResult voidResult = compute(observer, Agl(2.0), size, spacingDeg, onVoid, 4.0 / 3.0, nullptr);
+        bool noHeights = true;
+        for (int row = 0; row < size; row++)
+        {
+            for (int col = 0; col < size; col++)
+            {
+                noHeights = noHeights && std::isnan(voidResult.heightAboveGroundM[row][col]) && std::isnan(voidResult.groundM[row][col]);
+            }
+        }
+        right = right && voidResult.state == viewshed(observer, Agl(2.0), onVoid).visible && noHeights
+            && CountCells(ViewshedAtTargetHeight(voidResult, 0.0), CellVisibility::Degraded) == size * size;
+
+        MinimumVisibleHeightResult onFlat = compute(observer, Agl(2.0), size, spacingDeg, flat, 4.0 / 3.0, nullptr);
+        right = right && onFlat.terrainDatum == VerticalDatum::OrthometricMsl
+            && MinimumVisibleAbsoluteHeightM(onFlat, 0, 0) == 100.0 + onFlat.heightAboveGroundM[0][0]
+            && onFlat.groundM[0][0] == 100.0 && onFlat.groundM[center][center] == 100.0
+            && onFlat.heightAboveGroundM[center][center] == 0.0;
+
+        auto refused = [&](MinimumVisibleHeightResult r, InputProblem expected) { return r.inputProblem == expected && r.state.empty(); };
+        right = right
+            && refused(compute(observer, Agl(2.0), size, 0.0, flat, 4.0 / 3.0, nullptr), InputProblem::SpacingNotPositive)
+            && refused(compute(observer, Agl(std::nan("")), size, spacingDeg, flat, 4.0 / 3.0, nullptr), InputProblem::HeightNotFinite)
+            && refused(compute(observer, Agl(2.0), size, spacingDeg, flat, 0.0, nullptr), InputProblem::CurvatureFactorNotPositive)
+            && refused(compute({ 89.8, -111.5 }, Agl(2.0), 41, 0.01, level, 4.0 / 3.0, nullptr), InputProblem::GridBeyondPole)
+            && refused(compute({ std::nan(""), -111.5 }, Agl(2.0), size, spacingDeg, flat, 4.0 / 3.0, nullptr), InputProblem::CoordinateNotFinite)
+            && refused(compute(observer, Agl(2.0), 0, spacingDeg, flat, 4.0 / 3.0, nullptr), InputProblem::None);
+
+        std::vector<double> fractions;
+        MinimumVisibleHeightResult reported = compute(observer, Agl(2.0), size, spacingDeg, flat, 4.0 / 3.0,
+            [&](double fraction) { fractions.push_back(fraction); return true; });
+        bool inOrder = fractions.size() > 2 && fractions.front() == 0.0 && fractions.back() == 1.0;
+        for (size_t i = 1; i < fractions.size(); i++) inOrder = inOrder && fractions[i] >= fractions[i - 1];
+        int reportsBeforeStopping = 0;
+        MinimumVisibleHeightResult stopped = compute(observer, Agl(2.0), size, spacingDeg, flat, 4.0 / 3.0,
+            [&](double) { reportsBeforeStopping++; return false; });
+        right = right && SameMinimumVisibleHeights(reported, onFlat) && inOrder && stopped.cancelled && reportsBeforeStopping == 1;
+    }
+
+    MinimumVisibleHeightResult buried = ComputeMinimumVisibleHeightReference(observer, belowGround, size, size, spacingDeg, flat);
+    int infinite = 0;
+    for (const auto& row : buried.heightAboveGroundM)
+    {
+        for (double heightM : row) infinite += std::isinf(heightM) ? 1 : 0;
+    }
+    bool buriedRight = infinite == size * size - 1 && buried.heightAboveGroundM[center][center] == 0.0
+        && ViewshedAtTargetHeight(buried, 1000.0).visible
+            == ComputeViewshedNaive(observer, belowGround, size, size, spacingDeg, flat, 4.0 / 3.0, nullptr, Agl(1000.0)).visible;
+
+    MinimumVisibleHeightResult onFlat = ComputeMinimumVisibleHeightReference(observer, Agl(2.0), size, size, spacingDeg, flat);
+    bool thresholdsRefused = ViewshedAtTargetHeight(onFlat, std::nan("")).inputProblem == InputProblem::HeightNotFinite
+        && ViewshedAtTargetHeight(onFlat, INFINITY).inputProblem == InputProblem::HeightNotFinite
+        && ViewshedAtTargetHeight(onFlat, -1.0).inputProblem == InputProblem::HeightBelowGround
+        && ViewshedAtTargetHeight(onFlat, -1.0).visible.empty();
+
+    Expect(right && buriedRight && thresholdsRefused, "TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals");
+}
+
+// The fast minimum visible height is held to the fast viewshed's tolerances against the
+// reference, applied to the viewsheds both give for a target of each of these heights.
+// At 0 m that is test 57's comparison exactly; a taller target sees over the terrain that
+// decides the edge at 0 m.
+inline const double MinimumVisibleHeightComparedAtM[] = { 0.0, 2.0, 10.0, 30.0, 100.0 };
+
+//TEST 68
+void TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers()
+{
+    // The three observers of test 57 on the 1-arcsecond tile, each at 2 km and 5 km, with
+    // its defaults: at every height above, the fast version is within the fast viewshed's
+    // tolerance of the reference, at least 80% of their differences lie on the
+    // reference's visibility edge, and an answer that is the same in every cell -- 0
+    // everywhere, or out of sight everywhere -- fails the same tolerance. Prints the counts,
+    // and how far the heights themselves are apart.
+    const std::string path = "DATA/SRTM1/N36W112.hgt";
+    RealElevationSampler sampler(path, 36.0, -112.0);
+    if (!sampler.IsLoaded())
+    {
+        Skip("TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers", path + " not found from this working directory");
+        return;
+    }
+
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const RealTerrainViewshedRun runs[] = {
+        { { 36.5, -111.5 }, 2.0 }, { { 36.5, -111.5 }, 5.0 },
+        { { 36.86361, -111.30861 }, 2.0 }, { { 36.86361, -111.30861 }, 5.0 },
+        { { 36.55861, -111.81361 }, 2.0 }, { { 36.55861, -111.81361 }, 5.0 },
+    };
+    for (const auto& run : runs)
+    {
+        int grid = (int)(2 * MetersToLatitudeDeg(run.radiusKm * 1000.0) / spacingDeg);
+        MinimumVisibleHeightResult reference = ComputeMinimumVisibleHeightReference(run.observer, Agl(2.0), grid, grid, spacingDeg, sampler);
+        MinimumVisibleHeightResult fast = ComputeMinimumVisibleHeightFast(run.observer, Agl(2.0), grid, grid, spacingDeg, sampler);
+
+        std::ostringstream where;
+        where << "(" << run.observer.latitudeDeg << ", " << run.observer.longitudeDeg << "), " << run.radiusKm << " km";
+        bool withinTolerance = true, onEdge = true, oneAnswerFails = true;
+        for (double heightM : MinimumVisibleHeightComparedAtM)
+        {
+            ViewshedResult referenceView = ViewshedAtTargetHeight(reference, heightM);
+            ViewshedAgreement a = CompareViewsheds(ViewshedAtTargetHeight(fast, heightM), referenceView);
+            std::cout << "  " << where.str() << ", target " << heightM << " m: reference sees " << a.referenceVisible << ", fast "
+                << a.approximateVisible << "; fast only " << a.approximateOnlyVisible << ", reference only " << a.referenceOnlyVisible
+                << "; differ on " << (100.0 * a.DisagreementRate()) << "% of " << a.VisibleInEither() << ", "
+                << (100.0 * a.OffEdgeRate()) << "% off the edge; " << (100.0 * a.OnEdgeFraction()) << "% of differences on it" << std::endl;
+            withinTolerance = withinTolerance && WithinFastViewshedTolerance(a);
+            onEdge = onEdge && a.OnEdgeFraction() >= FastViewshedMinimumOnEdge;
+            oneAnswerFails = oneAnswerFails
+                && !WithinFastViewshedTolerance(CompareViewsheds(OneStateLike(referenceView, CellVisibility::NotVisible), referenceView))
+                && !WithinFastViewshedTolerance(CompareViewsheds(OneStateLike(referenceView, CellVisibility::Visible), referenceView));
+        }
+
+        std::vector<double> apartM;
+        for (int row = 0; row < grid; row++)
+        {
+            for (int col = 0; col < grid; col++)
+            {
+                double r = reference.heightAboveGroundM[row][col], f = fast.heightAboveGroundM[row][col];
+                if (std::isfinite(r) && std::isfinite(f)) apartM.push_back(std::abs(r - f));
+            }
+        }
+        std::sort(apartM.begin(), apartM.end());
+        if (!apartM.empty())
+        {
+            std::cout << "  " << where.str() << ": heights apart by a median of " << apartM[apartM.size() / 2] << " m, 90th percentile "
+                << apartM[apartM.size() * 9 / 10] << " m, 99th " << apartM[apartM.size() * 99 / 100] << " m, most " << apartM.back() << " m" << std::endl;
+        }
+
+        Expect(withinTolerance, "MinimumVisibleHeightFastWithinTolerance at " + where.str());
+        Expect(onEdge, "MinimumVisibleHeightFastDifferencesLieOnTheReferencesEdge at " + where.str());
+        Expect(oneAnswerFails, "MinimumVisibleHeightOneAnswerEverywhereFailsTheTolerance at " + where.str());
+    }
 }

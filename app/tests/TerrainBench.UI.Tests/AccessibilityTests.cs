@@ -231,6 +231,24 @@ public class AccessibilityTests
             app.Find<ItemsControl>("ViewshedLegend").BringIntoView();
             app.Settle();
             app.Window.CaptureRenderedFrame()!.Save(Path.Combine(folder, $"viewshed-edge-{name}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+
+            // The minimum visible height from the north rim, the map zoomed in on it, the legend in metres.
+            app.ViewModel.Viewshed.ObserverLatitude.Text = "36.86361";
+            app.ViewModel.Viewshed.ObserverLongitude.Text = "-111.30861";
+            app.FieldBox(app.ViewModel.Viewshed.RadiusKm).Text = "15";
+            app.ViewModel.Viewshed.ShowsHeights = true;
+            app.Click(app.Find<Button>("RunViewshedButton"));
+            app.WaitUntil(() => app.ViewModel.Viewshed.Map?.HeightsM is not null && !app.ViewModel.Viewshed.IsRunning && !app.ViewModel.Viewshed.IsObserverMoved, TimeSpan.FromSeconds(60), "the minimum visible height");
+            var heightsMap = app.Find<MapView>("Map");
+            heightsMap.ZoomAt(heightsMap.Frame!.Value.ToScreen(36.86361, -111.30861), 3);
+            // The observer is near the tile's north edge: move the map down so the whole disc shows.
+            heightsMap.Focus();
+            for (int i = 0; i < 2; i++) app.Window.KeyPress(Key.Up, RawInputModifiers.Control, PhysicalKey.ArrowUp, null);
+            app.Find<ItemsControl>("ViewshedLegend").BringIntoView();
+            app.Settle();
+            app.Window.CaptureRenderedFrame()!.Save(Path.Combine(folder, $"minimum-visible-height-{name}.png"), Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+            heightsMap.ZoomAt(heightsMap.Frame!.Value.Area.Center, 1);
+            app.ViewModel.Viewshed.ShowsHeights = false;
         }
         Application.Current!.RequestedThemeVariant = ThemeVariant.Default;
     }

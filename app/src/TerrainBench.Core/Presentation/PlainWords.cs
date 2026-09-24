@@ -62,6 +62,9 @@ public static class PlainWords
     public const string AlgorithmExplanation =
         "Fast casts rays from the observer to the grid's edge and answers the cells along each ray. Naive checks every cell with its own line of sight: it's the reference, and takes minutes at 30 km.";
 
+    public const string ShowExplanation =
+        "Visibility marks which cells a target of the given height can be seen at. Minimum visible height colours every cell by how high above its ground a target there must stand to be seen: 0 where the ground itself is. It answers every target height at once, so the target height isn't used.";
+
     public const string ComparisonExplanation =
         "Marks cells in yellow. Fast vs. naive runs both algorithms and marks where they disagree. Previous run marks every cell that changed since the last run, which shows what changing one setting, such as k, did.";
 

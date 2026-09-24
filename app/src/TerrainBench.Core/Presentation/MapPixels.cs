@@ -25,6 +25,41 @@ public static class MapPixels
     public const int HighlightLayer = 4;
 
     /// <summary>
+    /// The minimum-visible-height legend, low to high: each band holds the cells whose height is
+    /// above the previous band's limit and at most its own. The ground seen is the viewshed's
+    /// visible colour; then green through yellow and orange to red and a dark wine for the heights
+    /// that take a mast or a tower, and near-black for cells no height makes visible.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Name, double UpToM, Rgba Colour)> HeightBands =
+    [
+        ("Ground Seen (0 m)", 0, VisibleColour),
+        ("Up to 2 m", 2, new Rgba(102, 187, 106, 205)),
+        ("2 to 10 m", 10, new Rgba(212, 225, 87, 205)),
+        ("10 to 30 m", 30, new Rgba(255, 193, 7, 210)),
+        ("30 to 100 m", 100, new Rgba(251, 110, 0, 215)),
+        ("100 to 300 m", 300, new Rgba(211, 47, 47, 220)),
+        ("Over 300 m", double.MaxValue, new Rgba(110, 20, 60, 225)),
+        ("Not Seen at Any Height", double.PositiveInfinity, new Rgba(0, 0, 0, 150)),
+    ];
+
+    /// <summary>Index of the first height band in a hidden-layers array, after the highlights.</summary>
+    public const int FirstHeightLayer = HighlightLayer + 1;
+
+    /// <summary>How many layers a hidden-layers array covers: the four states, the highlights and every height band.</summary>
+    public static int LayerCount => FirstHeightLayer + HeightBands.Count;
+
+    /// <summary>The band a minimum visible height falls in, or -1 for NaN (no confident answer).</summary>
+    public static int HeightBand(double heightM)
+    {
+        if (double.IsNaN(heightM)) return -1;
+        for (int band = 0; band < HeightBands.Count; band++)
+        {
+            if (heightM <= HeightBands[band].UpToM) return band;
+        }
+        return HeightBands.Count - 1;
+    }
+
+    /// <summary>
     /// The tile as an image, one pixel per post, coloured along a low-to-high ramp between the
     /// tile's own lowest and highest elevations. Returns the image and those two elevations.
     /// </summary>
@@ -52,9 +87,10 @@ public static class MapPixels
 
     /// <summary>
     /// A viewshed as an image, one pixel per cell, flipped so north is up. When
-    /// <paramref name="highlights"/> is given, those cells are painted as highlights instead.
-    /// <paramref name="hidden"/>, indexed by <see cref="CellState"/> and then
-    /// <see cref="HighlightLayer"/>, leaves those layers out.
+    /// <paramref name="highlights"/> is given, those cells are painted as highlights instead. A
+    /// minimum-visible-height map colours each confident cell by its <see cref="HeightBands"/> band.
+    /// <paramref name="hidden"/>, indexed by <see cref="CellState"/>, then <see cref="HighlightLayer"/>,
+    /// then the height bands from <see cref="FirstHeightLayer"/>, leaves those layers out.
     /// </summary>
     public static byte[] Viewshed(ViewshedMap map, bool[]? highlights = null, bool[]? hidden = null)
     {
@@ -68,8 +104,14 @@ public static class MapPixels
             {
                 int cell = row * map.Cols + col;
                 var state = map.Cells[cell];
+                int band = map.HeightsM is { } heights ? HeightBand(heights[cell]) : -1;
                 Rgba colour;
                 if (highlights is not null && highlights[cell] && !Hidden(HighlightLayer)) colour = DisagreementColour;
+                else if (band >= 0)
+                {
+                    if (Hidden(FirstHeightLayer + band)) continue;
+                    colour = HeightBands[band].Colour;
+                }
                 else if (Hidden((int)state)) continue;
                 else colour = Colour(state);
                 Write(bgra, imageRow * map.Cols + col, colour);

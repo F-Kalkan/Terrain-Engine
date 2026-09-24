@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClInclude Include="IElevationSampler.h" />
     <ClInclude Include="LineOfSight.h" />
+    <ClInclude Include="MinimumVisibleHeight.h" />
     <ClInclude Include="TerrainProfile.h" />
     <ClInclude Include="VerticalDatum.h" />
     <ClInclude Include="Viewshed.h" />

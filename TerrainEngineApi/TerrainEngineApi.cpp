@@ -19,6 +19,7 @@
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
 #include "Viewshed.h"
+#include "MinimumVisibleHeight.h"
 #include "RealElevationSampler.h"
 
 // Filled in by the build (build.ps1 passes the version and the commit); a plain build falls back to
@@ -526,6 +527,107 @@ int32_t te_analyze_path(te_tile tile, const te_path_query* query, te_path_result
     });
 }
 
+namespace
+{
+    // What te_viewshed and te_minimum_visible_height both need before the engine runs: a
+    // checked query, the tile, the grid's size and spacing, and the progress callback.
+    struct GridRequest
+    {
+        std::shared_ptr<Tile> tile;
+        GeoPoint observer{};
+        DatumHeight observerHeight{};
+        int gridSize = 0;
+        double spacingDeg = 0.0;
+        ViewshedProgress report;
+    };
+
+    int32_t PrepareGrid(te_tile tile, const te_viewshed_query& q, bool usesTargetHeight, te_progress_callback progress, void* user_data, GridRequest& request)
+    {
+        request.tile = FindTile(tile);
+        if (!request.tile) return Fail(TE_ERROR_INVALID_HANDLE, InvalidHandleMessage);
+
+        std::string problem = PointProblem("observer", q.observer_latitude_deg, q.observer_longitude_deg);
+        if (problem.empty() && std::abs(q.observer_latitude_deg) > 89.9)
+            problem = "A viewshed can't be laid out within 0.1 degree of a pole, where lines of longitude meet. Choose an observer latitude between -89.9 and 89.9 degrees.";
+        if (problem.empty()) problem = HeightProblem("observer", q.observer_height_above_ground_m);
+        if (problem.empty() && usesTargetHeight) problem = HeightProblem("target", q.target_height_above_ground_m);
+        if (problem.empty()) problem = PositiveProblem("radius", q.radius_km, " km");
+        if (problem.empty()) problem = PositiveProblem("spacing", q.spacing_m, " m");
+        if (problem.empty()) problem = PositiveProblem("refraction factor k", q.refraction_k, "");
+        if (problem.empty()) problem = InterpolationProblem(q.interpolation);
+        if (problem.empty() && q.algorithm != TE_ALGORITHM_FAST && q.algorithm != TE_ALGORITHM_NAIVE)
+            problem = "The algorithm must be fast or naive.";
+        if (!problem.empty()) return Fail(TE_ERROR_INVALID_ARGUMENT, problem);
+
+        problem = OutsideTileProblem("observer", q.observer_latitude_deg, q.observer_longitude_deg, request.tile->nearest);
+        if (!problem.empty()) return Fail(TE_ERROR_OUTSIDE_TILE, problem);
+
+        // The same arithmetic the command-line benchmark uses to size a viewshed grid.
+        double metersPerDegree = MetersPerDegree();
+        double radiusDeg = (q.radius_km * 1000.0) / metersPerDegree;
+        request.spacingDeg = q.spacing_m / metersPerDegree;
+        double cellsAcross = 2 * radiusDeg / request.spacingDeg;
+        if (!(cellsAcross >= 1.0))
+            return Fail(TE_ERROR_INVALID_ARGUMENT, "The radius is smaller than half a cell. Use a radius of at least " + Number(q.spacing_m / 2000.0) + " km, or a smaller spacing.");
+        if (cellsAcross > TE_MAX_VIEWSHED_CELLS_PER_SIDE)
+            return Fail(TE_ERROR_INVALID_ARGUMENT, "That grid would be more than " + std::to_string(TE_MAX_VIEWSHED_CELLS_PER_SIDE)
+                + " cells across. Use a spacing of at least " + Number(2000.0 * q.radius_km / TE_MAX_VIEWSHED_CELLS_PER_SIDE) + " m, or a smaller radius.");
+        request.gridSize = (int)cellsAcross;
+
+        if (progress != nullptr)
+        {
+            request.report = [progress, user_data](double fractionDone) { return progress(fractionDone, user_data) == 0; };
+        }
+        request.observer = GeoPoint{ q.observer_latitude_deg, q.observer_longitude_deg };
+        request.observerHeight = DatumHeight{ q.observer_height_above_ground_m, VerticalDatum::HeightAboveGround };
+        return TE_OK;
+    }
+
+    // The engine's verdict on a finished run, as a result code: stopped, refused, or TE_OK.
+    int32_t GridOutcome(bool cancelled, InputProblem inputProblem, const char* what)
+    {
+        if (cancelled) return Fail(TE_ERROR_CANCELLED, std::string("The ") + what + " was cancelled.");
+
+        // The checks in PrepareGrid leave one refusal to the engine: a grid whose rows would
+        // reach a pole, which depends on the observer, the radius and the spacing together.
+        if (inputProblem == InputProblem::GridBeyondPole)
+            return Fail(TE_ERROR_INVALID_ARGUMENT, "That grid would reach the pole, where lines of longitude meet. Use a smaller radius, or an observer further from the pole.");
+        if (inputProblem != InputProblem::None)
+            return Fail(TE_ERROR_INVALID_ARGUMENT, std::string("The ") + what + " can't be computed: " + InputProblemToString(inputProblem) + ".");
+        return TE_OK;
+    }
+
+    // The grid's layout, and its cell states copied out row by row.
+    te_viewshed_grid DescribeGrid(const GridRequest& request)
+    {
+        int center = request.gridSize / 2;
+        double colStepDeg = LongitudeSpacingForLatitude(request.spacingDeg, request.observer.latitudeDeg);
+        te_viewshed_grid grid{};
+        grid.rows = request.gridSize;
+        grid.cols = request.gridSize;
+        grid.observer_row = center;
+        grid.observer_col = center;
+        grid.spacing_deg = request.spacingDeg;
+        grid.col_step_deg = colStepDeg;
+        grid.south_west_cell_latitude_deg = request.observer.latitudeDeg + (0 - center) * request.spacingDeg;
+        grid.south_west_cell_longitude_deg = request.observer.longitudeDeg + (0 - center) * colStepDeg;
+        return grid;
+    }
+
+    uint8_t* CopyCells(const std::vector<std::vector<CellVisibility>>& states, int gridSize)
+    {
+        uint8_t* cells = AllocateArray<uint8_t>((size_t)gridSize * (size_t)gridSize);
+        for (int row = 0; row < gridSize; row++)
+        {
+            for (int col = 0; col < gridSize; col++)
+            {
+                cells[(size_t)row * gridSize + col] = (uint8_t)states[row][col];
+            }
+        }
+        return cells;
+    }
+}
+
 int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells)
 {
     return Guarded([&]() -> int32_t {
@@ -534,84 +636,64 @@ int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_ca
         *out_grid = te_viewshed_grid{};
         *out_cells = nullptr;
 
-        std::shared_ptr<Tile> found = FindTile(tile);
-        if (!found) return Fail(TE_ERROR_INVALID_HANDLE, InvalidHandleMessage);
+        const te_viewshed_query& q = *query;
+        GridRequest request;
+        if (int32_t code = PrepareGrid(tile, q, true, progress, user_data, request); code != TE_OK) return code;
+
+        DatumHeight targetHeight{ q.target_height_above_ground_m, VerticalDatum::HeightAboveGround };
+        RealElevationSampler& sampler = request.tile->Sampler(q.interpolation);
+        ViewshedResult viewshed = q.algorithm == TE_ALGORITHM_NAIVE
+            ? ComputeViewshedNaive(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, targetHeight)
+            : ComputeViewshedFast(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, targetHeight);
+        if (int32_t code = GridOutcome(viewshed.cancelled, viewshed.inputProblem, "viewshed"); code != TE_OK) return code;
+
+        *out_grid = DescribeGrid(request);
+        *out_cells = CopyCells(viewshed.visible, request.gridSize);
+        return Succeed();
+    });
+}
+
+int32_t te_minimum_visible_height(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells, double** out_heights_m)
+{
+    return Guarded([&]() -> int32_t {
+        if (query == nullptr || out_grid == nullptr || out_cells == nullptr || out_heights_m == nullptr)
+            return Fail(TE_ERROR_INVALID_ARGUMENT, "query, out_grid, out_cells and out_heights_m must not be NULL.");
+        *out_grid = te_viewshed_grid{};
+        *out_cells = nullptr;
+        *out_heights_m = nullptr;
 
         const te_viewshed_query& q = *query;
-        std::string problem = PointProblem("observer", q.observer_latitude_deg, q.observer_longitude_deg);
-        if (problem.empty() && std::abs(q.observer_latitude_deg) > 89.9)
-            problem = "A viewshed can't be laid out within 0.1 degree of a pole, where lines of longitude meet. Choose an observer latitude between -89.9 and 89.9 degrees.";
-        if (problem.empty()) problem = HeightProblem("observer", q.observer_height_above_ground_m);
-        if (problem.empty()) problem = HeightProblem("target", q.target_height_above_ground_m);
-        if (problem.empty()) problem = PositiveProblem("radius", q.radius_km, " km");
-        if (problem.empty()) problem = PositiveProblem("spacing", q.spacing_m, " m");
-        if (problem.empty()) problem = PositiveProblem("refraction factor k", q.refraction_k, "");
-        if (problem.empty()) problem = InterpolationProblem(q.interpolation);
-        if (problem.empty() && q.algorithm != TE_ALGORITHM_FAST && q.algorithm != TE_ALGORITHM_NAIVE)
-            problem = "The viewshed algorithm must be fast or naive.";
-        if (!problem.empty()) return Fail(TE_ERROR_INVALID_ARGUMENT, problem);
+        GridRequest request;
+        if (int32_t code = PrepareGrid(tile, q, false, progress, user_data, request); code != TE_OK) return code;
 
-        problem = OutsideTileProblem("observer", q.observer_latitude_deg, q.observer_longitude_deg, found->nearest);
-        if (!problem.empty()) return Fail(TE_ERROR_OUTSIDE_TILE, problem);
+        RealElevationSampler& sampler = request.tile->Sampler(q.interpolation);
+        MinimumVisibleHeightResult heights = q.algorithm == TE_ALGORITHM_NAIVE
+            ? ComputeMinimumVisibleHeightReference(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report)
+            : ComputeMinimumVisibleHeightFast(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report);
+        if (int32_t code = GridOutcome(heights.cancelled, heights.inputProblem, "minimum visible height"); code != TE_OK) return code;
 
-        // The same arithmetic the command-line benchmark uses to size a viewshed grid.
-        double metersPerDegree = MetersPerDegree();
-        double radiusDeg = (q.radius_km * 1000.0) / metersPerDegree;
-        double spacingDeg = q.spacing_m / metersPerDegree;
-        double cellsAcross = 2 * radiusDeg / spacingDeg;
-        if (!(cellsAcross >= 1.0))
-            return Fail(TE_ERROR_INVALID_ARGUMENT, "The radius is smaller than half a cell. Use a radius of at least " + Number(q.spacing_m / 2000.0) + " km, or a smaller spacing.");
-        if (cellsAcross > TE_MAX_VIEWSHED_CELLS_PER_SIDE)
-            return Fail(TE_ERROR_INVALID_ARGUMENT, "That grid would be more than " + std::to_string(TE_MAX_VIEWSHED_CELLS_PER_SIDE)
-                + " cells across. Use a spacing of at least " + Number(2000.0 * q.radius_km / TE_MAX_VIEWSHED_CELLS_PER_SIDE) + " m, or a smaller radius.");
-        int gridSize = (int)cellsAcross;
-
-        ViewshedProgress report;
-        if (progress != nullptr)
+        uint8_t* cells = CopyCells(heights.state, request.gridSize);
+        double* heightsM = nullptr;
+        try
         {
-            report = [progress, user_data](double fractionDone) { return progress(fractionDone, user_data) == 0; };
+            heightsM = AllocateArray<double>((size_t)request.gridSize * (size_t)request.gridSize);
         }
-
-        GeoPoint observer{ q.observer_latitude_deg, q.observer_longitude_deg };
-        DatumHeight observerHeight{ q.observer_height_above_ground_m, VerticalDatum::HeightAboveGround };
-        DatumHeight targetHeight{ q.target_height_above_ground_m, VerticalDatum::HeightAboveGround };
-        RealElevationSampler& sampler = found->Sampler(q.interpolation);
-        ViewshedResult viewshed = q.algorithm == TE_ALGORITHM_NAIVE
-            ? ComputeViewshedNaive(observer, observerHeight, gridSize, gridSize, spacingDeg, sampler, q.refraction_k, report, targetHeight)
-            : ComputeViewshedFast(observer, observerHeight, gridSize, gridSize, spacingDeg, sampler, q.refraction_k, report, targetHeight);
-
-        if (viewshed.cancelled) return Fail(TE_ERROR_CANCELLED, "The viewshed was cancelled.");
-
-        // The checks above leave one refusal to the engine: a grid whose rows would reach
-        // a pole, which depends on the observer, the radius and the spacing together.
-        if (viewshed.inputProblem == InputProblem::GridBeyondPole)
-            return Fail(TE_ERROR_INVALID_ARGUMENT, "That viewshed would reach the pole, where lines of longitude meet. Use a smaller radius, or an observer further from the pole.");
-        if (viewshed.inputProblem != InputProblem::None)
-            return Fail(TE_ERROR_INVALID_ARGUMENT, std::string("The viewshed can't be computed: ") + InputProblemToString(viewshed.inputProblem) + ".");
-
-        int center = gridSize / 2;
-        double colStepDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
-        uint8_t* cells = AllocateArray<uint8_t>((size_t)gridSize * (size_t)gridSize);
-        for (int row = 0; row < gridSize; row++)
+        catch (...)
         {
-            for (int col = 0; col < gridSize; col++)
+            te_free(cells);
+            throw;
+        }
+        for (int row = 0; row < request.gridSize; row++)
+        {
+            for (int col = 0; col < request.gridSize; col++)
             {
-                cells[(size_t)row * gridSize + col] = (uint8_t)viewshed.visible[row][col];
+                heightsM[(size_t)row * request.gridSize + col] = heights.heightAboveGroundM[row][col];
             }
         }
 
-        te_viewshed_grid grid{};
-        grid.rows = gridSize;
-        grid.cols = gridSize;
-        grid.observer_row = center;
-        grid.observer_col = center;
-        grid.spacing_deg = spacingDeg;
-        grid.col_step_deg = colStepDeg;
-        grid.south_west_cell_latitude_deg = observer.latitudeDeg + (0 - center) * spacingDeg;
-        grid.south_west_cell_longitude_deg = observer.longitudeDeg + (0 - center) * colStepDeg;
-
-        *out_grid = grid;
+        *out_grid = DescribeGrid(request);
         *out_cells = cells;
+        *out_heights_m = heightsM;
         return Succeed();
     });
 }

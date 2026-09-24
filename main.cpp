@@ -13,10 +13,10 @@
 #include "CliArguments.h"
 #include <fstream>
 
-// Times a 50 km profile, a 30 km-radius fast viewshed, and fast against naive on a
-// 2 km viewshed, over one real tile. How far fast is from naive is a test of its own:
-// TestFastViewshedAgreesWithNaiveAtThreeObservers. Runs once per tile; a tile that
-// isn't present is skipped.
+// Times a 50 km profile, a 30 km-radius fast viewshed and fast minimum visible height,
+// and fast against naive on a 2 km viewshed, over one real tile. How far fast is from
+// naive is a test of its own: TestFastViewshedAgreesWithNaiveAtThreeObservers. Runs once
+// per tile; a tile that isn't present is skipped.
 void RunWallTimeBenchmark(const std::string& hgtPath, const std::string& tileLabel, const std::string& pgmSuffix)
 {
     RealElevationSampler sampler(hgtPath, 36.0, -112.0);
@@ -57,6 +57,11 @@ void RunWallTimeBenchmark(const std::string& hgtPath, const std::string& tileLab
     std::chrono::duration<double, std::milli> fastTime = end2 - start2;
     std::cout << radiusKm << "km fast viewshed (" << gridSize << "x" << gridSize << "), Time: " << fastTime.count() << " ms" << std::endl;
 
+    auto startHeights = std::chrono::high_resolution_clock::now();
+    MinimumVisibleHeightResult heights = ComputeMinimumVisibleHeightFast(viewshedObserver, agl2m, gridSize, gridSize, spacingInDegrees, sampler);
+    auto endHeights = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> heightsTime = endHeights - startHeights;
+    std::cout << radiusKm << "km fast minimum visible height (" << gridSize << "x" << gridSize << "), Time: " << heightsTime.count() << " ms" << std::endl;
 
     WriteProfilePGM(profile, (std::string("profile_output") + pgmSuffix + ".pgm").c_str());
     WriteViewshedPGM(fastResult, (std::string("viewshed_output") + pgmSuffix + ".pgm").c_str());
@@ -475,12 +480,35 @@ int main(int argc, char* argv[])
                 return 0;
             }
 
-            std::cout << "Unknown benchmark mode. Use 'profile' or 'viewshed'." << std::endl;
+            if (subMode == "minheight")
+            {
+                double radiusKm = 30.0;
+                double radiusInDegrees = (radiusKm * 1000.0) / metersPerDegreeLat;
+                int gridSize = (int)(2 * radiusInDegrees / spacingInDegrees);
+                GeoPoint observer{ swLat + 0.5, swLon + 0.5 };
+
+                auto start = std::chrono::high_resolution_clock::now();
+                DatumHeight agl2m{ 2.0, VerticalDatum::HeightAboveGround };
+                MinimumVisibleHeightResult result = ComputeMinimumVisibleHeightFast(observer, agl2m, gridSize, gridSize, spacingInDegrees, sampler);
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double, std::milli> elapsed = end - start;
+
+                PROCESS_MEMORY_COUNTERS pmc;
+                GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+                double peakMB = pmc.PeakWorkingSetSize / (1024.0 * 1024.0);
+
+                std::cout << "Minimum visible height benchmark (fast): 30km radius @ 30m data (" << gridSize << "x" << gridSize << ")" << std::endl;
+                std::cout << "Wall time: " << elapsed.count() << " ms" << std::endl;
+                std::cout << "Peak memory: " << peakMB << " MB" << std::endl;
+                return 0;
+            }
+
+            std::cout << "Unknown benchmark mode. Use 'profile', 'viewshed' or 'minheight'." << std::endl;
             return 1;
         }
 
         std::cout << "Usage:" << std::endl;
-        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>" << std::endl;
+        std::cout << "  TerrainEngine.exe benchmark <profile|viewshed|minheight> <hgtFile> <swLat> <swLon>" << std::endl;
         std::cout << "  TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]" << std::endl;
         std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]" << std::endl;
@@ -554,6 +582,11 @@ int main(int argc, char* argv[])
     TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse();
     TestAViewshedGridThatWouldReachAPoleIsRefused();
     TestRealElevationSamplerBilinearMatchesAHandWorkedValue();
+    TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight();
+    TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm();
+    TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight();
+    TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals();
+    TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers();
 
     std::cout << "-------------------------" << std::endl;
 

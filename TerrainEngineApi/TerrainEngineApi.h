@@ -285,6 +285,24 @@ typedef int32_t (*te_progress_callback)(double fraction_done, void* user_data);
 // Thread-safety: safe to call concurrently; the callback runs on the calling thread.
 TE_API int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells);
 
+// For every cell within radius_km of the observer, the lowest height above the cell's
+// ground at which a target standing there is seen: 0 where the ground itself is. Laid
+// out, checked and refused exactly as te_viewshed, over the same grid; the query's
+// target_height_above_ground_m is not used. algorithm picks the fast version or the exact
+// reference (TE_ALGORITHM_NAIVE). *out_cells holds rows * cols TE_CELL_* values: the
+// viewshed of the ground itself -- TE_CELL_VISIBLE where the ground is seen,
+// TE_CELL_NOT_VISIBLE where only a target above it is, and TE_CELL_DEGRADED or
+// TE_CELL_NOT_COVERED where there is no confident answer. *out_heights_m holds rows * cols
+// heights in metres, in the same order: NaN where there is no confident answer, +infinity
+// where no height is seen. The viewshed for a target H above the ground is every cell
+// whose height is at most H -- exactly what te_viewshed gives for that target height, with
+// the same algorithm. The same answer as an absolute height is the ground under the cell's
+// centre (te_tile_get_elevation, same interpolation) plus the height.
+// Ownership: *out_cells and *out_heights_m belong to the caller; release each with te_free.
+// Complexity: as te_viewshed, plus a few comparisons per hidden cell (fast); the reference
+// takes 1.0-1.6 times the naive viewshed's time. Thread-safety: as te_viewshed.
+TE_API int32_t te_minimum_visible_height(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells, double** out_heights_m);
+
 #ifdef __cplusplus
 }
 #endif

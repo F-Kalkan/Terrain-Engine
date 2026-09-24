@@ -24,6 +24,9 @@
     <ClInclude Include="TerrainProfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MinimumVisibleHeight.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Viewshed.h">
       <Filter>Header Files</Filter>
     </ClInclude>

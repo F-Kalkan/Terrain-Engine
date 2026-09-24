@@ -10,7 +10,8 @@ in-memory implementations of it (`FakeElevationSampler`, a tiny index-addressed 
 `MultiTileElevationSampler`, and the raster-block pair `RasterBlockViewElevationSampler` /
 `RasterBlockElevationSampler` — see
 [INTEGRATION.md](INTEGRATION.md)), the three algorithms (`GetTerrainProfile`,
-`ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`), and
+`ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`), the minimum visible
+height built on them (`MinimumVisibleHeight.h`, see "Minimum visible height" below), and
 `CompareViewsheds` (`ViewshedAgreement.h`), which measures an approximate viewshed
 against its exact reference -- see "Fast vs. naive viewshed" below. It has no
 include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
@@ -311,6 +312,144 @@ length), while fast casts rays only to the boundary and then answers each cell w
 lookup, so its work scales closer to the boundary's perimeter × profile length plus the
 cell count. That is why the speed-up is larger at 30 km than at 2 km.
 
+## Minimum visible height
+
+**The question.** For one observer and a radius: for every cell, the lowest height above
+the cell's ground at which a target standing on its centre is seen -- 0 where the ground
+itself is. A viewshed answers "is a target this high seen?" for one height; this answers it
+for all of them. `ComputeMinimumVisibleHeightReference` and `ComputeMinimumVisibleHeightFast`
+(`MinimumVisibleHeight.h`) return a `MinimumVisibleHeightResult` with, per cell:
+
+- `state` -- the viewshed of the ground itself: `Visible` where the ground is seen,
+  `NotVisible` where only a target above it is, and `NotCovered` or `Degraded`, for the same
+  reasons the viewshed gives them, where there is no confident answer;
+- `heightAboveGroundM` -- the answer; NaN where there is no confident answer, and infinity
+  where no height is seen (an observer whose eye is below the ground under it sees nothing);
+- `groundM` -- the ground under the cell's centre that the answer was computed on, in
+  `terrainDatum`. `MinimumVisibleAbsoluteHeightM` gives the same answer as an absolute
+  height: that ground plus the height.
+
+`ViewshedAtTargetHeight(result, H)` turns it back into the viewshed for a target `H` above
+every cell. `MinimumVisibleHeightAlongProfile` answers the same question for one path.
+Through the DLL it is `te_minimum_visible_height`, over the same grid, checks and refusals
+as `te_viewshed`, with the states and the heights as two arrays; TerrainBench draws it as a
+map layer with a legend in metres ([TERRAINBENCH.md](TERRAINBENCH.md)).
+
+**The model.** A target `D` away with its eye at height `T` is seen when its
+curvature-adjusted slope is at least that of every point in front of it (see "Fast vs.
+naive viewshed" above for `s`):
+
+```
+(T - eye) / D  -  D / 2kR  >=  S,      S = the largest s(d) = (h(d) - eye) / d - d / 2kR, d < D
+```
+
+Solved for `T`, the lowest target eye height seen is
+
+```
+T = eye + D * S + D^2 / 2kR,           and above the ground g under the target: max(0, T - g)
+```
+
+This is `ComputeLineOfSight`'s test turned round. The terrain at `d` blocks the line to `T`
+when, raised by the curvature drop, it stands above the line:
+`h(d) + d (D - d) / 2kR > eye + (d / D)(T - eye)`. Multiplied by `D / d` and rearranged, that
+is `T < eye + D s(d) + D^2 / 2kR`, one sample at a time; the largest of these is the answer.
+
+**On a smooth sphere** -- level ground at 0 m everywhere, an eye `h` above it -- every term
+has a closed form. There `s(d) = -h / d - d / 2kR`, whose derivative `h / d^2 - 1 / 2kR` is
+zero at
+
+```
+d_h = sqrt(2kR h)                      the horizon
+```
+
+`s` rises up to `d_h` and falls after it. So a target inside the horizon has nothing in front
+of it steeper than itself, and the ground there is seen: the answer is 0. Beyond it,
+`S = s(d_h) = -h / d_h - d_h / 2kR = -2 d_h / 2kR`, since `h = d_h^2 / 2kR`. Then
+
+```
+T = h - 2 D d_h / 2kR + D^2 / 2kR = (d_h^2 - 2 D d_h + D^2) / 2kR = (D - d_h)^2 / 2kR
+```
+
+-- the familiar radio-horizon result: past the horizon, the height needed grows with the
+square of the distance beyond it. For a 10 m eye and `k` = 4/3, `2kR` = 16,989,333 m and
+`d_h` = 13,034 m; a target 30 km away must stand (16,966 m)^2 / 16,989,333 m = 16.94 m above
+the ground. The engine finds `S` among its samples rather than at `d_h` itself, and the
+sample nearest `d_h` is at most half a spacing `s` from it, where `s(d)` falls short of its
+peak by at most `1/2 |s''| (s/2)^2`, with `s''(d) = -2h / d^3`. The answer is `D` times that
+short. `TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm` holds both versions to
+the closed form, with its tolerances derived that way: 10^-4 m along single paths at 30 m out
+to 50 km (measured, at most 4.2 x 10^-5 m), and 0.03 m over a grid of 300 m cells (measured,
+at most 2.1 mm).
+
+**Exact, not nearly.** `ComputeLineOfSight` compares a sight line with the terrain; the
+formula above compares slopes. On paper they are the same test; in doubles they part in the
+last bits, so near the answer the formula can say "seen" where the line of sight says
+"blocked". The formula is therefore only the estimate. Whether a target is seen can only go
+from "no" to "yes" as it rises -- every step from its height to the verdict preserves order,
+rounding included -- so there is one smallest double at which the line of sight first says
+"yes", and that is the answer. `SmallestHeightSeen` walks to it from the estimate:
+non-negative doubles are ordered like their bit patterns, so it steps up or down through them
+doubling the step until the answer is between two heights, then halves the gap. The
+estimate is usually some hundreds of doubles off -- its terms are large and cancel -- so a
+cell whose ground is hidden takes a median of 16 line-of-sight calls at (36.5, -111.5) and
+10 at (36.55861, -111.81361), 2 km on the 1-arcsecond tile, and a cell whose ground is seen
+takes one. Building the profile costs more than all of them: the reference takes 1.0-1.6
+times naive's time at 2 and 5 km, and 1.4 times at 30 km. The result is that
+`ViewshedAtTargetHeight(reference, H)` is, cell for cell, `ComputeViewshedNaive` with a
+target of height `H`, at every height -- `TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight`
+asks at every height the grid holds and at the double just below each. The fast version is
+settled the same way by the fast viewshed's own test, so it is, cell for cell,
+`ComputeViewshedFast` at every height.
+
+**The reference and the fast version.** The reference answers every cell along its own exact
+line, with `MinimumVisibleHeightAlongProfile` on the profile naive would build for it; it is
+kept as the reference the way naive is. The fast version shares the fast viewshed's rays
+(`AnswerEachCellFromFastHorizons`, `Viewshed.h`): each cell's horizon is the blend of the two
+rays either side of it, and the formula and the search above turn it into a height. Measured
+against the reference the way the fast viewshed is measured against naive -- `CompareViewsheds`
+on the viewsheds both give for a target of 0, 2, 10, 30 and 100 m, with the same tolerances --
+at the same observers (30 m cells, 2 m eye, `k` 4/3, nearest, 1-arcsecond tile; every figure
+printed by `TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers`):
+
+| Observer, radius | Differ at 0 m | 2 m | 10 m | 30 m | 100 m | Worst off the edge | Heights apart: median, 90th, 99th percentile |
+|---|---|---|---|---|---|---|---|
+| (36.5, -111.5), 2 km | 25.5% | 10.9% | 3.83% | 1.07% | 0.45% | 1.25% | 0.21 m, 1.27 m, 10.4 m |
+| (36.5, -111.5), 5 km | 19.2% | 7.46% | 2.55% | 0.77% | 0.35% | 1.71% | 0.24 m, 1.12 m, 11.2 m |
+| (36.86361, -111.30861), 2 km | 2.40% | 1.64% | 1.40% | 1.05% | 1.28% | 0.34% | 0 m, 2.82 m, 20.8 m |
+| (36.86361, -111.30861), 5 km | 7.36% | 3.21% | 1.49% | 0.67% | 0.29% | 0.86% | 0.002 m, 1.60 m, 9.77 m |
+| (36.55861, -111.81361), 2 km | 11.3% | 6.96% | 2.63% | 1.71% | 1.02% | 1.19% | 0.14 m, 6.45 m, 32.5 m |
+| (36.55861, -111.81361), 5 km | 13.5% | 5.79% | 1.43% | 0.73% | 0.56% | 0.90% | 0.15 m, 3.22 m, 31.0 m |
+
+"Differ" is over the cells either one sees, as for the viewsheds. At 0 m this is the fast
+viewshed's comparison with naive exactly. A taller target sees over the terrain that decides
+the edge at ground level, and the two agree more closely as it rises. Every run is within the
+fast viewshed's tolerances at every height, with at least 85% of differences on the
+reference's edge. The heights themselves are close for most cells and far apart for a few:
+where a ray beside the cell's line crosses a ridge that the line itself misses, or the other
+way round, the two answers are on different sides of it -- the same cells the viewsheds
+disagree on.
+
+**Performance** (the machine above, Release build; `TerrainEngine.exe benchmark minheight`
+and `benchmark viewshed`, three runs each, one process per run):
+
+| 30 km radius @ 30 m spacing (2000×2000) | Tile | Wall time | Peak memory |
+|---|---|---|---|
+| Fast viewshed | 3-arcsecond | ~1.68–1.76 s | ~61.7 MB |
+| Fast minimum visible height | 3-arcsecond | ~1.95–1.97 s | ~125.3–125.6 MB |
+| Fast viewshed | 1-arcsecond | ~1.64–1.71 s | ~83.8 MB |
+| Fast minimum visible height | 1-arcsecond | ~1.87–1.88 s | ~147.3–147.6 MB |
+
+The time added is small: the rays are the fast viewshed's, and a cell whose ground is
+hidden takes a few more comparisons. The memory added is the answer itself -- a height and
+a ground in doubles, and a state, for each of four million cells -- held beside the rays.
+The reference, run once in a benchmark-only program on the 3-arcsecond tile, took **340 s**
+for the same grid, against 1.52 s for the fast version in the same program (~220x); the
+naive viewshed took 240 s there. With both answers held at once the program peaked at
+168.6 MB. At that radius the two differ, at 0 m, on 13.7% of the cells either sees, and
+3.13% off the edge -- just past the 3% the tests hold the 3-arcsecond tile to at 2 km. That
+is the fast viewshed's own figure at 30 km on the coarser tile, which the tests don't run:
+the reference takes six minutes there.
+
 ## Void handling and degraded results
 
 Asserted by tests (`TestVoidPointIsDegraded`, `TestViewshedDetectsVoid`,
@@ -343,6 +482,10 @@ computed or thrown, and an input outside a function's domain likewise, as
 envelope" above. A viewshed asked for a grid with no rows or no columns returns an
 empty `ViewshedResult`, with no problem: it simply has no cells. Both viewsheds take an optional progress callback that can stop
 them early, which marks the result `cancelled`; without one they run exactly as before.
+`MinimumVisibleHeightResult` follows the same rules: the viewshed's states for cells
+without a confident answer, NaN heights there rather than a sentinel, the inputs the
+viewsheds refuse refused with the same `InputProblem`, and the same progress and
+cancellation.
 Nothing in `TerrainCore` or `TerrainReader` throws across its
 own boundary, other than the standard library's `std::bad_alloc` if memory runs out.
 

@@ -39,4 +39,11 @@ public interface ITile : IDisposable
     /// too, so pass a <see cref="Progress{T}"/> created on the UI thread to see them there.
     /// </summary>
     EngineResult<ViewshedMap> Viewshed(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation);
+
+    /// <summary>
+    /// For every cell of the viewshed grid, how high above its ground a target there must stand to be
+    /// seen, in <see cref="ViewshedMap.HeightsM"/>. The query's target height isn't used; the naive
+    /// algorithm runs the exact reference. Threading as <see cref="Viewshed"/>.
+    /// </summary>
+    EngineResult<ViewshedMap> MinimumVisibleHeight(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation);
 }

@@ -43,6 +43,7 @@ enum class InputProblem
     CurvatureFactorNotPositive, // a refraction factor k that is zero, negative, NaN or infinite
     FrequencyNotPositive,       // a Fresnel frequency that is zero, negative, NaN or infinite
     GridBeyondPole,             // a viewshed grid whose rows would reach a pole or past it
+    HeightBelowGround,          // a target height above ground that is negative: a target in the ground
 };
 
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
@@ -59,6 +60,7 @@ inline const char* InputProblemToString(InputProblem problem)
     case InputProblem::CurvatureFactorNotPositive: return "k is not a positive finite number";
     case InputProblem::FrequencyNotPositive: return "the frequency is not a positive finite number";
     case InputProblem::GridBeyondPole: return "the viewshed grid would reach a pole";
+    case InputProblem::HeightBelowGround: return "a target height above ground is below the ground";
     }
     return "unknown";
 }

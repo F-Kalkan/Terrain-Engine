@@ -209,7 +209,14 @@ public sealed class NativeTerrainEngine : ITerrainEngine
             }
         }
 
-        public EngineResult<ViewshedMap> Viewshed(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation)
+        public EngineResult<ViewshedMap> Viewshed(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation) =>
+            RunGrid(query, progress, cancellation, withHeights: false);
+
+        public EngineResult<ViewshedMap> MinimumVisibleHeight(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation) =>
+            RunGrid(query, progress, cancellation, withHeights: true);
+
+        /// <summary>te_viewshed, or te_minimum_visible_height when <paramref name="withHeights"/>: the same query, grid and progress.</summary>
+        private EngineResult<ViewshedMap> RunGrid(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation, bool withHeights)
         {
             var native = new NativeMethods.ViewshedQueryNative
             {
@@ -238,7 +245,10 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                 }
             };
 
-            int code = NativeMethods.te_viewshed(Handle, ref native, callback, IntPtr.Zero, out var grid, out IntPtr cellsPtr);
+            IntPtr heightsPtr = IntPtr.Zero;
+            int code = withHeights
+                ? NativeMethods.te_minimum_visible_height(Handle, ref native, callback, IntPtr.Zero, out var grid, out IntPtr cellsPtr, out heightsPtr)
+                : NativeMethods.te_viewshed(Handle, ref native, callback, IntPtr.Zero, out grid, out cellsPtr);
             GC.KeepAlive(callback);
             if (code != NativeMethods.Ok) return EngineResult<ViewshedMap>.Fail(LastError(code));
 
@@ -250,15 +260,23 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                 var cells = new CellState[count];
                 for (int i = 0; i < count; i++) cells[i] = (CellState)bytes[i];
 
+                double[]? heights = null;
+                if (withHeights)
+                {
+                    heights = new double[count];
+                    Marshal.Copy(heightsPtr, heights, 0, count);
+                }
+
                 return EngineResult<ViewshedMap>.Ok(new ViewshedMap(
                     grid.Rows, grid.Cols, grid.ObserverRow, grid.ObserverCol,
                     grid.SpacingDeg, grid.ColStepDeg,
                     grid.SouthWestCellLatitudeDeg, grid.SouthWestCellLongitudeDeg,
-                    cells));
+                    cells, heights));
             }
             finally
             {
                 NativeMethods.te_free(cellsPtr);
+                NativeMethods.te_free(heightsPtr);
             }
         }
 

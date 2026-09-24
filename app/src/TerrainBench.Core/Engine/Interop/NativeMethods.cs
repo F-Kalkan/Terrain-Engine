@@ -63,6 +63,9 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     public static extern int te_viewshed(ulong tile, ref ViewshedQueryNative query, ProgressCallback? progress, IntPtr userData, out ViewshedGridNative grid, out IntPtr cells);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int te_minimum_visible_height(ulong tile, ref ViewshedQueryNative query, ProgressCallback? progress, IntPtr userData, out ViewshedGridNative grid, out IntPtr cells, out IntPtr heightsM);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct TileInfoNative
     {

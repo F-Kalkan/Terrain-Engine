@@ -13,6 +13,8 @@ from the DLL; the app lays results out and colours them.
 ![The map zoomed in, with the pointer resting on the blocking point, dark theme](screenshots/map-zoom-hover-dark.png)
 ![The profile zoomed in, reading the distance and elevation under the pointer, dark theme](screenshots/profile-hover-dark.png)
 ![A viewshed near the tile's west edge: the disc is drawn where it overlaps the tile, dark theme](screenshots/viewshed-edge-dark.png)
+![The minimum visible height from the north rim: each cell coloured by how tall a target there must be to be seen, light theme](screenshots/minimum-visible-height-light.png)
+![The minimum visible height from the north rim, dark theme](screenshots/minimum-visible-height-dark.png)
 ![The first-run tour pointing at the line-of-sight answer, dark theme](screenshots/tour-5-dark.png)
 
 ## Download and run a release
@@ -85,6 +87,16 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   changed since the previous run, with the setting that changed (`k: 4/3 → 1e12 changed
   8,135 cells.`) -- which is how changing one setting shows up even when it moves a few
   thousand cells out of four million.
+- **Minimum visible height.** **Show** on the Viewshed panel switches from which cells a
+  target of one height is seen at to the minimum visible height: every cell coloured by how
+  high above its ground a target there must stand to be seen, answering every target height
+  at once. The legend is in metres -- the ground seen (0 m) in the viewshed's cyan, then up
+  to 2 m, 2 to 10, 10 to 30, 30 to 100, 100 to 300 and over 300 m, from green through yellow
+  and orange to red and a dark wine, and cells no height makes visible in near-black -- with
+  each band's count, and each band hidden or shown by clicking it, as the viewshed's states
+  are. The target height field is set aside, having nothing to ask, and so is Compare With;
+  the algorithm picks the fast version or the exact reference. Asked for any one target
+  height, the map's bands give exactly the cells the viewshed would show for it.
 - **Everywhere.** One side panel shows at a time, picked by the tabs on its left edge:
   Terrain, Line of Sight, Viewshed and About. The profile panel under the map closes to a
   Profile button; both panels are resized by dragging their edge. A ? beside a setting
@@ -123,12 +135,15 @@ Besides the engine's own suite, `app/` has two test projects, both run by `build
   (38.0 m) and curvature (34.79 m) cases written out as `.hgt` tiles, and the Blocked
   reference query checked against `TerrainEngine.exe` itself -- every bad input the DLL must
   survive (missing, empty and truncated files, a point outside the tile, spacing zero or
-  negative, a pole latitude, a closed handle), and the view models: validation, results,
+  negative, a pole latitude, a closed handle), the minimum visible height against the DLL's
+  own viewshed at round heights and at heights the grid holds, fast and exact, and the view
+  models: validation, results,
   errors, cancellation, comparisons, remembered settings, and numbers that keep a decimal
   point on a machine that writes a comma.
 - `TerrainBench.UI.Tests` (Avalonia.Headless.XUnit): the main flows clicked through a real
   window over the real DLL, including a naive 30 km viewshed that reports progress, leaves
-  the window working and cancels; keyboard reach and accessible names for every control;
+  the window working and cancels, and a minimum visible height whose bands are painted on the
+  map and uncover the ground when hidden; keyboard reach and accessible names for every control;
   4.5:1 text contrast in both themes; the first-run tour walked by mouse and by keyboard, with
   only its control taking clicks. With `TERRAINBENCH_SCREENSHOTS` set to a folder, it
   also renders the screenshots above.

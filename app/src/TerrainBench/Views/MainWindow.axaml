@@ -387,7 +387,16 @@
                   <views:NumberFieldView DataContext="{Binding Viewshed.ObserverHeight}" />
 
                   <TextBlock Classes="heading" Text="Parameters" />
-                  <views:NumberFieldView DataContext="{Binding Viewshed.TargetHeight}" />
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+                    <TextBlock Text="Show" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.ShowExplanation}"><TextBlock /></Border>
+                  </StackPanel>
+                  <ComboBox Name="ViewshedShowChoice" ItemsSource="{Binding Viewshed.ShowChoices}" SelectedIndex="{Binding Viewshed.ShowIndex}"
+                            IsEnabled="{Binding Viewshed.IsIdle}" Margin="0,0,0,12" AutomationProperties.Name="Show"
+                            AutomationProperties.HelpText="{x:Static p:PlainWords.ShowExplanation}" />
+                  <Panel IsEnabled="{Binding Viewshed.UsesTargetHeight}">
+                    <views:NumberFieldView DataContext="{Binding Viewshed.TargetHeight}" />
+                  </Panel>
                   <views:NumberFieldView DataContext="{Binding Viewshed.RadiusKm}" />
                   <views:NumberFieldView DataContext="{Binding Viewshed.Spacing}" />
                   <views:NumberFieldView DataContext="{Binding Viewshed.RefractionK}" />
@@ -410,7 +419,7 @@
                     <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.ComparisonExplanation}"><TextBlock /></Border>
                   </StackPanel>
                   <ComboBox ItemsSource="{Binding Viewshed.ComparisonChoices}" SelectedIndex="{Binding Viewshed.ComparisonIndex}"
-                            IsEnabled="{Binding Viewshed.IsIdle}" Margin="0,0,0,12" AutomationProperties.Name="Compare with"
+                            IsEnabled="{Binding Viewshed.IsComparisonChoiceEnabled}" Margin="0,0,0,12" AutomationProperties.Name="Compare with"
                             AutomationProperties.HelpText="{x:Static p:PlainWords.ComparisonExplanation}" />
 
                   <StackPanel Orientation="Horizontal" Margin="0,4,0,0">

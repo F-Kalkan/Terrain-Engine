@@ -166,6 +166,12 @@ public sealed record ViewshedQuery(
 /// A viewshed grid: <see cref="Cells"/> is row-major with row 0 the southernmost row, and cell
 /// (row, col) is centred on (<see cref="SouthWestCellLatitudeDeg"/> + row * <see cref="SpacingDeg"/>,
 /// <see cref="SouthWestCellLongitudeDeg"/> + col * <see cref="ColStepDeg"/>).
+/// <para>
+/// From a minimum-visible-height run, <see cref="HeightsM"/> holds, in the same order, the lowest
+/// height above each cell's ground at which a target there is seen: 0 where the ground itself is,
+/// infinity where no height is, NaN where there is no confident answer. <see cref="Cells"/> is then
+/// the viewshed of the ground itself. Null from a viewshed run.
+/// </para>
 /// </summary>
 public sealed record ViewshedMap(
     int Rows,
@@ -176,7 +182,11 @@ public sealed record ViewshedMap(
     double ColStepDeg,
     double SouthWestCellLatitudeDeg,
     double SouthWestCellLongitudeDeg,
-    CellState[] Cells)
+    CellState[] Cells,
+    double[]? HeightsM = null)
 {
     public CellState At(int row, int col) => Cells[row * Cols + col];
+
+    /// <summary>The cell's minimum visible height, or null for a viewshed run.</summary>
+    public double? HeightAt(int row, int col) => HeightsM?[row * Cols + col];
 }

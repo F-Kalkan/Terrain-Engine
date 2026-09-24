@@ -102,8 +102,31 @@ public sealed partial class ViewshedViewModel : ObservableObject
         set => ComparisonIndex = (int)value;
     }
 
+    public IReadOnlyList<string> ShowChoices { get; } = ["Visibility", "Minimum Visible Height"];
+
+    /// <summary>Index into <see cref="ShowChoices"/>.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsAlgorithmChoiceEnabled), nameof(IsIdle), nameof(ShowResult), nameof(NeedsRunAgain))]
+    [NotifyPropertyChangedFor(nameof(ShowsHeights), nameof(UsesTargetHeight), nameof(IsAlgorithmChoiceEnabled), nameof(IsComparisonChoiceEnabled))]
+    private int _showIndex;
+
+    /// <summary>
+    /// A run colours every cell by how high above its ground a target there must stand to be seen,
+    /// rather than marking which cells a target of one height is seen at.
+    /// </summary>
+    public bool ShowsHeights
+    {
+        get => ShowIndex == 1;
+        set => ShowIndex = value ? 1 : 0;
+    }
+
+    /// <summary>The minimum visible height answers every target height at once, so it takes none.</summary>
+    public bool UsesTargetHeight => !ShowsHeights;
+
+    /// <summary>Comparisons mark cells whose visibility differs; a height map has none of its own to mark.</summary>
+    public bool IsComparisonChoiceEnabled => !ShowsHeights && !IsRunning;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlgorithmChoiceEnabled), nameof(IsComparisonChoiceEnabled), nameof(IsIdle), nameof(ShowResult), nameof(NeedsRunAgain))]
     [NotifyCanExecuteChangedFor(nameof(RunCommand), nameof(CancelCommand))]
     private bool _isRunning;
 
@@ -145,7 +168,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
     public bool IsIdle => !IsRunning;
 
-    public bool IsAlgorithmChoiceEnabled => Comparison != ViewshedComparison.FastAndNaive && !IsRunning;
+    public bool IsAlgorithmChoiceEnabled => (ShowsHeights || Comparison != ViewshedComparison.FastAndNaive) && !IsRunning;
 
     public bool CanRun => !IsRunning && _tile() is not null && Fields.All(f => f.IsValid);
 
@@ -169,6 +192,22 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
         try
         {
+            if (ShowsHeights)
+            {
+                string name = $"{PlainWords.Algorithm(query.Algorithm)} Minimum Visible Height";
+                var (heights, heightsTime) = await RunOne(tile, query, name, token, withHeights: true);
+                if (!heights.IsOk) { Fail(heights.Error!); return; }
+
+                var (heightsDrawn, heightsPartlyBeyondTile) = DrawnCells(heights.Value);
+                ShowHeights(heights.Value, query, heightsDrawn);
+                Summary = $"{name} of {Format.Count(heights.Value.Rows)} × {Format.Count(heights.Value.Cols)} cells in {Format.Milliseconds(heightsTime)}. " +
+                          "Each cell is coloured by how high above its ground a target there must stand to be seen from the observer." +
+                          (heightsPartlyBeyondTile ? BeyondTileSentence : "");
+                // A height map has no visibility of its own to compare the next run with.
+                _previous = null;
+                return;
+            }
+
             if (Comparison != ViewshedComparison.FastAndNaive)
             {
                 var (result, elapsed) = await RunOne(tile, query, $"{PlainWords.Algorithm(query.Algorithm)} Viewshed", token);
@@ -255,13 +294,14 @@ public sealed partial class ViewshedViewModel : ObservableObject
     {
         report.Section("Viewshed inputs")
             .Line("Observer", $"{ObserverLatitude.Text}, {ObserverLongitude.Text} degrees, {ObserverHeight.Text} m above ground")
-            .Line("Target height", TargetHeight.Text + " m above ground")
+            .Line("Shows", ShowChoices[ShowsHeights ? 1 : 0])
+            .Line("Target height", ShowsHeights ? "not used" : TargetHeight.Text + " m above ground")
             .Line("Radius", RadiusKm.Text + " km")
             .Line("Cell spacing", Spacing.Text + " m")
             .Line("Refraction factor k", RefractionK.Text)
             .Line("Interpolation", PlainWords.Interpolation(Interpolation))
-            .Line("Algorithm", Comparison == ViewshedComparison.FastAndNaive ? "Both" : PlainWords.Algorithm(Algorithm))
-            .Line("Compared with", ComparisonChoices[(int)Comparison]);
+            .Line("Algorithm", !ShowsHeights && Comparison == ViewshedComparison.FastAndNaive ? "Both" : PlainWords.Algorithm(Algorithm))
+            .Line("Compared with", ShowsHeights ? ComparisonChoices[0] : ComparisonChoices[(int)Comparison]);
 
         report.Section("Viewshed result");
         if (Map is null)
@@ -351,13 +391,13 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
     private static bool IsConfident(CellState state) => state is CellState.Visible or CellState.NotVisible;
 
-    private async Task<(EngineResult<ViewshedMap> Result, TimeSpan Elapsed)> RunOne(ITile tile, ViewshedQuery query, string label, CancellationToken token)
+    private async Task<(EngineResult<ViewshedMap> Result, TimeSpan Elapsed)> RunOne(ITile tile, ViewshedQuery query, string label, CancellationToken token, bool withHeights = false)
     {
         ProgressText = label;
         Progress = 0;
         var progress = new Progress<double>(fraction => Progress = fraction);
         var stopwatch = Stopwatch.StartNew();
-        var result = await Task.Run(() => tile.Viewshed(query, progress, token), CancellationToken.None);
+        var result = await Task.Run(() => withHeights ? tile.MinimumVisibleHeight(query, progress, token) : tile.Viewshed(query, progress, token), CancellationToken.None);
         stopwatch.Stop();
         return (result, stopwatch.Elapsed);
     }
@@ -427,6 +467,38 @@ public sealed partial class ViewshedViewModel : ObservableObject
             AddLegendRow(highlightName, MapPixels.DisagreementColour, highlighted, MapPixels.HighlightLayer);
         }
 
+        Present(map, highlights, query);
+    }
+
+    /// <summary>
+    /// A minimum-visible-height map: one legend row per height band, in metres, then the cells with
+    /// no confident answer -- each counted over the cells the map draws.
+    /// </summary>
+    private void ShowHeights(ViewshedMap map, ViewshedQuery query, bool[] drawn)
+    {
+        int[] bands = new int[MapPixels.HeightBands.Count];
+        int[] states = new int[4];
+        for (int i = 0; i < map.Cells.Length; i++)
+        {
+            if (!drawn[i]) continue;
+            int band = MapPixels.HeightBand(map.HeightsM![i]);
+            if (band >= 0) bands[band]++;
+            else states[(int)map.Cells[i]]++;
+        }
+
+        Legend.Clear();
+        for (int band = 0; band < bands.Length; band++)
+        {
+            AddLegendRow(MapPixels.HeightBands[band].Name, MapPixels.HeightBands[band].Colour, bands[band], MapPixels.FirstHeightLayer + band);
+        }
+        AddLegendRow("No Confident Answer (Missing Data on the Way)", MapPixels.DegradedColour, states[(int)CellState.Degraded], (int)CellState.Degraded);
+        AddLegendRow("Not Reached", MapPixels.NotReachedColour, states[(int)CellState.NotCovered], (int)CellState.NotCovered);
+
+        Present(map, null, query);
+    }
+
+    private void Present(ViewshedMap map, bool[]? highlights, ViewshedQuery query)
+    {
         // The engine's own counts, over its whole square grid, for the copied report.
         _engineCounts = new int[4];
         foreach (var cell in map.Cells) _engineCounts[(int)cell]++;
@@ -454,9 +526,12 @@ public sealed partial class ViewshedViewModel : ObservableObject
         HiddenLayers = hidden;
     }
 
-    /// <summary>Which layers the map leaves out, indexed by <see cref="CellState"/> and then <see cref="MapPixels.HighlightLayer"/>.</summary>
+    /// <summary>
+    /// Which layers the map leaves out, indexed by <see cref="CellState"/>, then
+    /// <see cref="MapPixels.HighlightLayer"/>, then the height bands from <see cref="MapPixels.FirstHeightLayer"/>.
+    /// </summary>
     [ObservableProperty]
-    private bool[] _hiddenLayers = new bool[MapPixels.HighlightLayer + 1];
+    private bool[] _hiddenLayers = new bool[MapPixels.LayerCount];
 
     /// <summary>How opaque the viewshed layer is drawn, 0 to 100.</summary>
     [ObservableProperty]
@@ -488,7 +563,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
         : "Settings changed. The map shows the last run, faded; run the viewshed again to update it.";
 
     /// <summary>A plain fast run is quick enough to redo by itself when the observer is placed on the map.</summary>
-    public bool CanRunByItself => Algorithm == ViewshedAlgorithm.Fast && Comparison == ViewshedComparison.None && CanRun;
+    public bool CanRunByItself => Algorithm == ViewshedAlgorithm.Fast && (ShowsHeights || Comparison == ViewshedComparison.None) && CanRun;
 
     private void OnSettingChanged(bool observer)
     {
@@ -500,6 +575,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
     partial void OnInterpolationChanged(Interpolation value) => OnSettingChanged(observer: false);
 
     partial void OnAlgorithmChanged(ViewshedAlgorithm value) => OnSettingChanged(observer: false);
+
+    partial void OnShowIndexChanged(int value) => OnSettingChanged(observer: false);
 
     private Func<double, string?> InsideTile(bool latitude) => value =>
     {

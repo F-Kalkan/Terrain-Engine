@@ -134,6 +134,77 @@ public class KeyboardAndViewshedPixelTests
         Assert.True(bare.R + bare.G + bare.B > shaded.R + shaded.G + shaded.B + 30, $"Expected the ground brighter once its shading is hidden: {shaded} then {bare}.");
     }
 
+    [AvaloniaFact]
+    public void The_minimum_visible_height_paints_cells_by_band_and_a_hidden_band_uncovers_the_ground()
+    {
+        using var app = new Harness();
+        app.Click(app.Find<Button>("SamplePromptButton"));
+        app.SelectTab(MainTab.Viewshed);
+        // An observer on the north rim: the ground seen nearby, and to the west a wide stretch a
+        // target must stand tens to hundreds of metres tall to be seen in.
+        app.ViewModel.Viewshed.ObserverLatitude.Text = "36.86361";
+        app.ViewModel.Viewshed.ObserverLongitude.Text = "-111.30861";
+        app.ViewModel.Viewshed.RadiusKm.Text = "10";
+        app.Find<ComboBox>("ViewshedShowChoice").SelectedIndex = 1;
+        app.Settle();
+
+        // It answers every target height at once, so the target height field is set aside.
+        Assert.False(app.FieldBox(app.ViewModel.Viewshed.TargetHeight).IsEffectivelyEnabled);
+        app.Click(app.Find<Button>("RunViewshedButton"));
+        app.WaitUntil(() => app.ViewModel.Viewshed.HasResult && !app.ViewModel.Viewshed.IsRunning, TimeSpan.FromSeconds(60), "the minimum visible height");
+        var heights = app.ViewModel.Viewshed.Map!;
+        Assert.NotNull(heights.HeightsM);
+        Assert.Contains(app.ViewModel.Viewshed.Legend, row => row.Name == "Ground Seen (0 m)" && row.Count != "0");
+
+        // At this zoom a 30 m cell is a fraction of a pixel, so look where a wide patch of cells all
+        // need 30 m or more: the map paints it in the red end of the legend.
+        int[] tall = [4, 5, 6];
+        var map = app.Find<MapView>("Map");
+        var (lat, lon) = UniformPatch(heights, band => tall.Contains(band));
+        var point = map.TranslatePoint(map.Frame!.Value.ToScreen(lat, lon), app.Window)!.Value;
+        var painted = PixelAt(app, point);
+        Assert.True(painted.R > painted.G + 40 && painted.R > painted.B + 30, $"Expected the red end of the legend, got {painted}.");
+
+        // Hiding those bands in the legend uncovers the terrain under them at once.
+        foreach (var button in app.Find<ItemsControl>("ViewshedLegend").GetVisualDescendants().OfType<Button>()
+                     .Where(b => b.DataContext is LegendRow row && tall.Contains(row.Layer - Presentation.MapPixels.FirstHeightLayer)).ToList())
+        {
+            app.Click(button);
+        }
+        var bare = PixelAt(app, point);
+        Assert.False(bare.R > bare.G + 40 && bare.R > bare.B + 30, $"Expected the terrain once those bands are hidden, got {bare}.");
+    }
+
+    /// <summary>
+    /// The centre of a 51 x 51 block of cells -- 1.5 km at 30 m -- all in bands the test accepts, inside
+    /// the drawn circle, north-west of the observer: clear of its marker and label, the ring round the
+    /// circle, and the radius label and the elevation legend to the north-east -- so a pixel there shows
+    /// only them.
+    /// </summary>
+    private static (double LatitudeDeg, double LongitudeDeg) UniformPatch(ViewshedMap map, Func<int, bool> accepts)
+    {
+        const int half = 25;
+        double radius = map.ObserverRow, inside = 0.75 * radius, clear = 0.3 * radius;
+        for (int row = half; row < map.Rows - half; row += 5)
+        {
+            for (int col = half; col < map.Cols - half; col += 5)
+            {
+                int dr = row - map.ObserverRow, dc = col - map.ObserverCol;
+                if (dr * dr + dc * dc > inside * inside || dr < clear || dc > -clear) continue;
+                bool uniform = true;
+                for (int r = row - half; r <= row + half && uniform; r++)
+                {
+                    for (int c = col - half; c <= col + half && uniform; c++)
+                    {
+                        uniform = accepts(Presentation.MapPixels.HeightBand(map.HeightAt(r, c)!.Value));
+                    }
+                }
+                if (uniform) return (map.SouthWestCellLatitudeDeg + row * map.SpacingDeg, map.SouthWestCellLongitudeDeg + col * map.ColStepDeg);
+            }
+        }
+        throw new Xunit.Sdk.XunitException("No patch of cells all in the bands asked for.");
+    }
+
     private static bool IsPurple((byte R, byte G, byte B) pixel) => pixel.R > pixel.G + 40 && pixel.B > pixel.G + 40;
 
     private static CellState CellStateAt(ViewshedMap map, double latitudeDeg, double longitudeDeg)
@@ -156,9 +227,10 @@ public class KeyboardAndViewshedPixelTests
         using var buffer = frame.Lock();
         int x = (int)Math.Round(point.X), y = (int)Math.Round(point.Y);
         int offset = y * buffer.RowBytes + x * 4;
-        byte b = Marshal.ReadByte(buffer.Address, offset);
+        byte first = Marshal.ReadByte(buffer.Address, offset);
         byte g = Marshal.ReadByte(buffer.Address, offset + 1);
-        byte r = Marshal.ReadByte(buffer.Address, offset + 2);
-        return (r, g, b);
+        byte third = Marshal.ReadByte(buffer.Address, offset + 2);
+        // The frame says which way round its channels are.
+        return buffer.Format == Avalonia.Platform.PixelFormat.Rgba8888 ? (first, g, third) : (third, g, first);
     }
 }

@@ -189,7 +189,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ProfileShowSightLine = saved.ProfileShowSightLine;
         ProfileShowFresnel = saved.ProfileShowFresnel;
         Viewshed.OverlayOpacity = double.IsFinite(saved.ViewshedOpacity) ? Math.Clamp(saved.ViewshedOpacity, 0, 100) : 100;
-        if (saved.HiddenViewshedLayers is { Length: MapPixels.HighlightLayer + 1 } hidden) Viewshed.HiddenLayers = hidden;
+        // Saved before the height bands existed, the array stops after the highlights; the bands start shown.
+        if (saved.HiddenViewshedLayers is { Length: >= MapPixels.FirstHeightLayer } hidden)
+        {
+            var layers = new bool[MapPixels.LayerCount];
+            Array.Copy(hidden, layers, Math.Min(hidden.Length, layers.Length));
+            Viewshed.HiddenLayers = layers;
+        }
         ProfileHeight = double.IsFinite(saved.ProfileHeight) && saved.ProfileHeight >= 120 ? saved.ProfileHeight : DefaultProfileHeight;
         PanelWidth = double.IsFinite(saved.PanelWidth) && saved.PanelWidth >= 320 ? saved.PanelWidth : DefaultPanelWidth;
 

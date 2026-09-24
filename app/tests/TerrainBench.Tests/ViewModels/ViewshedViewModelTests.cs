@@ -201,6 +201,80 @@ public class ViewshedViewModelTests
     }
 
     [Fact]
+    public async Task Showing_the_minimum_visible_height_colours_cells_by_height_with_a_legend_in_metres()
+    {
+        // The fake map: the ground seen, 12.5 m, and two cells with no confident answer.
+        var vm = new ViewshedViewModel(() => _tile) { ShowsHeights = true };
+
+        Assert.False(vm.UsesTargetHeight);
+        Assert.False(vm.IsComparisonChoiceEnabled);
+        await vm.RunAsync();
+
+        Assert.Single(_tile.HeightQueries);
+        Assert.Empty(_tile.ViewshedQueries);
+        Assert.NotNull(vm.Map?.HeightsM);
+        Assert.Null(vm.Highlights);
+        Assert.Equal(
+            ["Ground Seen (0 m)", "Up to 2 m", "2 to 10 m", "10 to 30 m", "30 to 100 m", "100 to 300 m", "Over 300 m", "Not Seen at Any Height",
+             "No Confident Answer (Missing Data on the Way)", "Not Reached"],
+            vm.Legend.Select(row => row.Name));
+        Assert.Equal(["1", "0", "0", "1", "0", "0", "0", "0", "2", "0"], vm.Legend.Select(row => row.Count));
+        Assert.StartsWith("Fast Minimum Visible Height of 2 × 2 cells", vm.Summary);
+    }
+
+    [Fact]
+    public async Task A_height_band_can_be_hidden_like_a_state()
+    {
+        var vm = new ViewshedViewModel(() => _tile) { ShowsHeights = true };
+        await vm.RunAsync();
+
+        var band = vm.Legend.Single(row => row.Name == "10 to 30 m");
+        vm.ToggleLayerCommand.Execute(band);
+
+        Assert.False(band.IsShown);
+        Assert.True(vm.HiddenLayers[Presentation.MapPixels.FirstHeightLayer + 3]);
+        Assert.Equal("1", band.Count);
+    }
+
+    [Fact]
+    public async Task The_height_map_sets_the_comparison_aside_and_runs_the_chosen_algorithm()
+    {
+        // Naive runs the exact reference; there is nothing to compare, so no highlights.
+        var vm = new ViewshedViewModel(() => _tile) { Comparison = ViewshedComparison.FastAndNaive, ShowsHeights = true, Algorithm = ViewshedAlgorithm.Naive };
+        Assert.True(vm.IsAlgorithmChoiceEnabled);
+
+        await vm.RunAsync();
+
+        Assert.Equal(ViewshedAlgorithm.Naive, Assert.Single(_tile.HeightQueries).Algorithm);
+        Assert.Empty(_tile.ViewshedQueries);
+        Assert.Null(vm.Highlights);
+        Assert.StartsWith("Naive Minimum Visible Height", vm.Summary);
+    }
+
+    [Fact]
+    public async Task Switching_what_is_shown_fades_the_map_and_moving_the_observer_redoes_a_fast_height_map()
+    {
+        var vm = new ViewshedViewModel(() => _tile);
+        await vm.RunAsync();
+
+        vm.ShowsHeights = true;
+        Assert.True(vm.IsStale);
+
+        await vm.RunAsync();
+        vm.PlaceObserver(36.6, -111.4);
+        await WaitUntil(() => _tile.HeightQueries.Count == 2 && !vm.IsRunning);
+
+        Assert.Equal(36.6, _tile.HeightQueries[^1].ObserverLatitudeDeg);
+        Assert.NotNull(vm.Map?.HeightsM);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        for (int i = 0; i < 200 && !condition(); i++) await Task.Delay(10);
+        Assert.True(condition());
+    }
+
+    [Fact]
     public void A_pole_latitude_is_caught_at_the_field()
     {
         var polar = new FakeTile("N89W112.hgt", 89, -112);

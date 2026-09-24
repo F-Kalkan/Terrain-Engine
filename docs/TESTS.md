@@ -1,7 +1,8 @@
 # The engine's test suite
 
-63 test functions, hand-checkable apart from the real-data comparisons, which hold the
-fast viewshed against naive at several observers on each tile:
+68 test functions, hand-checkable apart from the real-data comparisons, which hold the
+fast viewshed against naive, and the fast minimum visible height against its reference, at
+several observers:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
   on disk): flat plateau, wall, curvature, void, determinism,
@@ -102,6 +103,32 @@ terrain, decides every answer.
     degrees from either pole when its rows would reach 0.27 degrees, and laid out 0.5
     degrees from it when they wouldn't; a latitude of 91 and a spacing of 0 are refused,
     and a grid with no rows is still simply empty.
+- **Minimum visible height** (both the reference and the fast version, unless one is named):
+  - *the wall, by hand*: in the wall scene the lowest target seen 120 m east, just behind the
+    wall, is 66.000212 m, and 180 m east 98.000954 m, worked out in the test from the sight
+    line over the wall and the curvature drop; in front of the wall and on it, 0; each cell
+    carries its own ground, the wall's top on the wall;
+  - *a smooth sphere*: over level ground only curvature hides anything, and past the horizon
+    `d_h = sqrt(2kR h)` the answer is `(D - d_h)^2 / 2kR` (derived in
+    [ENGINE.md](ENGINE.md)); along single paths out to 50 km from eyes of 10 and 100 m, and
+    over every cell of a 101x101 grid of 300 m cells, within tolerances derived in the test
+    from how far the nearest sample can be from the horizon -- and exactly 0 inside it;
+  - *exactly the viewshed*: asked for a target of height H, the reference gives, cell for
+    cell, the naive viewshed at H, and the fast version the fast viewshed at H -- at every
+    height the grid holds and at the double just below each, on the wall scene with a void
+    and cells off the data, and on the 1-arcsecond tile over 1 km;
+  - *no answer, and refusals*: an observer on a void leaves every cell Degraded as in the
+    viewsheds, with no height or ground; an observer whose eye is below its ground needs an
+    infinite height everywhere, and a target 1 km up is still hidden, as naive says; the
+    absolute answer is the cell's ground plus its height; spacing, heights, k, coordinates
+    and a grid reaching a pole are refused with the viewsheds' reasons, a grid with no rows
+    is empty; a target height below the ground or not a number is refused when thresholding;
+    progress runs from 0 to 1 without changing a cell, and a stop is honoured;
+  - *fast against the reference* (skipped when the 1-arcsecond tile isn't present): at the
+    three observers of the fast/naive comparison, 2 km and 5 km, the viewsheds both give for
+    targets of 0, 2, 10, 30 and 100 m are within the fast viewshed's tolerances, with at
+    least 80% of differences on the reference's edge, and one answer everywhere fails; each
+    run prints its counts and how far the heights are apart.
 - **1-arcsecond data** (skipped when `DATA/SRTM1/N36W112.hgt` isn't present): 200
   consecutive posts read through `GetTerrainProfile` at the tile's own spacing must
   each return exactly the value stored in the file at that row and column; and the 1-
@@ -141,7 +168,14 @@ neighbour with no confident answer for an edge. So were the refusals: each check
 spacing, sample count, latitude, height, undulation, k, frequency, the batch's per-query
 path and the grid at a pole taken out in turn, and the datum conversion let take NaN,
 turns a test red -- and a viewshed with its spacing check taken out crashes the suite
-outright, laying out a grid at a spacing of zero. A suite that stays green with the
-defect restored verifies nothing.
+outright, laying out a grid at a spacing of zero. And so was the minimum visible height,
+thirteen defects one at a time: either version answering with the formula alone instead of
+settling it, the search returning the last height not seen instead of the first seen, the
+fast version leaving curvature out of the target's slope, the reference calling every
+answered cell hidden, either version taking the observer's ground for the cell's,
+thresholding with "above" instead of "at or above", the reference's refusal, its observer
+cell's height, its progress reports or its no-answer state taken out, and the refusal of a
+target below the ground taken out. A suite that stays green with the defect restored
+verifies nothing.
 
 All of the above pass identically in Debug and Release.

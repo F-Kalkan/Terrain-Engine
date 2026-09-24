@@ -68,6 +68,22 @@ internal sealed class FakeTile(string path, double south, double west) : ITile
         return OnViewshed(query, progress, cancellation);
     }
 
+    public List<ViewshedQuery> HeightQueries { get; } = [];
+
+    public Func<ViewshedQuery, IProgress<double>?, CancellationToken, EngineResult<ViewshedMap>> OnMinimumVisibleHeight { get; set; } =
+        (query, progress, _) =>
+        {
+            progress?.Report(0);
+            progress?.Report(1);
+            return EngineResult<ViewshedMap>.Ok(Maps.WithHeights(0, 12.5, double.NaN, double.NaN));
+        };
+
+    public EngineResult<ViewshedMap> MinimumVisibleHeight(ViewshedQuery query, IProgress<double>? progress, CancellationToken cancellation)
+    {
+        lock (HeightQueries) HeightQueries.Add(query);
+        return OnMinimumVisibleHeight(query, progress, cancellation);
+    }
+
     public void Dispose() => Disposed = true;
 }
 
@@ -93,6 +109,10 @@ internal static class Analyses
 internal static class Maps
 {
     public static ViewshedMap Of(params CellState[] cells) => new(2, 2, 1, 1, 0.00027, 0.00034, 36.5, -111.5, cells);
+
+    /// <summary>A 2x2 minimum-visible-height map: each cell's state follows from its height, NaN meaning no confident answer.</summary>
+    public static ViewshedMap WithHeights(params double[] heightsM) => new(2, 2, 1, 1, 0.00027, 0.00034, 36.5, -111.5,
+        heightsM.Select(h => double.IsNaN(h) ? CellState.Degraded : h == 0 ? CellState.Visible : CellState.NotVisible).ToArray(), heightsM);
 }
 
 internal sealed class FakeDialogs : IDialogService
