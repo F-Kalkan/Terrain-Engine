@@ -9,8 +9,10 @@ TerrainBench. The [README](../README.md) gives the overview.
 in-memory implementations of it (`FakeElevationSampler`, a tiny index-addressed grid for sampler tests,
 `MultiTileElevationSampler`, and the raster-block pair `RasterBlockViewElevationSampler` /
 `RasterBlockElevationSampler` — see
-[INTEGRATION.md](INTEGRATION.md)), and the three algorithms (`GetTerrainProfile`,
-`ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`). It has no
+[INTEGRATION.md](INTEGRATION.md)), the three algorithms (`GetTerrainProfile`,
+`ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`), and
+`CompareViewsheds` (`ViewshedAgreement.h`), which measures an approximate viewshed
+against its exact reference -- see "Fast vs. naive viewshed" below. It has no
 include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
 
 `TerrainReader` contains `RealElevationSampler`, a reader for SRTM `.hgt` tiles —
@@ -155,9 +157,17 @@ AMD Ryzen 7 3800X (8 cores / 16 threads), 16 GB RAM, Windows 11 Pro x64, Release
 | Operation                                        | Tile         | Wall time     | Peak memory |
 |--------------------------------------------------|--------------|---------------|-------------|
 | 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.25–0.43 ms | ~10.7 MB    |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.01–1.04 s  | ~23.6 MB    |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.70–1.81 s  | ~61.7 MB    |
 | 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.42 ms      | ~55 MB      |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.07–1.08 s  | ~54.7 MB    |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.69–1.70 s  | ~83.7 MB    |
+
+The two viewshed rows moved with the fast viewshed's current algorithm, which answers
+every cell from its own centre between two rays and keeps every ray's horizon to do it
+(see "Fast vs. naive viewshed" below). Measured the same day, on the same machine, the
+previous algorithm took ~1.22 s and ~24 MB (3-arcsecond) and ~1.19 s and ~55 MB
+(1-arcsecond); the extra memory is those horizons, one float per ray sample. The earlier
+~1.01–1.08 s recorded here for that algorithm came from a quieter run of the machine; the
+same-day pair is the one to compare.
 
 The 1-arcsecond tile's higher peak memory is the tile, not the computation: 3601×3601
 posts is ~25.9 MB of 16-bit elevations, nine times the 3-arcsecond tile, and the reader
@@ -196,66 +206,94 @@ they read.
 
 ## Fast vs. naive viewshed: accuracy and performance
 
-On a 2 km-radius viewshed over the real SRTM tile (133×133 = 17,689 grid cells total,
-all 17,689 of them valid and confident in both algorithms, **0 excluded**), the fast
-(boundary-ray-sweep) algorithm disagrees with the naive (one-LOS-per-cell) algorithm
-on **682 cells (3.86%)** over the 3-arcsecond tile and **450 cells (2.54%)** over the
-1-arcsecond tile, each asserted to stay under a 5% tolerance
-(`FastViewshedMatchesNaive on real SRTM data within stated tolerance`, once per tile,
-in the CLI's test/benchmark output, which also prints the excluded-cell count directly
-alongside the ratio).
+**What each one does.** Naive answers every cell along its own line: a profile from the
+observer to the cell's centre, and `ComputeLineOfSight` on it. Fast casts one ray to each
+cell on the grid's boundary and keeps, along each, the horizon: the largest
+curvature-adjusted slope `s(d) = (h - eye) / d - d / 2kR` of the terrain so far. That is
+`ComputeLineOfSight`'s own test with the target's distance cancelled out
+(`CurvatureAdjustedSlope`, `Viewshed.h`), so one running maximum along a ray serves every
+cell beside it. Every cell is then answered from its own centre -- its ground, its
+distance, a target standing on it -- against the horizon of the two rays either side of
+it, blended by the cell's direction between them. The last half cell of a ray before the
+target is left out of its horizon: that terrain lies in the target's own cell, beside the
+line to its centre. The rays pass beside most cells rather than through their centres, so
+fast is an approximation, and the question is how far from naive it is, and where.
 
-The disagreement is concentrated on ridgelines. The fast algorithm only casts rays to
-the grid's boundary cells and derives every interior cell's visibility from whichever
-ray happens to pass nearest it, rather than that cell's own exact-direction line — an
-interior cell just off a boundary ray's path is judged by a slightly different sightline
-than the one a naive per-target LOS would use for it. That difference in the assumed
-sightline only changes the answer where the terrain's slope is changing fast underfoot,
-which is exactly a ridgeline; over flat or smoothly-sloped ground the two sightlines
-agree. This ratio has moved several times as the underlying geometry was refined —
-worse after two early attempts to shrink it (casting more, angularly-denser rays;
-using `ceil` instead of `floor` for the profile's sample count both made it worse,
-4.85% then 4.29% — see [NOTES.md](../NOTES.md) for why); up to 4.65% when the viewshed grid's
-column spacing was corrected for latitude; down to 3.92% when the distance
-calculation switched from a flat-plane approximation to a true great-circle one,
-which brought both algorithms' independently-derived sightlines into closer
-agreement on the ridgelines where the old approximation's error was concentrated;
-down again to 3.60% when the fast viewshed stopped skipping samples that land in the
-same cell as the previous one, so their terrain now reaches its horizon; and up to
-the current 3.86% when the profile's sample count started rounding up, so that no ray
-skips a cell. That last move is not a regression: rounding down made the two
-algorithms agree slightly more often while silently dropping a sample on most
-viewshed axis rays. It is comfortably under the 5% tolerance, which is worth knowing
-rather than discovering under a slightly different tile or radius. The history above
-is all on the 3-arcsecond tile. The 1-arcsecond figure comes from the same code over
-different terrain data: that tile is a separately reprocessed product, not the
-3-arcsecond one at a finer grid (see [TESTS.md](TESTS.md)), so the ridgelines the disagreement
-concentrates on are not identical between the two.
+**The measure** (`CompareViewsheds`, `ViewshedAgreement.h`). Differences are counted over
+the cells both answer with confidence, and divided by the cells *either* finds visible --
+not by every cell. Most of a grid is usually hidden, and a rate over every cell mostly
+measures that: at (36.5, -111.5) on the 1-arcsecond tile 95% of the 2 km grid is hidden,
+and a "viewshed" answering NotVisible everywhere differs on 4.80% of all cells, but on
+100% of the cells either sees. The counts behind each rate are kept, one direction at a
+time. Each differing cell is also placed: **on naive's visibility edge** when some
+confident 8-neighbour gets the other answer from naive -- fast drew the boundary one cell
+off -- or **off the edge**, where no neighbour agrees with fast.
 
-**Performance side of the same comparison** (Release build, the same real tiles):
+A one-cell shift of the boundary is about what naive's own answer is worth there. Moving
+the observer 1 m north changes naive on 1.3-6.4% of the cells either run sees, and 5 m on
+6.9-26% (the same observers and radii as below). So the tolerance has two parts: the whole
+disagreement, and the part off the edge.
 
-| Radius / grid / tile                        | Naive              | Fast              | Speed-up    |
-|---------------------------------------------|--------------------|-------------------|-------------|
-| 2 km / 133×133 / 3-arcsecond                | ~107.6–109.5 ms    | ~4.93–5.00 ms     | ~21.8–21.9x |
-| 2 km / 133×133 / 1-arcsecond                | ~109.4 ms (one run) | ~5.06 ms (one run) | ~21.6x     |
-| 30 km / 2000×2000 / 3-arcsecond             | ~317.6 s (one run) | ~1.01–1.04 s      | ~310x       |
+**Measured** -- 30 m cells, 2 m above ground at both ends, `k` 4/3, nearest; every figure
+comes from `TestFastViewshedAgreesWithNaiveAtThreeObservers`, which prints them:
 
-The 30 km naive viewshed takes over five minutes and was measured on the 3-arcsecond
-tile only.
+| Observer, radius, tile | Naive sees | Fast only | Naive only | Differ, of cells either sees | Off naive's edge | On the edge |
+|---|---|---|---|---|---|---|
+| (36.5, -111.5), 2 km, 1" | 850 | 107 | 137 | 25.5% | 1.25% | 95.1% |
+| (36.5, -111.5), 5 km, 1" | 6,361 | 535 | 788 | 19.2% | 1.71% | 91.1% |
+| (36.86361, -111.30861), 2 km, 1" | 9,254 | 90 | 134 | 2.4% | 0.34% | 85.7% |
+| (36.86361, -111.30861), 5 km, 1" | 56,599 | 2,041 | 2,275 | 7.4% | 0.86% | 88.4% |
+| (36.55861, -111.81361), 2 km, 1" | 7,054 | 372 | 465 | 11.3% | 1.19% | 89.5% |
+| (36.55861, -111.81361), 5 km, 1" | 31,573 | 2,212 | 2,343 | 13.5% | 0.90% | 93.3% |
+| (36.5, -111.5), 2 km, 3" | 1,996 | 218 | 185 | 18.2% | 2.62% | 85.6% |
 
-These are CLI timings too, with the same caveat as the table above: sharing the
-executable with the test suite inflates both columns together (naive and fast each rose
-by roughly the same ~55% when it grew). The speed-up ratio is the figure to read here —
-both algorithms run in the same binary, so whatever that costs, it costs both.
+The three 1-arcsecond observers see little (5-6% of the grid), about half, and in between.
+Each run asserts: the whole disagreement under **30%**; the part off the edge under **2%**
+on the 1-arcsecond tile and **3%** on the 3-arcsecond one, whose 90 m posts, read at 30 m,
+stand as terraces three cells wide; at least **80%** of differences on the edge; and a
+viewshed with one answer everywhere failing the same tolerance. So the disagreement is not
+concentrated on ridgelines, as this section used to argue without measuring, but on the
+edge of the visible region, balanced between the two directions: fast is neither
+systematically optimistic nor pessimistic.
 
-Naive's cost grows faster than fast's as the radius grows: it runs one full profile +
-line-of-sight per cell, so its total work scales with roughly (cell count) ×
-(average profile length), both of which grow with radius, while fast only casts rays
-to the boundary, so its work scales closer to the boundary's perimeter × profile
-length. That is why the speed-up is larger at 30 km than at 2 km — and it is the
-number this project was missing: the performance table above used to report the fast
-viewshed's time in isolation, with no naive baseline next to it, so the actual
-speed-up this design buys was never stated.
+**The change behind these numbers.** Until this version fast judged each cell by the first
+sample of whichever single ray passed nearest, at that sample's own position and height --
+up to half a cell from the centre naive tests. On the same runs, measured the same way, it
+differed on 41.7%, 32.7%, 3.3%, 10.9%, 17.7% and 23.4% of the cells either sees on the
+1-arcsecond tile, and 29.1% on the 3-arcsecond one; off the edge, 2.60%, 3.07%, 0.45%,
+1.33%, 1.55%, 1.70% and 3.54%. Asking about the centre, leaving the target's own half cell
+out of the horizon and blending two rays took the whole disagreement down by about a third
+at every run, and the part off the edge by a quarter to a half. [NOTES.md](../NOTES.md) has
+the experiments and why these three changes.
+
+Under the old measure, over every confident cell, the figure recorded here was 3.86% on the
+3-arcsecond tile and 2.54% on the 1-arcsecond one, at (36.5, -111.5), 2 km; its earlier
+history on the 3-arcsecond tile (4.85% and 4.29% after two early attempts to shrink it,
+4.65% with the grid's latitude correction, 3.92% with great-circle distances, 3.60% once
+samples sharing a cell reached the horizon, 3.86% once the sample count rounded up) is in
+[NOTES.md](../NOTES.md) and isn't comparable with the rates above.
+
+**Performance side of the same comparison** (the machine above, Release build, the same
+real tiles; CLI timings, so the caveat above applies to both columns alike):
+
+| Radius / grid / tile | Naive | Fast | Speed-up |
+|---|---|---|---|
+| 2 km / 133×133 / 3-arcsecond | ~121–138 ms | ~8.9–9.5 ms | ~13.6–15.5x |
+| 2 km / 133×133 / 1-arcsecond | ~129–131 ms | ~8.3–9.6 ms | ~13.7–15.8x |
+| 30 km / 2000×2000 / 3-arcsecond | ~240.3 s (one run) | ~1.32 s (same program) | ~183x |
+
+The 30 km naive viewshed takes about four minutes and was measured on the 3-arcsecond
+tile only, in a benchmark-only program with the fast one beside it -- where fast takes
+1.32 s rather than the CLI's ~1.75 s, for the reason given under Performance above. The
+previous fast viewshed was about 1.45 times quicker than this one (1.22 s against 1.75 s
+from the CLI at 30 km, measured the same day), and the speed-ups at 2 km were ~22x before
+this version.
+
+Naive's cost grows faster than fast's as the radius grows: it runs one full profile and
+line of sight per cell, so its work scales with roughly (cell count) × (average profile
+length), while fast casts rays only to the boundary and then answers each cell with a
+lookup, so its work scales closer to the boundary's perimeter × profile length plus the
+cell count. That is why the speed-up is larger at 30 km than at 2 km.
 
 ## Void handling and degraded results
 

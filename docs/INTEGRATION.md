@@ -78,20 +78,17 @@ constraints directly.
   O(gridRows × gridCols × samples per profile) and single-thread-only, and
   `GetTerrainProfile`'s scratch-buffer overload states its O(sample count) and the
   condition under which concurrent callers are safe.
-- **A stated threading position for the viewshed** — `ComputeViewshedFast`'s
-  boundary rays are applied to the grid in a fixed, sequential order, and where
-  two rays visit the same cell, the later one in that order wins. That "last ray
-  wins" reduction is deterministic only because ray order never varies; naively
-  parallelising the ray loop would let completion order decide the result
-  instead. The decision, stated directly above `ComputeViewshedFast` in
-  `Viewshed.h`: **deliberately serial, not order-independent** — there is no
-  per-frame pressure to change it, since a viewshed call is a planning-time cost
-  rather than a per-frame one, and the comment states what would have
-  to change (an order-independent per-cell reduction, e.g. a locked or
-  atomic-compare-and-swap running max of slope) before that loop could safely be
-  threaded. `ComputeViewshedNaive` has no such hazard today — each cell is
-  written exactly once by its own independent call — and the comment above it
-  says so.
+- **A stated threading position for the viewshed** — both viewsheds run on one
+  thread, and both are order-independent, so either could be threaded without
+  changing a cell. `ComputeViewshedNaive` writes each cell exactly once, from its own
+  independent line of sight. `ComputeViewshedFast` casts every boundary ray on its
+  own, keeping its horizon, and then answers every cell on its own from the finished
+  rays. (It once applied rays to the grid in a fixed order with the last ray to visit
+  a cell winning, a reduction that was deterministic only because the order never
+  varied; answering each cell from its own centre removed it -- see `NOTES.md`,
+  "A fast viewshed that asks naive's question".) There is no per-frame pressure to
+  thread either: a viewshed is a planning-time cost. The comment above each function
+  in `Viewshed.h` states its position.
 - **A frame-safe line-of-sight path vs. a batch viewshed path, labelled in the
   headers** — the split already existed structurally (the scratch-buffer overload
   above is the frame-safe half; the viewsheds and `ComputeBatchLineOfSight` were

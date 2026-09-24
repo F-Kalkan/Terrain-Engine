@@ -24,6 +24,7 @@
     <ClInclude Include="TerrainProfile.h" />
     <ClInclude Include="VerticalDatum.h" />
     <ClInclude Include="Viewshed.h" />
+    <ClInclude Include="ViewshedAgreement.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="TerrainCore.cpp" />

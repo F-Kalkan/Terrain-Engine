@@ -27,6 +27,9 @@
     <ClInclude Include="Viewshed.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ViewshedAgreement.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="VerticalDatum.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -10,6 +10,7 @@
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
 #include "Viewshed.h"
+#include "ViewshedAgreement.h"
 #include "RealElevationSampler.h"
 #include "CliArguments.h"
 #include <string>
@@ -1789,8 +1790,9 @@ void TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive()
     // at 0 m and 30 m nothing east of the wall can be seen, so there is no boundary in
     // the open field and the two must agree on every cell. At 120 m a target clears the
     // wall out to about 225 m east, so the visible region ends in the open field -- and
-    // there, as docs/ENGINE.md's fast/naive section explains for ridgelines, the fast
-    // algorithm's rays sample a cell off its centre and may answer the other way. Every
+    // there, as docs/ENGINE.md's fast/naive section measures on real terrain, the fast
+    // algorithm's horizon comes from rays beside the cell's own line and may answer the
+    // other way. Every
     // disagreement must lie on that boundary: a cell with a neighbour naive answers
     // differently. One anywhere else fails the test.
     const int size = 21;
@@ -1874,4 +1876,220 @@ void TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown()
         && naive.visible[center][center] == CellVisibility::Visible
         && fast.visible == naive.visible,
         "TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown");
+}
+
+// A viewshed drawn as text, one string per row: '#' Visible, '.' NotVisible, '?' Degraded.
+inline ViewshedResult ViewshedFromText(const std::vector<std::string>& rows)
+{
+    ViewshedResult result;
+    for (const auto& text : rows)
+    {
+        std::vector<CellVisibility> row;
+        for (char c : text)
+        {
+            row.push_back(c == '#' ? CellVisibility::Visible : c == '.' ? CellVisibility::NotVisible : CellVisibility::Degraded);
+        }
+        result.visible.push_back(row);
+    }
+    return result;
+}
+
+// A viewshed that gives every cell `reference` answers with confidence the one answer `state`.
+inline ViewshedResult OneStateLike(const ViewshedResult& reference, CellVisibility state)
+{
+    ViewshedResult result = reference;
+    for (auto& row : result.visible)
+    {
+        for (auto& cell : row)
+        {
+            if (IsConfident(cell)) cell = state;
+        }
+    }
+    return result;
+}
+
+// The tolerances the fast viewshed is held to against the naive one, and why they
+// are these numbers: NOTES.md, "A measure that doesn't shrink". Off the edge, the
+// 1-arcsecond tile is held to 2% and the 3-arcsecond tile to 3%: read at 30 m, the
+// coarser tile's 90 m posts stand as terraces three cells wide, and their cliffs give
+// the visible region a more ragged edge.
+constexpr double FastViewshedDisagreementTolerance = 0.30;
+constexpr double FastViewshedOffEdgeTolerance = 0.02;
+constexpr double FastViewshedOffEdgeToleranceCoarseTile = 0.03;
+constexpr double FastViewshedMinimumOnEdge = 0.80;
+
+inline bool WithinFastViewshedTolerance(const ViewshedAgreement& agreement, double offEdgeTolerance = FastViewshedOffEdgeTolerance)
+{
+    return agreement.sameGrid
+        && agreement.DisagreementRate() < FastViewshedDisagreementTolerance
+        && agreement.OffEdgeRate() < offEdgeTolerance;
+}
+
+//TEST 54
+void TestViewshedAgreementCountsEachDirectionOverTheVisibleCells()
+{
+    // Worked by hand. The reference sees a 3x3 block. The approximation draws the
+    // block one column east, leaves a hole in its middle, and adds a stray cell in
+    // the far corner. Six of the eight differences sit on the reference's edge --
+    // the block's west column, and the column just east of it. The hole and the
+    // stray have no neighbour that agrees with the approximation: off the edge.
+    //   visible in both: 5, reference only: 4, approximation only: 4, in either: 13.
+    // The two '?' cells have no confident answer and are left out: 49 - 2 = 47.
+    ViewshedResult reference = ViewshedFromText({
+        ".......",
+        ".......",
+        "..###..",
+        "..###..",
+        "..###..",
+        ".......",
+        "?......",
+    });
+    ViewshedResult approximation = ViewshedFromText({
+        "#......",
+        ".......",
+        "...###.",
+        "....##.",
+        "...###.",
+        ".......",
+        "......?",
+    });
+
+    ViewshedAgreement a = CompareViewsheds(approximation, reference);
+
+    // A neighbour with no confident answer says nothing about where the edge is: the
+    // hole in the middle of this visible square stays off the edge, '?' beside it or not.
+    ViewshedAgreement besideUnknown = CompareViewsheds(
+        ViewshedFromText({ "###", "#.#", "###" }),
+        ViewshedFromText({ "###", "###", "##?" }));
+
+    Expect(a.sameGrid && a.comparedCells == 47
+        && a.referenceVisible == 9 && a.approximateVisible == 9
+        && a.approximateOnlyVisible == 4 && a.referenceOnlyVisible == 4
+        && a.differingOnEdge == 6 && a.DifferingOffEdge() == 2
+        && a.VisibleInEither() == 13
+        && a.DisagreementRate() == 8.0 / 13 && a.OffEdgeRate() == 2.0 / 13 && a.OnEdgeFraction() == 6.0 / 8
+        && besideUnknown.comparedCells == 8 && besideUnknown.Differing() == 1 && besideUnknown.DifferingOffEdge() == 1,
+        "TestViewshedAgreementCountsEachDirectionOverTheVisibleCells");
+}
+
+//TEST 55
+void TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere()
+{
+    // Against the same 3x3 block in a 7x7 grid, where 40 of 49 cells are hidden:
+    // counted over every cell, "hidden everywhere" would differ on 9 / 49 = 18%.
+    // Over the cells either one sees it differs on all of them, and "visible
+    // everywhere" differs on 40 / 49, 24 of those more than a cell from any visible
+    // cell. Both fall outside the tolerances; the block itself, and the block moved
+    // one cell, do not.
+    ViewshedResult reference = ViewshedFromText({
+        ".......",
+        ".......",
+        "..###..",
+        "..###..",
+        "..###..",
+        ".......",
+        ".......",
+    });
+    ViewshedAgreement allHidden = CompareViewsheds(OneStateLike(reference, CellVisibility::NotVisible), reference);
+    ViewshedAgreement allVisible = CompareViewsheds(OneStateLike(reference, CellVisibility::Visible), reference);
+    ViewshedAgreement itself = CompareViewsheds(reference, reference);
+    ViewshedAgreement movedOneCell = CompareViewsheds(ViewshedFromText({
+        ".......",
+        ".......",
+        ".......",
+        "..###..",
+        "..###..",
+        "..###..",
+        ".......",
+    }), reference);
+
+    Expect(allHidden.DisagreementRate() == 1.0 && allHidden.referenceOnlyVisible == 9
+        && allVisible.DisagreementRate() == 40.0 / 49 && allVisible.OffEdgeRate() == 24.0 / 49
+        && !WithinFastViewshedTolerance(allHidden) && !WithinFastViewshedTolerance(allVisible)
+        && itself.Differing() == 0 && itself.OnEdgeFraction() == 1.0 && WithinFastViewshedTolerance(itself)
+        && movedOneCell.DifferingOffEdge() == 0 && movedOneCell.OffEdgeRate() == 0.0,
+        "TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere");
+}
+
+//TEST 56
+void TestViewshedAgreementRefusesGridsOfDifferentSizes()
+{
+    // Nothing to compare cell for cell: the answer says so rather than counting a
+    // partial overlap. And two viewsheds that see nothing agree completely.
+    ViewshedResult threeByThree = ViewshedFromText({ "...", ".#.", "..." });
+    ViewshedResult threeByFour = ViewshedFromText({ "....", ".#..", "...." });
+    ViewshedResult ragged = ViewshedFromText({ "...", ".#", "..." });
+    ViewshedResult dark = ViewshedFromText({ "...", "...", "..." });
+
+    ViewshedAgreement sizes = CompareViewsheds(threeByThree, threeByFour);
+    ViewshedAgreement shape = CompareViewsheds(ragged, threeByThree);
+    ViewshedAgreement nothingVisible = CompareViewsheds(dark, dark);
+
+    Expect(!sizes.sameGrid && sizes.comparedCells == 0
+        && !shape.sameGrid && shape.comparedCells == 0
+        && nothingVisible.sameGrid && nothingVisible.comparedCells == 9
+        && nothingVisible.DisagreementRate() == 0.0 && nothingVisible.OffEdgeRate() == 0.0,
+        "TestViewshedAgreementRefusesGridsOfDifferentSizes");
+}
+
+// Fast against naive on a real tile: at each observer and radius, the fast viewshed
+// is within tolerance, its differences are measured to lie on naive's visibility
+// edge, and a viewshed with one answer everywhere fails the same tolerance. Prints
+// the counts behind every rate. Skips when the tile isn't present.
+struct RealTerrainViewshedRun
+{
+    GeoPoint observer;
+    double radiusKm;
+};
+
+inline void CheckFastViewshedAgainstNaiveOnRealTerrain(const std::string& path, const std::string& tileLabel, double offEdgeTolerance, const std::vector<RealTerrainViewshedRun>& runs)
+{
+    const std::string testName = "FastViewshedAgreesWithNaive (" + tileLabel + ")";
+    RealElevationSampler sampler(path, 36.0, -112.0);
+    if (!sampler.IsLoaded())
+    {
+        Skip(testName, path + " not found from this working directory");
+        return;
+    }
+
+    // 30 m cells, 2 m above ground, k = 4/3, nearest: the app's defaults.
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    for (const auto& run : runs)
+    {
+        int grid = (int)(2 * MetersToLatitudeDeg(run.radiusKm * 1000.0) / spacingDeg);
+        ViewshedResult naive = ComputeViewshedNaive(run.observer, Agl(2.0), grid, grid, spacingDeg, sampler);
+        ViewshedResult fast = ComputeViewshedFast(run.observer, Agl(2.0), grid, grid, spacingDeg, sampler);
+        ViewshedAgreement a = CompareViewsheds(fast, naive);
+
+        std::ostringstream where;
+        where << "(" << run.observer.latitudeDeg << ", " << run.observer.longitudeDeg << "), " << run.radiusKm << " km, " << tileLabel;
+        std::cout << "  " << where.str() << ": " << grid << "x" << grid << ", " << a.comparedCells << " cells compared; naive sees "
+            << a.referenceVisible << ", fast " << a.approximateVisible << "; fast only " << a.approximateOnlyVisible
+            << ", naive only " << a.referenceOnlyVisible << "; differ on " << (100.0 * a.DisagreementRate()) << "% of "
+            << a.VisibleInEither() << " cells either sees, " << (100.0 * a.OffEdgeRate()) << "% off naive's edge ("
+            << a.DifferingOffEdge() << " cells); " << (100.0 * a.OnEdgeFraction()) << "% of differences on the edge" << std::endl;
+
+        Expect(WithinFastViewshedTolerance(a, offEdgeTolerance), "FastViewshedWithinTolerance at " + where.str());
+        Expect(a.OnEdgeFraction() >= FastViewshedMinimumOnEdge, "FastViewshedDifferencesLieOnNaivesEdge at " + where.str());
+        Expect(!WithinFastViewshedTolerance(CompareViewsheds(OneStateLike(naive, CellVisibility::NotVisible), naive), offEdgeTolerance)
+            && !WithinFastViewshedTolerance(CompareViewsheds(OneStateLike(naive, CellVisibility::Visible), naive), offEdgeTolerance),
+            "OneAnswerEverywhereFailsTheTolerance at " + where.str());
+    }
+}
+
+//TEST 57
+void TestFastViewshedAgreesWithNaiveAtThreeObservers()
+{
+    // The three observers on the 1-arcsecond tile: little visible, half visible, and
+    // in between -- each at 2 km and 5 km.
+    CheckFastViewshedAgainstNaiveOnRealTerrain("DATA/SRTM1/N36W112.hgt", "1-arcsecond tile, ~30 m", FastViewshedOffEdgeTolerance, {
+        { { 36.5, -111.5 }, 2.0 }, { { 36.5, -111.5 }, 5.0 },
+        { { 36.86361, -111.30861 }, 2.0 }, { { 36.86361, -111.30861 }, 5.0 },
+        { { 36.55861, -111.81361 }, 2.0 }, { { 36.55861, -111.81361 }, 5.0 },
+    });
+
+    // The bundled 3-arcsecond tile, at the observer and radius the suite has always used.
+    CheckFastViewshedAgainstNaiveOnRealTerrain("DATA/N36W112.hgt", "3-arcsecond tile, ~90 m", FastViewshedOffEdgeToleranceCoarseTile, {
+        { { 36.5, -111.5 }, 2.0 },
+    });
 }

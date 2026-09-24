@@ -13,17 +13,17 @@
 #include "CliArguments.h"
 #include <fstream>
 
-// Times a 50 km profile and a 30 km-radius fast viewshed over one real tile, then
-// checks fast against naive on a 2 km viewshed within a stated tolerance. Runs once
-// per tile; a tile that isn't present is skipped, not failed.
+// Times a 50 km profile, a 30 km-radius fast viewshed, and fast against naive on a
+// 2 km viewshed, over one real tile. How far fast is from naive is a test of its own:
+// TestFastViewshedAgreesWithNaiveAtThreeObservers. Runs once per tile; a tile that
+// isn't present is skipped.
 void RunWallTimeBenchmark(const std::string& hgtPath, const std::string& tileLabel, const std::string& pgmSuffix)
 {
     RealElevationSampler sampler(hgtPath, 36.0, -112.0);
-    const std::string toleranceTestName = "FastViewshedMatchesNaive on real SRTM data within stated tolerance (" + tileLabel + ")";
 
     if (!sampler.IsLoaded())
     {
-        Skip(toleranceTestName, hgtPath + " not found -- missing data, not a test failure");
+        std::cout << "[" << tileLabel << ": " << hgtPath << " not found -- benchmark skipped]" << std::endl;
         return;
     }
     std::cout << "[" << tileLabel << ": " << hgtPath << "]" << std::endl;
@@ -81,39 +81,6 @@ void RunWallTimeBenchmark(const std::string& hgtPath, const std::string& tileLab
     std::cout << smallRadiusKm << "km naive viewshed (" << smallGridSize << "x" << smallGridSize << "), Time: " << smallNaiveTime.count() << " ms" << std::endl;
     std::cout << smallRadiusKm << "km fast viewshed (" << smallGridSize << "x" << smallGridSize << "), Time: " << smallFastTime.count() << " ms" << std::endl;
     std::cout << "Speed-up (naive / fast): " << (smallNaiveTime.count() / smallFastTime.count()) << "x" << std::endl;
-
-    int mismatches = 0;
-    int totalValid = 0;
-    int excludedCells = 0;
-    for (int row = 0; row < smallGridSize; row++)
-    {
-        for (int col = 0; col < smallGridSize; col++)
-        {
-            if (IsConfident(smallFast.visible[row][col]) && IsConfident(smallNaive.visible[row][col]))
-            {
-                totalValid++;
-                if (smallFast.visible[row][col] != smallNaive.visible[row][col])
-                {
-                    mismatches++;
-                }
-            }
-            else
-            {
-                excludedCells++;
-            }
-        }
-    }
-
-    double mismatchRatio = (double)mismatches / totalValid;
-    double tolerance = 0.05; // Ridgeline disagreement between fast's off-axis ray sampling and naive's exact per-target LOS; see notes.
-
-    std::cout << smallRadiusKm << "km comparison (" << smallGridSize << "x" << smallGridSize << "): "
-        << mismatches << " / " << totalValid << " cells differ (" << (mismatchRatio * 100.0)
-        << "%, tolerance: " << (tolerance * 100.0) << "%), " << excludedCells
-        << " cell(s) excluded (not confident in both algorithms)" << std::endl;
-
-    Expect(mismatchRatio < tolerance, toleranceTestName);
-
 }
 
 // Read argv[index] as a number, or say which argument was wrong and return false.
@@ -557,6 +524,10 @@ int main(int argc, char* argv[])
     TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight();
     TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive();
     TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown();
+    TestViewshedAgreementCountsEachDirectionOverTheVisibleCells();
+    TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere();
+    TestViewshedAgreementRefusesGridsOfDifferentSizes();
+    TestFastViewshedAgreesWithNaiveAtThreeObservers();
 
     std::cout << "-------------------------" << std::endl;
 

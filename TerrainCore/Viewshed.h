@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <vector>
 #include "LineOfSight.h"
 #include <cmath>
@@ -135,33 +136,52 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
     return result;
 }
 
-// Complexity: O(gridRows + gridCols) rays cast from the boundary inward, each
-// O(samples per profile) -- far below naive's O(gridRows * gridCols * samples),
-// at the cost of being an approximation (see docs/ENGINE.md's stated fast/naive
-// tolerance) rather than an exact per-cell answer.
+// A point at distance dM with height heightM is seen from an eye at eyeM when its
+// curvature-adjusted slope is at least that of every point nearer the eye:
 //
-// Threading position: deliberately serial, not order-independent -- and this is a
-// stated decision, not an oversight. The boundary rays below are cast and applied to the grid in a
-// fixed, sequential order; where two rays visit the same cell (which happens
-// near the observer, where rays converge), the later ray in that fixed order
-// overwrites the earlier one ("last ray wins"). That rule is deterministic
-// only because the ray order itself never varies -- naively parallelising this
-// loop (e.g. one thread per boundary ray) would let completion order decide
-// the result instead, breaking the determinism contract silently (same inputs,
-// same state, same ordering => same output, every run, every machine).
+//     s(d) = (height - eye) / d  -  d / (2 k R)
 //
-// There is no per-frame pressure to change this: a viewshed call is a
-// planning-time cost, computed at load time or on request, so keeping the loop
-// serial costs nothing today. If that changes, the reduction must become
-// order-independent before the loop is threaded -- e.g. track the best
-// (highest) slope seen per cell explicitly, applied under a lock or via
-// atomic compare-and-swap, instead of "whichever ray touched this cell last,
-// wins".
+// This is ComputeLineOfSight's own test rearranged. Raised by the drop
+// d (D - d) / (2 k R) against the chord to a target D away, a point blocks when
+// (height + d (D - d) / 2kR - eye) / d exceeds the target's (heightT - eye) / D; the
+// D / 2kR term is common to both sides and cancels, leaving s(d) against s(D).
+// Unlike the raw slope, s doesn't depend on how far away the target is, so one
+// running maximum along a ray serves every target on it.
 //
-// Thread-safety: single-thread-only. Builds one profile at a time in a local,
-// per-ray vector and calls the non-thread-affine sampler sequentially.
-// Progress (optional): reported before every 16th boundary ray, then once at the end.
-// Target height (optional): as for ComputeViewshedNaive -- see the two slopes in the ray loop.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double CurvatureAdjustedSlope(double heightM, double eyeM, double dM, double k)
+{
+    return (heightM - eyeM) / dM - dM / (2 * k * EarthRadiusM);
+}
+
+// Casts a ray from the observer to every cell on the grid's boundary and records,
+// along each, the horizon: the largest curvature-adjusted slope of the terrain so
+// far. Then answers every cell from its own centre -- its own ground, its own
+// distance, the target height standing on it -- against the horizon of the two rays
+// either side of it, blended by the cell's direction between them. The ray's terrain
+// within half a cell of the target is left out of its horizon: it lies in the
+// target's own cell, beside the line to the centre rather than on it.
+//
+// Naive answers each cell along its own exact line; the rays here pass beside most
+// cells, so this is an approximation. How far it is from naive, and where the two
+// differ -- on naive's visibility edge, almost always -- is measured by
+// ViewshedAgreement.h and tested at three observers on real terrain; see
+// docs/ENGINE.md and NOTES.md, "A fast viewshed that asks naive's question".
+//
+// Complexity: O(gridRows + gridCols) rays, each O(samples per profile) to cast;
+// then O(log rays + 1) per cell. Memory: one float per ray sample, about
+// 4 * gridSize * gridSize * 0.7 of them -- ~45 MB for a 30 km radius at 30 m.
+//
+// Threading position: single-thread-only as written, but order-independent: every
+// ray is cast on its own, and every cell is then answered on its own from the
+// finished rays, so no cell's answer depends on the order anything was visited in.
+// Either loop could be split across threads without changing a single cell.
+//
+// Thread-safety: single-thread-only. Calls the non-thread-affine sampler sequentially.
+// Progress (optional): reported before every 16th ray and before every grid row of
+// the answering pass, then once at the end.
+// Target height (optional): as for ComputeViewshedNaive. The terrain alone builds
+// the horizon; the target, standing on the cell, is what is tested against it.
 inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround })
 {
     ViewshedResult result;
@@ -199,99 +219,126 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
     result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
     double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
-
     double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *observerElevationM, terrainDatum);
+    auto cellCentre = [&](int row, int col) {
+        return GeoPoint{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (col - centerCol) * lonSpacingDeg };
+    };
+    // A direction on the grid, measured in cells: rows and columns are the same length on the ground.
+    auto directionOf = [&](int row, int col) { return std::atan2((double)(row - centerRow), (double)(col - centerCol)); };
 
-    std::vector<GeoPoint> boundaryCells;
-
+    // One ray to each boundary cell. Samples are evenly spaced along it, sample i at
+    // i * stepM, so only their horizon is kept: horizon[i - 1] covers samples 1 to i.
+    struct Ray
+    {
+        double direction = 0;
+        double stepM = 0;
+        double firstVoidM = INFINITY;
+        std::vector<float> horizon;
+    };
+    std::vector<std::pair<int, int>> ends;
     for (int col = 0; col < gridCols; col++)
     {
-        boundaryCells.push_back(GeoPoint{ observer.latitudeDeg + (0 - centerRow) * spacingDeg, observer.longitudeDeg + (col - centerCol) * lonSpacingDeg });
-        boundaryCells.push_back(GeoPoint{ observer.latitudeDeg + (gridRows - 1 - centerRow) * spacingDeg, observer.longitudeDeg + (col - centerCol) * lonSpacingDeg });
+        ends.push_back({ 0, col });
+        if (gridRows > 1) ends.push_back({ gridRows - 1, col });
+    }
+    for (int row = 1; row < gridRows - 1; row++)
+    {
+        ends.push_back({ row, 0 });
+        if (gridCols > 1) ends.push_back({ row, gridCols - 1 });
     }
 
-    for (int row = 0; row < gridRows; row++)
+    const double workUnits = (double)ends.size() + gridRows;
+    std::vector<Ray> rays;
+    rays.reserve(ends.size());
+    for (size_t i = 0; i < ends.size(); i++)
     {
-        boundaryCells.push_back(GeoPoint{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (0 - centerCol) * lonSpacingDeg });
-        boundaryCells.push_back(GeoPoint{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (gridCols - 1 - centerCol) * lonSpacingDeg });
-    }
-
-    const size_t rayCount = boundaryCells.size();
-    for (size_t ray = 0; ray < rayCount; ray++)
-    {
-        if (progress && ray % 16 == 0 && !progress((double)ray / rayCount))
+        if (progress && i % 16 == 0 && !progress(i / workUnits))
         {
             result.cancelled = true;
             return result;
         }
 
-        const GeoPoint& target = boundaryCells[ray];
-        std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacingDeg, sampler);
+        auto [row, col] = ends[i];
+        if (row == centerRow && col == centerCol) continue;
 
-        double totalDistanceM = profile.back().distanceFromStartM;
-
-        if (totalDistanceM == 0) continue;
-
-        double maxSlope = -1e18;
-        int lastRow = -9999;
-        int lastCol = -9999;
-        bool degraded = false;
-
-        for (size_t i = 1; i < profile.size(); i++)
+        std::vector<ProfileSample> profile = GetTerrainProfile(observer, cellCentre(row, col), spacingDeg, sampler);
+        Ray ray;
+        ray.direction = directionOf(row, col);
+        ray.stepM = profile.back().distanceFromStartM / (profile.size() - 1);
+        ray.horizon.reserve(profile.size() - 1);
+        double horizon = -INFINITY;
+        for (size_t s = 1; s < profile.size(); s++)
         {
-            int row = (int)round((profile[i].point.latitudeDeg - observer.latitudeDeg) / spacingDeg) + centerRow;
-            int col = (int)round((profile[i].point.longitudeDeg - observer.longitudeDeg) / lonSpacingDeg) + centerCol;
-            if (row < 0 || row >= gridRows || col < 0 || col >= gridCols) continue;
-
-            // Consecutive samples often round into the same cell -- on a diagonal
-            // ray, roughly a quarter of them do. Only the cell's *verdict* may be
-            // skipped for those; everything that accumulates along the ray must
-            // still run, or the ray silently loses information. Skipping the whole
-            // iteration (as this once did) meant a void landing on such a sample
-            // was never noticed and its terrain never entered the horizon.
-            bool sameCellAsPrevious = (row == lastRow && col == lastCol);
-
-            lastRow = row;
-            lastCol = col;
-
-            if (!profile[i].elevationM.has_value())
+            double dM = profile[s].distanceFromStartM;
+            if (!profile[s].elevationM.has_value())
             {
-                degraded = true;
+                ray.firstVoidM = (std::min)(ray.firstVoidM, dM);
             }
+            else
+            {
+                horizon = (std::max)(horizon, CurvatureAdjustedSlope(*profile[s].elevationM, observerEyeHeightM, dM, k));
+            }
+            ray.horizon.push_back((float)horizon);
+        }
+        rays.push_back(std::move(ray));
+    }
+    // By direction, so the two rays either side of any cell are neighbours in the list.
+    std::sort(rays.begin(), rays.end(), [](const Ray& a, const Ray& b) { return a.direction < b.direction; });
 
-            if (degraded)
+    // A ray's horizon over its samples strictly nearer than dM.
+    auto horizonBefore = [](const Ray& ray, double dM) -> double {
+        if (dM <= 0 || ray.stepM <= 0 || ray.horizon.empty()) return -INFINITY;
+        size_t count = (std::min)((size_t)std::ceil(dM / ray.stepM) - 1, ray.horizon.size());
+        return count == 0 ? -INFINITY : (double)ray.horizon[count - 1];
+    };
+
+    const double pi = 3.14159265358979323846;
+    const double halfCellM = EarthRadiusM * DegToRad * spacingDeg / 2;
+    for (int row = 0; row < gridRows; row++)
+    {
+        if (progress && !progress((ends.size() + row) / workUnits))
+        {
+            result.cancelled = true;
+            return result;
+        }
+
+        for (int col = 0; col < gridCols; col++)
+        {
+            if (row == centerRow && col == centerCol) continue;
+
+            GeoPoint centre = cellCentre(row, col);
+            auto groundM = sampler.GetElevation(centre.latitudeDeg, centre.longitudeDeg);
+            if (!groundM.has_value() || rays.empty())
             {
                 result.visible[row][col] = CellVisibility::Degraded;
                 continue;
             }
 
-            double dM = profile[i].distanceFromStartM;
+            // The rays either side: b the first at or past this direction, a the one before, wrapping round.
+            double direction = directionOf(row, col);
+            size_t b = std::lower_bound(rays.begin(), rays.end(), direction,
+                [](const Ray& ray, double d) { return ray.direction < d; }) - rays.begin();
+            size_t a = (b + rays.size() - 1) % rays.size();
+            b %= rays.size();
+            double span = rays[b].direction - rays[a].direction;
+            if (span <= 0) span += 2 * pi;
+            double past = direction - rays[a].direction;
+            if (past < 0) past += 2 * pi;
+            double t = (std::min)(1.0, past / span);
 
-            double dRemainM = totalDistanceM - dM;
-            double curvatureDropM = CurvatureDropM(dM, dRemainM, k);
-            double pointHeightM = *profile[i].elevationM + curvatureDropM;
-
-            // Two slopes: the terrain's own, which is what raises the horizon for every
-            // cell further out, and the target's -- a mast of targetHeight standing in
-            // this cell -- which is what this cell's answer is about. A target sees
-            // over the horizon the terrain before it built, but its height never
-            // raises that horizon: the next cell's mast stands on the ground, not on
-            // this one. With no target height the two are the same slope.
-            double targetPointHeightM = *EyeHeightInTerrainDatum(targetHeight, *profile[i].elevationM, terrainDatum) + curvatureDropM;
-            double slope = (pointHeightM - observerEyeHeightM) / dM;
-            double targetSlope = (targetPointHeightM - observerEyeHeightM) / dM;
-
-            bool isVisible = targetSlope >= maxSlope;
-
-            if (slope > maxSlope)
+            double dM = GreatCircleDistanceM(observer, centre);
+            if (rays[a].firstVoidM < dM || rays[b].firstVoidM < dM)
             {
-                maxSlope = slope;
+                result.visible[row][col] = CellVisibility::Degraded;
+                continue;
             }
 
-            // The first sample to land in a cell decides it; later samples in the
-            // same cell have already had their say through maxSlope above.
-            if (sameCellAsPrevious) continue;
+            double ha = horizonBefore(rays[a], dM - halfCellM);
+            double hb = horizonBefore(rays[b], dM - halfCellM);
+            double horizon = std::isinf(ha) || std::isinf(hb) ? (std::max)(ha, hb) : ha + t * (hb - ha);
 
+            double targetM = *EyeHeightInTerrainDatum(targetHeight, *groundM, terrainDatum);
+            bool isVisible = CurvatureAdjustedSlope(targetM, observerEyeHeightM, dM, k) >= horizon;
             result.visible[row][col] = isVisible ? CellVisibility::Visible : CellVisibility::NotVisible;
         }
     }

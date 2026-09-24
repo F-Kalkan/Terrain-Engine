@@ -1,6 +1,7 @@
 # The engine's test suite
 
-53 hand-checkable test functions, plus a real-data tolerance assertion per tile:
+57 test functions, hand-checkable apart from the real-data comparisons, which hold the
+fast viewshed against naive at several observers on each tile:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
   on disk): flat plateau, wall, curvature, void, determinism,
@@ -62,9 +63,17 @@ terrain, decides every answer.
   ever reveals cells, never hides one or raises the horizon for the cells behind it, and an
   explicit 0 m is the default cell for cell; fast matches naive on every cell off the wall
   at 0 m and 30 m, and at 120 m, where the visible region ends in the open field, disagrees
-  only on that boundary, for the reason the fast/naive section of [ENGINE.md](ENGINE.md) gives for ridgelines; and a
-  target height in a datum the terrain can't be put on leaves every cell but the observer's
-  Degraded in both, never guessed.
+  only on that boundary, where the fast/naive section of [ENGINE.md](ENGINE.md) measures
+  such differences on real terrain; and a target height in a datum the terrain can't be
+  put on leaves every cell but the observer's Degraded in both, never guessed.
+- **Viewshed agreement** (`CompareViewsheds`, the measure the fast viewshed is held to):
+  on 7x7 viewsheds drawn as text, a 3x3 block drawn one column off, with a hole and a
+  stray cell, gives the counts worked by hand -- 4 cells each way, 6 of 8 differences on
+  the reference's edge, 13 cells either sees -- and a neighbour with no confident answer
+  never makes a cell an edge cell; "hidden everywhere" and "visible everywhere" fail the
+  tolerance on a grid where, counted over every cell, "hidden everywhere" would differ
+  on only 18%; the block moved one cell has no difference off the edge; and grids of
+  different sizes, or ragged ones, are refused rather than partly compared.
 - **Command line**: the number parser behind every CLI argument accepting real
   numbers and refusing text, trailing characters, `nan`, `inf` and out-of-range
   values, instead of throwing.
@@ -82,9 +91,13 @@ terrain, decides every answer.
   by field against `DATA/oracle_profile.csv`. It reads `DATA/` relative to the working
   directory and skips, rather than fails, when the data isn't there; a damaged row fails
   the test and names the row, rather than throwing and taking the suite down with it.
-- **Real data**: a tolerance assertion comparing naive and fast viewshed output over
-  each Grand Canyon tile present (`FastViewshedMatchesNaive on real SRTM data within
-  stated tolerance`, printed by `RunWallTimeBenchmark`).
+- **Real data** (`TestFastViewshedAgreesWithNaiveAtThreeObservers`, skipped per tile when
+  it isn't present): on the 1-arcsecond tile at (36.5, -111.5), (36.86361, -111.30861) and
+  (36.55861, -111.81361), each at 2 km and 5 km, and on the 3-arcsecond tile at
+  (36.5, -111.5), 2 km -- 30 m cells, 2 m above ground, `k` 4/3, nearest -- the fast
+  viewshed is within tolerance of naive, at least 80% of their differences lie on naive's
+  visibility edge, and a viewshed with one answer everywhere fails the same tolerance.
+  Each run prints its counts in both directions; [ENGINE.md](ENGINE.md) tabulates them.
 
 Each correctness fix above was confirmed by putting the defect back in a scratch copy
 of the code and watching its test fail: curvature forced inert inside both viewsheds,
@@ -93,7 +106,13 @@ cell with the previous one, the sight line interpolated by sample index, the obs
 own cell marked visible unconditionally, an ellipsoidal height used without its
 undulation, every profile distance halved, and the tile reader placing its grid one
 post off or assuming 3-arcsecond post spacing for a 1-arcsecond file, and the raster
-view copying its buffer at construction or ignoring its validity flags. A suite that
-stays green with the defect restored verifies nothing.
+view copying its buffer at construction or ignoring its validity flags. The fast viewshed
+and its measure were checked the same way: a fast viewshed answering NotVisible
+everywhere, answering from the nearest ray alone, letting the target's own cell into its
+horizon, leaving curvature out of its slope, ignoring the target height or the voids on
+its rays, reading one ray twice, or reading a ray's horizon over its whole length; and a
+measure counted over every cell, taking every difference for an edge one, or taking a
+neighbour with no confident answer for an edge. A suite that stays green with the defect
+restored verifies nothing.
 
 All of the above pass identically in Debug and Release.

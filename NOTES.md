@@ -225,6 +225,75 @@ app and the DLL ship together, so there is no older caller to keep working; a DL
 called by programs built against an earlier header would need a size field or a new function
 instead.
 
+## Update: a measure that doesn't shrink
+
+The fast/naive tolerance counted differing cells over every cell both answered, and held
+that under 5% at one observer. Most cells are usually hidden, so the figure mostly
+measured how much was hidden: at the suite's observer on the 1-arcsecond tile, 95% of
+the grid is, and a "fast viewshed" answering NotVisible everywhere differed on 4.80% --
+and passed. At two other observers on the same tile the real fast viewshed differed on
+5.91% and 7.77%. The claim beside it, that the disagreement sits on ridgelines, was
+argued and never measured.
+
+`ViewshedAgreement.h` now compares any approximate viewshed with its reference. Its rates
+divide by the cells either one finds visible, which a viewshed that sees nothing can't
+shrink, and it keeps the counts behind them, each direction apart. It also places every
+differing cell: on the reference's visibility edge, where some neighbour gets the other
+answer from the reference -- so the approximation drew the boundary one cell off -- or
+off it, where nothing nearby agrees with the approximation. Measured, 85-95% of the
+differences are on the edge, and the two directions balance. A one-cell boundary shift
+is also about as much as naive's own answer is worth there: moving the observer 1 m north
+changes naive by 1-6% of the cells either run sees, and 5 m by 7-26%. So the tolerance
+has two parts, on the whole disagreement and on the part off the edge, and a viewshed
+with one answer everywhere fails one of them at every observer.
+
+Counted that way, the old fast viewshed was further off than 2.5% suggested: 42% of the
+visible cells at the suite's observer, 2.6% off the edge. That left a choice -- a better
+fast algorithm, or a wider tolerance stated honestly. I measured before choosing.
+
+## Update: a fast viewshed that asks naive's question
+
+The old fast viewshed judged each cell by the first sample of whichever ray passed
+nearest, at that sample's position and height -- up to half a cell from the centre naive
+tests, often on a different post of the tile. Two changes, tried separately in a scratch
+program against the new measure first:
+
+1. **Ask about the cell's centre.** Its own ground, its own distance, the target standing
+   on it, tested against the ray's horizon. Alone this made the part off the edge worse
+   at five of six runs, and the reason was visible in the numbers: the ray's last samples
+   before the target lie in the target's own cell, beside the line to the centre, and
+   the cell's own ground was blocking it. Leaving the last half cell out of the horizon fixed that;
+   leaving a whole cell out did slightly better still, but a whole cell can skip a real
+   obstacle standing just in front of the target, and half a cell is exactly the target's
+   own cell, so half a cell it is.
+2. **Blend the two rays either side,** by the cell's direction between them, the same
+   "start plus fraction of the difference" as bilinear interpolation, on angle instead of
+   distance.
+
+Together, at the three observers and both radii, the whole disagreement fell by about a
+third (41.7% to 25.5% at the worst) and the part off the edge by a quarter to a half
+(worst 3.07% to 1.71%). The horizon is kept as the curvature-adjusted slope
+(h - eye) / d - d / 2kR, which is ComputeLineOfSight's own test with the target's
+distance cancelled out, so one running maximum along a ray serves every cell beside it.
+
+The cost is real: the 30 km viewshed went from ~1.2 s to ~1.7 s, and holding every ray's
+horizon adds ~30-38 MB at peak. I kept it anyway, for three reasons. It is closer to the
+exact answer at every observer measured. Every cell is now answered on its own from
+finished rays, so the old "last ray wins" rule is gone and either loop could be threaded
+without changing a cell. And the next steps want exactly this structure: a horizon per
+ray, looked up between two rays, is what answering many targets from one prepared
+observer needs.
+
+The tolerances are set from what the new algorithm measures, with a margin, and tight
+enough to fail its own parts: total disagreement under 30% (worst 25.5%), off the edge
+under 2% on the 1-arcsecond tile (worst 1.71%) and 3% on the 3-arcsecond one (worst
+2.62% -- read at 30 m, its 90 m posts stand as terraces three cells wide with cliffs
+between), and at least 80% of differences on the edge. 2% rather than 3% is what makes
+dropping the blending fail: nearest-ray-only reaches 2.15% at (36.5, -111.5), 5 km. Eight
+defects put back one at a time -- one answer everywhere, no blending, no half-cell
+margin, curvature left out, target height ignored, voids ignored, one ray used twice, a
+horizon over the whole ray -- each turn at least one check red.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

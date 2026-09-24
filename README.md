@@ -45,12 +45,13 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
   3-arcsecond tile of the Grand Canyon is included in `DATA/`.
 - **Honest answers.** Missing data is never read as sea level: a path that crosses a
   void is reported as "no confident answer", not as visible.
-- **Fast.** A 50 km profile takes under half a millisecond; a 30 km-radius viewshed
-  (2000 × 2000 cells) about a second — some 310 times faster than checking every cell
-  on its own. On real terrain the two disagree on under 4% of cells, on ridgelines, and
-  a test holds that under 5%.
-- **Tested.** 53 hand-checkable engine tests and 116 app tests, all run by `build.ps1`
-  and by CI on every push.
+- **Fast, and measured against exact.** A 50 km profile takes under half a millisecond;
+  a 30 km-radius viewshed (2000 × 2000 cells) under two seconds — some 180 times
+  faster than checking every cell on its own. Over the cells either one finds visible, the two
+  differ on at most 26% at three test observers, almost all of it the boundary of the
+  visible region drawn one cell off; under 2% is off that boundary.
+- **Tested.** 57 engine tests and 116 app tests, all run by `build.ps1` and by CI on
+  every push.
 
 ## What's in the repository
 
@@ -90,7 +91,7 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 53-case test suite + demo
+TerrainEngine.exe # run the 57-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
