@@ -150,17 +150,17 @@ public class ViewshedViewModelTests
     {
         var vm = new ViewshedViewModel(() => _tile) { Comparison = ViewshedComparison.PreviousRun };
         await vm.RunAsync();
-        Assert.Equal(0, _tile.ViewshedQueries[^1].TargetHeightAboveGroundM);
+        Assert.Equal(new Height(0), _tile.ViewshedQueries[^1].TargetHeight);
 
-        vm.TargetHeight.Text = "10";
+        vm.TargetHeight.Metres.Text = "10";
         Assert.True(vm.IsStale);
         await vm.RunAsync();
 
-        Assert.Equal(10, _tile.ViewshedQueries[^1].TargetHeightAboveGroundM);
-        Assert.Contains("target height: 0 m → 10 m", vm.Summary);
+        Assert.Equal(new Height(10), _tile.ViewshedQueries[^1].TargetHeight);
+        Assert.Contains("target height: 0 m above ground → 10 m above ground", vm.Summary);
 
-        vm.TargetHeight.Text = "-1";
-        Assert.Equal("The target height must be between 0 and 100000.", vm.TargetHeight.Error);
+        vm.TargetHeight.Metres.Text = "-1";
+        Assert.Equal("The target height must be between 0 and 100000.", vm.TargetHeight.Metres.Error);
         Assert.False(vm.RunCommand.CanExecute(null));
     }
 
@@ -221,6 +221,12 @@ public class ViewshedViewModelTests
             vm.Legend.Select(row => row.Name));
         Assert.Equal(["1", "0", "0", "1", "0", "0", "0", "0", "2", "0", "0"], vm.Legend.Select(row => row.Count));
         Assert.StartsWith("Fast Minimum Visible Height of 2 × 2 cells", vm.Summary);
+
+        // The legend's metres say what they are measured from; a viewshed's legend has no metres to explain.
+        Assert.Equal("Heights in m above each cell's own ground", vm.LegendNote);
+        vm.ShowsHeights = false;
+        await vm.RunAsync();
+        Assert.Null(vm.LegendNote);
     }
 
     [Fact]

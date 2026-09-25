@@ -485,6 +485,44 @@ reader's `Window` keeps the tile's own post arithmetic and holds only the posts 
 version of the fast box also listed the grid's corner cells; they are already the ends of its
 corner rays, and the line went.
 
+## Update: heights in every datum, on every surface
+
+The library took heights above the ground, above sea level and above the ellipsoid; the DLL,
+the command line and TerrainBench, above the ground only. Now they take all three. Five
+decisions.
+
+**One `te_height`, not more fields.** The DLL could have grown a datum field beside each
+`..._height_above_ground_m`. A height and what it's measured from belong together, as they do
+in the library's `DatumHeight`, so the query carries a `te_height`: metres, a datum code, and
+an undulation with a flag saying it was given. A flag, not a NaN meaning "none" -- a zeroed
+struct is then the ground itself, and nothing reads an undulation of 0 as if it had been given.
+The structs changed layout, so a program built against the earlier header must be rebuilt;
+the DLL and TerrainBench ship together.
+
+**The surfaces refuse what the library answers.** Given an ellipsoidal height without its
+undulation, the library answers `DatumRejected`: no confident answer, which is right for code
+that asked. A person who typed the height needs to hear what's missing, and a program calling
+the DLL is better stopped than handed a grid of `Degraded` cells. So each surface refuses it
+before anything runs, saying what to give.
+
+**Answers stay in the tile's datum.** A path's heights could come back in the datum each end
+was given in. But one result would then mix datums -- the observer's eye above the ellipsoid,
+the terrain under it above sea level -- and turning each sample back would need the undulation
+at every sample, which nobody supplied. Every height in a result is in the tile's datum, and
+the result says which.
+
+**A bare number still means above the ground.** On the command line and in a queries file,
+`2` is what it always was; a datum is said with `:agl`, `:msl` or `:hae:<undulation>`. Every
+existing command and file keeps its meaning, and a height typed without a thought for datums
+gets the one it always got.
+
+**An eye or a target in the ground.** Heights above the ground can't go below it; altitudes
+can. The line of sight blocks such a path at its own end, but the fast algorithms leave each
+end's ground out of their horizons, and from the cells beside a buried eye or target they saw
+into or out of the ground -- 11 and 13 cells against naive on the new test's grids. None of this
+was reachable from the surfaces before; making it reachable is what showed it. Each fast
+algorithm now asks it outright, and agrees with naive.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called
@@ -566,7 +604,12 @@ input may take it down.
 - **Comparing with the previous run.** A very large `k` should visibly change a 30 km
   viewshed. Measured on the sample tile, it doesn't, much: with a 2 m observer, 8,583
   of the 4,000,000 cells in the whole square grid change (0.21%; 8,135 of them inside the
-  30 km circle the app draws and counts); even at 300 m it is 1.87%. Drawn at map size, picking one
+  30 km circle the app draws and counts); even at 300 m it is 1.87%. (Those two moved once
+  since, with the fast viewshed that answers each cell from its own centre, "a fast viewshed
+  that asks naive's question" above: 8,438 cells of the grid, 145 fewer, and 8,001 inside the
+  circle, 134 fewer -- the new algorithm puts a few cells on the other side of a ridge at one
+  `k` or the other. Measured again with the engine as it stood after the minimum visible
+  height, after data not given and as it stands now, it hasn't moved.) Drawn at map size, picking one
   cell per screen pixel, scattered changes like that simply vanish. Two changes fix it
   without touching the engine: the viewshed can be compared with the previous run, marking
   every changed cell and counting them, and an overlay larger than the screen is averaged

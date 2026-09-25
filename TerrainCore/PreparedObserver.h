@@ -46,6 +46,7 @@ struct PreparedObserver
 {
     GeoPoint observer{};
     double observerEyeM = 0.0;          // in terrainDatum
+    bool eyeAboveGround = true;         // false for an eye below the ground under it, which sees nothing
     double k = 4.0 / 3.0;
     double radiusM = 0.0;
     double stepM = 0.0;                 // sample spacing along every ray
@@ -132,6 +133,7 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
         return prepared;
     }
     prepared.observerEyeM = *EyeHeightInTerrainDatum(observerHeight, observerGround.elevationM, prepared.terrainDatum);
+    prepared.eyeAboveGround = prepared.observerEyeM >= observerGround.elevationM;
 
     const double twoPi = 2 * 3.14159265358979323846;
     std::vector<ProfileSample> profile;
@@ -188,7 +190,8 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
 // from a prepared observer. Answered from the two rays either side of the target's
 // direction, blended by where it lies between them, against the horizon strictly in
 // front of it, leaving out the last half sample spacing (the target's own cell, beside its
-// line rather than on it). A target below the ground under it is hidden, as
+// line rather than on it). A target below the ground under it is hidden, and so is every
+// target from an eye below the ground under it, as
 // ComputeLineOfSight answers it.
 //
 // Complexity: O(1): a distance, a bearing, a ground read and two table reads. Allocates
@@ -258,7 +261,7 @@ inline TargetAnswer QueryTarget(const PreparedObserver& prepared, GeoPoint targe
         horizon = std::isinf(ha) || std::isinf(hb) ? (std::max)(ha, hb) : ha + t * (hb - ha);
     }
 
-    bool seen = targetEyeM >= ground.elevationM && CurvatureAdjustedSlope(targetEyeM, prepared.observerEyeM, dM, prepared.k) >= horizon;
+    bool seen = prepared.eyeAboveGround && targetEyeM >= ground.elevationM && CurvatureAdjustedSlope(targetEyeM, prepared.observerEyeM, dM, prepared.k) >= horizon;
     answer.state = seen ? CellVisibility::Visible : CellVisibility::NotVisible;
     return answer;
 }

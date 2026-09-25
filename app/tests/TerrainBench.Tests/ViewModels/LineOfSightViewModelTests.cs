@@ -93,18 +93,18 @@ public class LineOfSightViewModelTests
     public void Swapping_trades_the_points_and_their_heights_and_checks_again()
     {
         var vm = new LineOfSightViewModel(() => _tile);
-        vm.ObserverHeight.Text = "10";
+        vm.ObserverHeight.Metres.Text = "10";
 
         vm.SwapCommand.Execute(null);
 
         Assert.Equal("36.35", vm.ObserverLatitude.Text);
         Assert.Equal("-111.45", vm.ObserverLongitude.Text);
-        Assert.Equal("2", vm.ObserverHeight.Text);
+        Assert.Equal("2", vm.ObserverHeight.Metres.Text);
         Assert.Equal("36.3", vm.TargetLatitude.Text);
-        Assert.Equal("10", vm.TargetHeight.Text);
+        Assert.Equal("10", vm.TargetHeight.Metres.Text);
         var query = _tile.PathQueries.Single();
         Assert.Equal(36.35, query.ObserverLatitudeDeg);
-        Assert.Equal(10, query.TargetHeightAboveGroundM);
+        Assert.Equal(new Height(10), query.TargetHeight);
     }
 
     [Fact]

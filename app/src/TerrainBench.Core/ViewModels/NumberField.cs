@@ -11,16 +11,26 @@ namespace TerrainBench.ViewModels;
 public sealed partial class NumberField : ObservableObject
 {
     private readonly Func<double, string?> _rule;
+    private readonly Func<bool>? _inUse;
+    private readonly string? _requiredMessage;
 
-    public NumberField(string key, string label, string unit, string defaultText, Func<double, string?> rule, bool optional = false, string? hint = null, string? shortLabel = null)
+    /// <param name="inUse">
+    /// For a field only some choices call for, such as a geoid undulation: while it returns false the field
+    /// is set aside -- no value, no error -- and while it returns true an empty field is an error that says
+    /// <paramref name="requiredMessage"/>.
+    /// </param>
+    public NumberField(string key, string label, string unit, string defaultText, Func<double, string?> rule, bool optional = false, string? hint = null, string? shortLabel = null,
+        Func<bool>? inUse = null, string? requiredMessage = null)
     {
         Key = key;
         Label = label;
         DisplayLabel = shortLabel ?? label;
-        Unit = unit;
-        Hint = hint;
+        _unit = unit;
+        _hint = hint;
         IsOptional = optional;
         _rule = rule;
+        _inUse = inUse;
+        _requiredMessage = requiredMessage;
         _text = defaultText;
         Validate();
     }
@@ -35,12 +45,16 @@ public sealed partial class NumberField : ObservableObject
     public string DisplayLabel { get; }
 
     /// <summary>The unit and, for a height, what it is measured from, e.g. "m above ground".</summary>
-    public string Unit { get; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUnit))]
+    private string _unit;
 
     public bool HasUnit => Unit.Length > 0;
 
     /// <summary>What the field means, shown when the pointer rests on the ? beside its name.</summary>
-    public string? Hint { get; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHint))]
+    private string? _hint;
 
     public bool HasHint => Hint is not null;
 
@@ -72,6 +86,20 @@ public sealed partial class NumberField : ObservableObject
     /// <summary>Checks the current text again, for rules that depend on something else, like the open tile.</summary>
     public void Validate()
     {
+        if (_inUse is not null && !_inUse())
+        {
+            Value = null;
+            Error = null;
+            return;
+        }
+
+        if (_inUse is not null && _requiredMessage is not null && string.IsNullOrWhiteSpace(Text))
+        {
+            Value = null;
+            Error = _requiredMessage;
+            return;
+        }
+
         if (IsOptional && string.IsNullOrWhiteSpace(Text))
         {
             Value = null;

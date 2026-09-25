@@ -149,7 +149,7 @@ public class KeyboardAndViewshedPixelTests
         app.Settle();
 
         // It answers every target height at once, so the target height field is set aside.
-        Assert.False(app.FieldBox(app.ViewModel.Viewshed.TargetHeight).IsEffectivelyEnabled);
+        Assert.False(app.FieldBox(app.ViewModel.Viewshed.TargetHeight.Metres).IsEffectivelyEnabled);
         app.Click(app.Find<Button>("RunViewshedButton"));
         app.WaitUntil(() => app.ViewModel.Viewshed.HasResult && !app.ViewModel.Viewshed.IsRunning, TimeSpan.FromSeconds(60), "the minimum visible height");
         var heights = app.ViewModel.Viewshed.Map!;

@@ -373,7 +373,10 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint obser
         return result;
     }
 
+    // An eye below the ground under it sees nothing, from any height: the reference's line of
+    // sight is blocked by that ground at its first sample, as in ComputeViewshedFast.
     double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, observerGround.elevationM, terrainDatum);
+    bool eyeAboveGround = observerEyeHeightM >= observerGround.elevationM;
     double twoKR = 2 * k * EarthRadiusM;
     bool finished = AnswerEachCellFromFastHorizons(observer, observerEyeHeightM, gridRows, gridCols, spacingDeg, sampler, k, progress, result.state,
         [&](int row, int col, double groundM, double dM, double horizon) {
@@ -382,7 +385,8 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint obser
                 double targetM = *EyeHeightInTerrainDatum(DatumHeight{ heightM, VerticalDatum::HeightAboveGround }, groundM, terrainDatum);
                 return CurvatureAdjustedSlope(targetM, observerEyeHeightM, dM, k) >= horizon;
             };
-            double heightM = seen(0.0) ? 0.0 : SmallestHeightSeen(seen, observerEyeHeightM + dM * horizon + dM * dM / twoKR - groundM);
+            double heightM = !eyeAboveGround ? INFINITY
+                : seen(0.0) ? 0.0 : SmallestHeightSeen(seen, observerEyeHeightM + dM * horizon + dM * dM / twoKR - groundM);
             result.state[row][col] = heightM == 0.0 ? CellVisibility::Visible : CellVisibility::NotVisible;
             result.heightAboveGroundM[row][col] = heightM;
             result.groundM[row][col] = groundM;

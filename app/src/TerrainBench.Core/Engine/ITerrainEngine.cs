@@ -27,7 +27,7 @@ public interface ITile : IDisposable
 
     TileInfo Info { get; }
 
-    /// <summary>Elevation in metres above mean sea level, or null over a void.</summary>
+    /// <summary>Elevation in metres, in the tile's <see cref="TileInfo.ElevationDatum"/> (above mean sea level for SRTM), or null over a void.</summary>
     EngineResult<double?> Elevation(double latitudeDeg, double longitudeDeg, Interpolation interpolation);
 
     EngineResult<TilePosts> CopyPosts();

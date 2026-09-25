@@ -77,7 +77,9 @@ only a demo/tooling one.
   never an exception) whenever the heights and the terrain can't be put on one datum:
   terrain declared `Unknown`, `HeightAboveGround` or `PressureAltitude`; a profile
   mixing datums; a height in `PressureAltitude` or `Unknown`; or an
-  ellipsoidal↔orthometric move with no undulation to make it with.
+  ellipsoidal↔orthometric move with no undulation to make it with. The DLL, the command
+  line and TerrainBench take the same three datums, and refuse an ellipsoidal height without
+  its undulation before anything runs (see "Heights in every datum, on every surface").
 - **Earth curvature**: `drop = d1*d2 / (2*k*R)`, `R = 6,371,000 m`, `k` defaults to
   `4/3` (standard atmospheric refraction) and is a real parameter — on
   `ComputeLineOfSight`, `ComputeViewshedNaive`, and `ComputeViewshedFast` — settable
@@ -650,6 +652,71 @@ visible height over 1 km, the fast viewshed and fast minimum visible height over
 fast viewshed read bilinearly -- run on a window of only its reported posts gives, to the bit,
 the answer it gives on the whole tile; and with the window a post short on each side in turn,
 every answer that changes becomes `DataNotGiven`, and none becomes a void.
+
+## Heights in every datum, on every surface
+
+**The question.** The library took each height above the ground, above mean sea level, or
+above the WGS84 ellipsoid with the geoid undulation at its point; the DLL, the command line
+and TerrainBench took heights above the ground only. A host placing an aircraft has its
+altitude, not its height over whatever ground lies under it, and GPS gives heights above the
+ellipsoid. Every surface now takes the same three, and every height it returns says what it
+is measured from.
+
+**The DLL.** A height is a `te_height`: the metres, a `TE_DATUM_*` code (above the ground,
+orthometric, ellipsoidal) and, for an ellipsoidal height, the geoid undulation with a flag
+saying it was given -- never a 0 standing in for "not given". A zeroed `te_height` is the
+ground itself. Above the ground a height is 0 to 100,000 m; above sea level or the ellipsoid,
+-1,000 to 100,000 m; an undulation, -200 to 200 m (the real geoid spans about -107 to +86).
+An ellipsoidal height without its undulation is refused before anything runs, with
+`TE_ERROR_INVALID_ARGUMENT` and a message saying what is missing -- where the library alone
+would answer `DatumRejected`, "no confident answer", a surface a person types into can say
+what to do about it. What comes back says its datum: `te_path_result::heights_datum` for
+the eyes, the blocking point and every sample, `te_viewshed_grid::heights_datum` for the
+minimum visible height (above each cell's own ground) and `te_tile_info::elevation_datum`
+for the tile. The heights come back in the tile's own datum, whatever datum the query's
+came in: one datum for every height in a result, and nothing to convert back for which an
+undulation would be needed at every sample. The query structs changed, so a program built
+against the earlier header has to be built again.
+
+**The command line.** A bare number is still metres above the ground, so every existing
+command line and queries file means what it meant; `2:agl`, `1937:msl` and
+`1915.37:hae:-21.63` say their datum outright (`CliArguments.h`, `ParseHeight`). A height
+above the ellipsoid without its undulation, or with a datum the engine doesn't know, is
+refused with exit code 1 and the argument's name. `los` prints both eyes to the last digit,
+and every height it prints says what it is measured from; `profile` heads its columns the same way.
+
+**TerrainBench.** Each height has a **Measured From** list beside it. Above sea level, the
+target is placed by altitude and stays there when moved; above the ellipsoid, a Geoid
+Undulation box appears, and the check waits for it, saying why. The choice is remembered with
+the rest, the copied report and the command line it gives carry it, and every height shown
+-- the result rows, the map's cards and elevation range, the profile and its CSV, the pointer's
+readout and the minimum visible height's legend -- says its datum.
+
+**An eye or a target below its ground.** A height above sea level can put an eye or a target
+below the ground under it -- an aircraft's altitude over a plateau higher than it. The line
+of sight answers that as blocked by the ground at the path's own end. The fast viewshed, the
+fast minimum visible height and the prepared observer leave both ends' own ground out of
+their horizons, so from cells beside such a point they saw into or out of the ground: on
+`TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm`'s grids the fast viewshed differed
+from naive on 11 cells for a target under a plateau and 13 for an eye under its ground, and
+the fast minimum visible heights were finite where the reference's are infinite. Each now
+asks it outright -- an eye below its ground sees nothing, a target below its ground is not
+seen -- and agrees with naive, cell for cell. Above the ground, no height is below it, so no
+figure recorded above moved.
+
+**Measured.** `DatumTests` asks README's blocked line of sight with its eyes 1.7654321 m up
+given above the ground, above sea level (the ground plus that) and above the ellipsoid (that
+plus an undulation of -21.63 m), through the DLL, `TerrainEngine.exe` and the Line of Sight panel:
+each surface gives the same verdict and blocking point all three ways, with the eyes, the
+clearance deficit and every sample's sight line within 1e-9 m; the viewshed and minimum
+visible height from the three observers are the same cells, heights within 1e-9 m. A height
+above the ellipsoid without its undulation is refused on each, with its message. Put back,
+each defect -- a surface taking every height as above the ground, letting an ellipsoidal
+height through without its undulation, not saying its heights' datum, or dropping the
+undulation on the way in; the command line reading `msl` as above the ground or printing
+the eyes to six digits; and each fast algorithm seeing into or out of the ground -- turns a
+test red. The six digits first survived: with 2 m eyes on whole-metre ground, every eye was a
+whole number, which six digits print exactly. The eyes are an uneven height now.
 
 ## Void handling and degraded results
 

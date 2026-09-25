@@ -446,11 +446,16 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
 
     result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
+    // An eye below the ground under it, or a target below the ground under it -- possible for a
+    // height above sea level or the ellipsoid -- is walled in by that ground: ComputeLineOfSight
+    // finds it blocking at the path's own end, and so naive hides the cell. The horizons leave
+    // both ends' own ground out, so the fast test asks it here.
     double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, observerGround.elevationM, terrainDatum);
+    bool eyeAboveGround = observerEyeHeightM >= observerGround.elevationM;
     bool finished = AnswerEachCellFromFastHorizons(observer, observerEyeHeightM, gridRows, gridCols, spacingDeg, sampler, k, progress, result.visible,
         [&](int row, int col, double groundM, double dM, double horizon) {
             double targetM = *EyeHeightInTerrainDatum(targetHeight, groundM, terrainDatum);
-            bool isVisible = CurvatureAdjustedSlope(targetM, observerEyeHeightM, dM, k) >= horizon;
+            bool isVisible = eyeAboveGround && targetM >= groundM && CurvatureAdjustedSlope(targetM, observerEyeHeightM, dM, k) >= horizon;
             result.visible[row][col] = isVisible ? CellVisibility::Visible : CellVisibility::NotVisible;
         });
     if (!finished)

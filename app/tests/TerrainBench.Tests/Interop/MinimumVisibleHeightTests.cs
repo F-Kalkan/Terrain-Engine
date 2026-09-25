@@ -38,7 +38,7 @@ public class MinimumVisibleHeightTests
 
         foreach (double targetM in asked)
         {
-            var viewshed = tile.Viewshed(Query(algorithm, radiusKm) with { TargetHeightAboveGroundM = targetM }, null, default).Value;
+            var viewshed = tile.Viewshed(Query(algorithm, radiusKm) with { TargetHeight = targetM }, null, default).Value;
             Assert.Equal((map.Rows, map.Cols, map.SouthWestCellLatitudeDeg), (viewshed.Rows, viewshed.Cols, viewshed.SouthWestCellLatitudeDeg));
             for (int i = 0; i < map.Cells.Length; i++)
             {
@@ -94,7 +94,7 @@ public class MinimumVisibleHeightTests
         Assert.Equal(EngineErrorKind.OutsideTile, outside?.Kind);
 
         // The answer covers every target height, so the query's own isn't looked at -- not even a NaN.
-        var anyTarget = tile.MinimumVisibleHeight(Query(ViewshedAlgorithm.Fast) with { TargetHeightAboveGroundM = double.NaN }, null, default);
+        var anyTarget = tile.MinimumVisibleHeight(Query(ViewshedAlgorithm.Fast) with { TargetHeight = double.NaN }, null, default);
         Assert.True(anyTarget.IsOk, anyTarget.Error?.Message);
     }
 

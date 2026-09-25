@@ -132,6 +132,39 @@ bool ReadPositiveNumberArg(char* argv[], int index, const char* name, double& ou
     return true;
 }
 
+// Why a height argument (or a height in a queries file) can't be used, as a sentence, or ""
+// when it can. where names it: "hA", or "queries.txt, query 3: hA".
+std::string HeightArgMessage(const HeightArg& parsed, const std::string& where, const std::string& text)
+{
+    switch (parsed.problem)
+    {
+    case HeightArgProblem::None: return "";
+    case HeightArgProblem::EllipsoidWithoutUndulation:
+        return where + " is a height above the WGS84 ellipsoid with no geoid undulation, so it can't be put on the tile's "
+            "mean sea level; give the undulation at that point as <m>:hae:<undulation>, got '" + text + "'";
+    case HeightArgProblem::UnknownDatum:
+        return where + " must be metres above the ground (a number, or <m>:agl), above mean sea level (<m>:msl) or above "
+            "the WGS84 ellipsoid (<m>:hae:<undulation>), got '" + text + "'";
+    default:
+        return where + " must be a number of metres, optionally followed by :agl, :msl or :hae:<undulation>, got '" + text + "'";
+    }
+}
+
+// Read argv[index] as a height in any datum (CliArguments.h, ParseHeight), or say what is
+// wrong with it and return false.
+bool ReadHeightArg(char* argv[], int index, const char* name, DatumHeight& out)
+{
+    HeightArg parsed = ParseHeight(argv[index]);
+    std::string message = HeightArgMessage(parsed, name, argv[index]);
+    if (!message.empty())
+    {
+        std::cout << "Error: " << message << std::endl;
+        return false;
+    }
+    out = parsed.height;
+    return true;
+}
+
 // The library refuses a path it can't sample -- a latitude past a pole, a spacing so fine
 // the sample count overflows. Say why and stop, rather than print an answer about nothing.
 bool PathCanBeSampled(GeoPoint a, GeoPoint b, double spacing)
@@ -185,6 +218,7 @@ int main(int argc, char* argv[])
             if (!PathCanBeSampled(a, b, spacing)) return 1;
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
 
+            std::cout << "latitude, longitude, elevation (m " << VerticalDatumWords(sampler.GetDatum()) << ")" << std::endl;
             for (const auto& sample : profile)
             {
                 if (sample.elevationM.has_value())
@@ -202,13 +236,14 @@ int main(int argc, char* argv[])
         if (mode == "los" && (argc == 12 || argc == 13 || argc == 14))
         {
             std::string hgtFile = argv[2];
-            double swLat, swLon, aLat, aLon, bLat, bLon, spacing, hA, hB;
+            double swLat, swLon, aLat, aLon, bLat, bLon, spacing;
+            DatumHeight hADatum, hBDatum;
             double k = 4.0 / 3.0;
             if (!ReadNumberArg(argv, 3, "swLat", swLat) || !ReadNumberArg(argv, 4, "swLon", swLon)
                 || !ReadNumberArg(argv, 5, "aLat", aLat) || !ReadNumberArg(argv, 6, "aLon", aLon)
                 || !ReadNumberArg(argv, 7, "bLat", bLat) || !ReadNumberArg(argv, 8, "bLon", bLon)
                 || !ReadPositiveNumberArg(argv, 9, "spacing", spacing)
-                || !ReadNumberArg(argv, 10, "hA", hA) || !ReadNumberArg(argv, 11, "hB", hB)
+                || !ReadHeightArg(argv, 10, "hA", hADatum) || !ReadHeightArg(argv, 11, "hB", hBDatum)
                 || (argc >= 13 && !ReadPositiveNumberArg(argv, 12, "k", k)))
             {
                 return 1;
@@ -227,18 +262,28 @@ int main(int argc, char* argv[])
             if (!PathCanBeSampled(a, b, spacing)) return 1;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            DatumHeight hADatum{ hA, VerticalDatum::HeightAboveGround };
-            DatumHeight hBDatum{ hB, VerticalDatum::HeightAboveGround };
             LineOfSightResult los = ComputeLineOfSight(profile, hADatum, hBDatum, k);
 
+            // Every height printed says what it is measured from: the tile's own datum. The eyes
+            // are printed to the last digit, so the same eye given in two datums can be compared.
+            const char* datumWords = VerticalDatumWords(sampler.GetDatum());
             std::cout << "Visible: " << (los.isVisible ? "YES" : "NO") << std::endl;
+            if (profile.front().elevationM.has_value() && profile.back().elevationM.has_value())
+            {
+                std::optional<double> eyeA = EyeHeightInTerrainDatum(hADatum, *profile.front().elevationM, sampler.GetDatum());
+                std::optional<double> eyeB = EyeHeightInTerrainDatum(hBDatum, *profile.back().elevationM, sampler.GetDatum());
+                std::streamsize precision = std::cout.precision(17);
+                if (eyeA.has_value()) std::cout << "Observer eye: " << *eyeA << " m " << datumWords << std::endl;
+                if (eyeB.has_value()) std::cout << "Target eye: " << *eyeB << " m " << datumWords << std::endl;
+                std::cout.precision(precision);
+            }
             if (los.blockingPoint.has_value())
             {
                 std::cout << "Blocking point: " << los.blockingPoint->latitudeDeg << ", " << los.blockingPoint->longitudeDeg << std::endl;
-                std::cout << "Blocking elevation: " << *los.blockingElevationM << std::endl;
+                std::cout << "Blocking elevation: " << *los.blockingElevationM << " m " << datumWords << std::endl;
                 std::cout << "Blocking feature: " << TerrainFeatureTypeToString(los.blockingFeature) << std::endl;
             }
-            std::cout << "Clearance deficit: " << los.clearanceDeficitM << std::endl;
+            std::cout << "Clearance deficit: " << los.clearanceDeficitM << " m" << std::endl;
             std::cout << "Status: " << ComputationStatusToString(los.status) << std::endl;
             return 0;
         }
@@ -246,17 +291,18 @@ int main(int argc, char* argv[])
         if (mode == "viewshed" && argc >= 10 && argc <= 13)
         {
             std::string hgtFile = argv[2];
-            double swLat, swLon, obsLat, obsLon, spacing, height;
-            double targetHeight = 0.0;
+            double swLat, swLon, obsLat, obsLon, spacing;
+            DatumHeight heightDatum;
+            DatumHeight targetHeight{ 0.0, VerticalDatum::HeightAboveGround };
             int gridSize = 0;
             double k = 4.0 / 3.0;
             if (!ReadNumberArg(argv, 3, "swLat", swLat) || !ReadNumberArg(argv, 4, "swLon", swLon)
                 || !ReadNumberArg(argv, 5, "obsLat", obsLat) || !ReadNumberArg(argv, 6, "obsLon", obsLon)
                 || !ReadPositiveIntArg(argv, 7, "gridSize", gridSize)
                 || !ReadPositiveNumberArg(argv, 8, "spacing", spacing)
-                || !ReadNumberArg(argv, 9, "height", height)
+                || !ReadHeightArg(argv, 9, "height", heightDatum)
                 || (argc >= 11 && !ReadPositiveNumberArg(argv, 10, "k", k))
-                || (argc >= 13 && !ReadNumberArg(argv, 12, "targetHeight", targetHeight)))
+                || (argc >= 13 && !ReadHeightArg(argv, 12, "targetHeight", targetHeight)))
             {
                 return 1;
             }
@@ -271,9 +317,7 @@ int main(int argc, char* argv[])
             }
             
             GeoPoint observer{ obsLat, obsLon };
-            DatumHeight heightDatum{ height, VerticalDatum::HeightAboveGround };
-
-            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k, nullptr, DatumHeight{ targetHeight, VerticalDatum::HeightAboveGround });
+            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k, nullptr, targetHeight);
             if (result.inputProblem != InputProblem::None)
             {
                 std::cout << "Error: " << InputProblemToString(result.inputProblem) << std::endl;
@@ -288,13 +332,14 @@ int main(int argc, char* argv[])
         if (mode == "fresnel" && (argc == 13 || argc == 14))
         {
             std::string hgtFile = argv[2];
-            double swLat, swLon, aLat, aLon, bLat, bLon, spacing, hA, hB, frequencyMHz;
+            double swLat, swLon, aLat, aLon, bLat, bLon, spacing, frequencyMHz;
+            DatumHeight hADatum, hBDatum;
             double k = 4.0 / 3.0;
             if (!ReadNumberArg(argv, 3, "swLat", swLat) || !ReadNumberArg(argv, 4, "swLon", swLon)
                 || !ReadNumberArg(argv, 5, "aLat", aLat) || !ReadNumberArg(argv, 6, "aLon", aLon)
                 || !ReadNumberArg(argv, 7, "bLat", bLat) || !ReadNumberArg(argv, 8, "bLon", bLon)
                 || !ReadPositiveNumberArg(argv, 9, "spacing", spacing)
-                || !ReadNumberArg(argv, 10, "hA", hA) || !ReadNumberArg(argv, 11, "hB", hB)
+                || !ReadHeightArg(argv, 10, "hA", hADatum) || !ReadHeightArg(argv, 11, "hB", hBDatum)
                 || !ReadPositiveNumberArg(argv, 12, "frequencyMHz", frequencyMHz)
                 || (argc == 14 && !ReadPositiveNumberArg(argv, 13, "k", k)))
             {
@@ -312,8 +357,6 @@ int main(int argc, char* argv[])
             if (!PathCanBeSampled(a, b, spacing)) return 1;
 
             std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacing, sampler);
-            DatumHeight hADatum{ hA, VerticalDatum::HeightAboveGround };
-            DatumHeight hBDatum{ hB, VerticalDatum::HeightAboveGround };
             FresnelClearanceResult result = ComputeFresnelClearance(profile, hADatum, hBDatum, frequencyMHz * 1e6, k);
 
             if (!IsOk(result.status))
@@ -370,8 +413,8 @@ int main(int argc, char* argv[])
                 return 1;
             }
 
-            // The file is a positive spacing followed by six numbers per query
-            // (aLat aLon bLat bLon hA hB). Read it as whitespace-separated tokens and
+            // The file is a positive spacing followed by six values per query
+            // (aLat aLon bLat bLon hA hB, the heights in any datum). Read it as whitespace-separated tokens and
             // check every one, so a word where a number belongs, or a query cut
             // short at the end of the file, is reported instead of silently dropped.
             std::vector<std::string> tokens;
@@ -391,15 +434,16 @@ int main(int argc, char* argv[])
             if ((tokens.size() - 1) % 6 != 0)
             {
                 std::cout << "Error: " << queriesFile << " has " << (tokens.size() - 1)
-                    << " values after the spacing; each query is six numbers (aLat aLon bLat bLon hA hB)" << std::endl;
+                    << " values after the spacing; each query is six values (aLat aLon bLat bLon hA hB)" << std::endl;
                 return 1;
             }
 
+            // hA and hB are heights as the command line takes them, in any datum (ParseHeight).
             std::vector<BatchLineOfSightQuery> queries;
             for (size_t first = 1; first < tokens.size(); first += 6)
             {
-                double values[6];
-                for (size_t j = 0; j < 6; j++)
+                double values[4];
+                for (size_t j = 0; j < 4; j++)
                 {
                     std::optional<double> value = ParseFiniteDouble(tokens[first + j].c_str());
                     if (!value.has_value())
@@ -410,12 +454,25 @@ int main(int argc, char* argv[])
                     }
                     values[j] = *value;
                 }
+                DatumHeight heights[2];
+                for (size_t j = 0; j < 2; j++)
+                {
+                    const std::string& text = tokens[first + 4 + j];
+                    HeightArg parsed = ParseHeight(text.c_str());
+                    std::string message = HeightArgMessage(parsed, queriesFile + ", query " + std::to_string(queries.size()) + (j == 0 ? ": hA" : ": hB"), text);
+                    if (!message.empty())
+                    {
+                        std::cout << "Error: " << message << std::endl;
+                        return 1;
+                    }
+                    heights[j] = parsed.height;
+                }
 
                 BatchLineOfSightQuery q;
                 q.observer = GeoPoint{ values[0], values[1] };
                 q.target = GeoPoint{ values[2], values[3] };
-                q.observerHeight = DatumHeight{ values[4], VerticalDatum::HeightAboveGround };
-                q.targetHeight = DatumHeight{ values[5], VerticalDatum::HeightAboveGround };
+                q.observerHeight = heights[0];
+                q.targetHeight = heights[1];
                 queries.push_back(q);
             }
 
@@ -630,6 +687,8 @@ int main(int argc, char* argv[])
         std::cout << "  TerrainEngine.exe viewshed <hgtFile> <swLat> <swLon> <obsLat> <obsLon> <gridSize> <spacing> <height> [k] [nearest|bilinear] [targetHeight]" << std::endl;
         std::cout << "  TerrainEngine.exe fresnel <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> <frequencyMHz> [k]" << std::endl;
         std::cout << "  TerrainEngine.exe batch <hgtFile> <swLat> <swLon> <queriesFile> [k]" << std::endl;
+        std::cout << "A height (hA, hB, height, targetHeight) is metres above the ground: 2 or 2:agl; above mean sea level: 1937:msl;" << std::endl;
+        std::cout << "or above the WGS84 ellipsoid with the geoid undulation at that point: 1915.4:hae:-21.6." << std::endl;
         return 1;
     }
 
@@ -713,6 +772,8 @@ int main(int argc, char* argv[])
     TestDataNotGivenIsToldApartFromAVoid();
     TestQueryExtentsAreTheBoxesTheQueriesRead();
     TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile();
+    TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm();
+    TestACommandLineHeightSaysItsDatum();
 
     std::cout << "-------------------------" << std::endl;
 

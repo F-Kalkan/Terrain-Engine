@@ -63,7 +63,8 @@ public sealed class NativeTerrainEngine : ITerrainEngine
             native.SouthWestLatitudeDeg, native.SouthWestLongitudeDeg,
             native.NorthEastLatitudeDeg, native.NorthEastLongitudeDeg,
             native.PostsPerSide, native.VoidCount,
-            native.PostSpacingArcsec, native.PostSpacingNorthSouthM, native.PostSpacingEastWestM);
+            native.PostSpacingArcsec, native.PostSpacingNorthSouthM, native.PostSpacingEastWestM,
+            (HeightDatum)native.ElevationDatum);
 
         return EngineResult<ITile>.Ok(new NativeTile(handle, path!, info));
     }
@@ -142,10 +143,10 @@ public sealed class NativeTerrainEngine : ITerrainEngine
             {
                 ObserverLatitudeDeg = query.ObserverLatitudeDeg,
                 ObserverLongitudeDeg = query.ObserverLongitudeDeg,
-                ObserverHeightAboveGroundM = query.ObserverHeightAboveGroundM,
+                ObserverHeight = ToNative(query.ObserverHeight),
                 TargetLatitudeDeg = query.TargetLatitudeDeg,
                 TargetLongitudeDeg = query.TargetLongitudeDeg,
-                TargetHeightAboveGroundM = query.TargetHeightAboveGroundM,
+                TargetHeight = ToNative(query.TargetHeight),
                 SpacingM = query.SpacingM,
                 RefractionK = query.RefractionK,
                 FrequencyMHz = query.FrequencyMHz,
@@ -202,7 +203,8 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                     result.IsVisible != 0,
                     blocking,
                     clearance,
-                    samples));
+                    samples,
+                    (HeightDatum)result.HeightsDatum));
             }
             finally
             {
@@ -223,13 +225,13 @@ public sealed class NativeTerrainEngine : ITerrainEngine
             {
                 ObserverLatitudeDeg = query.ObserverLatitudeDeg,
                 ObserverLongitudeDeg = query.ObserverLongitudeDeg,
-                ObserverHeightAboveGroundM = query.ObserverHeightAboveGroundM,
+                ObserverHeight = ToNative(query.ObserverHeight),
                 RadiusKm = query.RadiusKm,
                 SpacingM = query.SpacingM,
                 RefractionK = query.RefractionK,
                 Interpolation = (int)query.Interpolation,
                 Algorithm = (int)query.Algorithm,
-                TargetHeightAboveGroundM = query.TargetHeightAboveGroundM,
+                TargetHeight = ToNative(query.TargetHeight),
             };
 
             // An exception must never unwind into the DLL: anything thrown while reporting stops the run.
@@ -272,7 +274,7 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                     grid.Rows, grid.Cols, grid.ObserverRow, grid.ObserverCol,
                     grid.SpacingDeg, grid.ColStepDeg,
                     grid.SouthWestCellLatitudeDeg, grid.SouthWestCellLongitudeDeg,
-                    cells, heights));
+                    cells, heights, (HeightDatum)grid.HeightsDatum));
             }
             finally
             {
@@ -280,6 +282,15 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                 NativeMethods.te_free(heightsPtr);
             }
         }
+
+        /// <summary>A height as te_height carries it: the undulation, when given, flagged as given.</summary>
+        private static NativeMethods.HeightNative ToNative(Height height) => new()
+        {
+            ValueM = height.ValueM,
+            Datum = (int)height.Datum,
+            GeoidUndulationM = height.GeoidUndulationM ?? 0,
+            HasGeoidUndulation = height.GeoidUndulationM.HasValue ? 1 : 0,
+        };
 
         public void Dispose()
         {

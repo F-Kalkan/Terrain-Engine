@@ -6,6 +6,8 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.VisualTree;
 using TerrainBench.Controls;
+using TerrainBench.Engine;
+using TerrainBench.Presentation;
 using TerrainBench.ViewModels;
 using Xunit;
 
@@ -454,5 +456,41 @@ public class MainFlowTests
         Assert.Equal(app.ViewModel.About.EngineCommit, app.Find<SelectableTextBlock>("AboutCommit").Text);
         Assert.False(string.IsNullOrEmpty(app.ViewModel.About.EngineCommit));
         Assert.NotNull(app.Window.Icon);
+    }
+
+    [AvaloniaFact]
+    public void A_target_is_placed_by_altitude_and_one_above_the_ellipsoid_waits_for_its_undulation()
+    {
+        using var app = new Harness();
+        app.Click(app.Find<Button>("SamplePromptButton"));
+        app.SelectTab(MainTab.LineOfSight);
+        var target = app.ViewModel.LineOfSight.TargetHeight;
+        var measuredFrom = app.Window.GetVisualDescendants().OfType<ComboBox>().Single(c => c.Name == "Datum" && ReferenceEquals(c.DataContext, target));
+
+        // Above Sea Level in the target's Measured From list makes its height an altitude: an aircraft at 5,000 m.
+        measuredFrom.SelectedIndex = (int)HeightDatum.AboveSeaLevel;
+        app.FieldBox(target.Metres).Text = "5000";
+        app.Settle();
+        var unit = app.Window.GetVisualDescendants().OfType<TextBlock>().Single(t => ReferenceEquals(t.DataContext, target.Metres) && t.Classes.Contains("muted"));
+        Assert.Equal("(m above sea level)", unit.Text);
+
+        app.Click(app.Find<Button>("CheckButton"));
+        var shown = app.Find<StackPanel>("LineOfSightResult").GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
+        Assert.Contains("5000.00 m above mean sea level", shown);
+
+        // Above the ellipsoid, the geoid undulation box appears, and until it is filled the check waits, saying why.
+        Assert.DoesNotContain(app.Window.GetVisualDescendants().OfType<TextBox>(), t => t.IsEffectivelyVisible && ReferenceEquals(t.DataContext, target.Undulation));
+        measuredFrom.SelectedIndex = (int)HeightDatum.AboveEllipsoid;
+        app.Settle();
+        var undulation = app.FieldBox(target.Undulation);
+        Assert.True(undulation.IsEffectivelyVisible);
+        var error = app.Window.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Classes.Contains("error") && ReferenceEquals(t.DataContext, target.Undulation));
+        Assert.True(error.IsEffectivelyVisible);
+        Assert.Equal(PlainWords.UndulationRequired, error.Text);
+        Assert.False(app.Find<Button>("CheckButton").IsEffectivelyEnabled);
+
+        undulation.Text = "-21.63";
+        app.Settle();
+        Assert.True(app.Find<Button>("CheckButton").IsEffectivelyEnabled);
     }
 }

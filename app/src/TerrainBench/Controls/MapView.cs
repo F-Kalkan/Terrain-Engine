@@ -375,11 +375,14 @@ public sealed class MapView : Control
         if (_elevation is null || visible.Width <= 0) return;
         var north = Text("N ↑", 13, Brushes.Black, FontWeight.Bold);
         var range = Text($"{Format.WholeMetres(_elevation.MinM)} – {Format.WholeMetres(_elevation.MaxM)}", 12, Brushes.Black);
-        double width = Math.Max(north.Width, range.Width) + 12;
-        var box = new Rect(visible.Right - width - 8, visible.Y + 8, width, north.Height + range.Height + 10);
+        // What the range is measured from, on a line of its own so the card stays narrow.
+        var above = Text(Tile is { } info ? PlainWords.DatumWords(info.ElevationDatum) : string.Empty, 12, Brushes.Black);
+        double width = Math.Max(north.Width, Math.Max(range.Width, above.Width)) + 12;
+        var box = new Rect(visible.Right - width - 8, visible.Y + 8, width, north.Height + range.Height + above.Height + 10);
         context.FillRectangle(new SolidColorBrush(Color.FromArgb(215, 255, 255, 255)), box, 4);
         context.DrawText(north, new Point(box.X + 6, box.Y + 4));
         context.DrawText(range, new Point(box.X + 6, box.Y + 6 + north.Height));
+        context.DrawText(above, new Point(box.X + 6, box.Y + 6 + north.Height + range.Height));
     }
 
     /// <summary>What is known about the marker or blocking point under the pointer, on a small card beside it.</summary>
@@ -401,7 +404,7 @@ public sealed class MapView : Control
                 title = "Blocked";
                 titleBrush = Resource("BlockedTextBrush", Brushes.Red);
                 lines.Add((PlainWords.BlockingSentence(blocking), body));
-                lines.Add(($"Terrain height: {Format.Metres(blocking.ElevationM)} above mean sea level", muted));
+                lines.Add(($"Terrain height: {Format.Metres(blocking.ElevationM)} {PlainWords.DatumWords(Analysis.HeightsDatum)}", muted));
                 lines.Add(($"{Format.Degrees(blocking.LatitudeDeg)}, {Format.Degrees(blocking.LongitudeDeg)}", muted));
                 break;
             case Hovered.Observer when ObserverLatitude is double lat && ObserverLongitude is double lon:
@@ -454,11 +457,12 @@ public sealed class MapView : Control
     }
 
     /// <summary>Ground and eye height from the last analysis, when it was computed for this very point.</summary>
-    private static void AddHeights(List<(string, IBrush)> lines, double lat, double lon, (PathSample Sample, double? EyeM)? end, IBrush brush)
+    private void AddHeights(List<(string, IBrush)> lines, double lat, double lon, (PathSample Sample, double? EyeM)? end, IBrush brush)
     {
         if (end is not { } e || Math.Abs(e.Sample.LatitudeDeg - lat) > 1e-9 || Math.Abs(e.Sample.LongitudeDeg - lon) > 1e-9) return;
-        lines.Add(($"Ground: {(e.Sample.ElevationM is double g ? Format.Metres(g) : "no data")}", brush));
-        if (e.EyeM is double eye) lines.Add(($"Eye: {Format.Metres(eye)} above mean sea level", brush));
+        string above = Analysis is null ? string.Empty : " " + PlainWords.DatumWords(Analysis.HeightsDatum);
+        lines.Add(($"Ground: {(e.Sample.ElevationM is double g ? Format.Metres(g) + above : "no data")}", brush));
+        if (e.EyeM is double eye) lines.Add(($"Eye: {Format.Metres(eye)}{above}", brush));
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)

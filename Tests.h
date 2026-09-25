@@ -3599,3 +3599,99 @@ void TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile()
 
     Expect(same && reported, "TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile");
 }
+
+//TEST 79
+void TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm()
+{
+    // A height above sea level or the ellipsoid can put an eye or a target below the ground
+    // under it: a target at 200 m above sea level over a 300 m plateau, an observer at 50 m
+    // above sea level on 100 m ground. The line of sight is blocked by that ground at the
+    // path's own end, so naive hides the cell; the fast viewshed, the fast minimum visible
+    // height and a prepared observer, whose horizons leave both ends' ground out, must say
+    // the same -- not see into or out of the ground from the cells beside it.
+    const int size = 21;
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    ElevationCells cells = MakeFlatCells(size, 100.0);
+    for (int row = 14; row < 18; row++)
+        for (int col = 0; col < size; col++) cells[row][col] = 300.0;
+    RasterBlockElevationSampler ground = MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+    double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
+    auto centre = [&](int row, int col) {
+        return GeoPoint{ observer.latitudeDeg + (row - size / 2) * spacingDeg, observer.longitudeDeg + (col - size / 2) * lonSpacingDeg };
+    };
+    auto sameCells = [](const std::vector<std::vector<CellVisibility>>& a, const std::vector<std::vector<CellVisibility>>& b) { return a == b; };
+
+    // A target under the plateau's ground: hidden there by every algorithm.
+    const DatumHeight underPlateau{ 200.0, VerticalDatum::OrthometricMsl };
+    ViewshedResult fast = ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, ground, 4.0 / 3.0, nullptr, underPlateau);
+    ViewshedResult naive = ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, ground, 4.0 / 3.0, nullptr, underPlateau);
+    PreparedObserver prepared = PrepareObserver(observer, Agl(2.0), 500.0, spacingDeg, ground);
+    bool targets = sameCells(fast.visible, naive.visible) && CountCells(naive, CellVisibility::Visible) > 0;
+    for (int row = 14; row < 18; row++)
+    {
+        for (int col = 0; col < size; col++)
+        {
+            targets = targets && naive.visible[row][col] == CellVisibility::NotVisible
+                && QueryTarget(prepared, centre(row, col), underPlateau).state != CellVisibility::Visible;
+        }
+    }
+
+    // An eye under its own ground: nothing seen but its own cell, from any height.
+    const DatumHeight underGround{ 50.0, VerticalDatum::OrthometricMsl };
+    ViewshedResult fastBelow = ComputeViewshedFast(observer, underGround, size, size, spacingDeg, ground);
+    ViewshedResult naiveBelow = ComputeViewshedNaive(observer, underGround, size, size, spacingDeg, ground);
+    MinimumVisibleHeightResult fastHeights = ComputeMinimumVisibleHeightFast(observer, underGround, size, size, spacingDeg, ground);
+    MinimumVisibleHeightResult exactHeights = ComputeMinimumVisibleHeightReference(observer, underGround, size, size, spacingDeg, ground);
+    PreparedObserver buried = PrepareObserver(observer, underGround, 500.0, spacingDeg, ground);
+    bool observers = sameCells(fastBelow.visible, naiveBelow.visible) && CountCells(naiveBelow, CellVisibility::Visible) == 1
+        && fastHeights.state == exactHeights.state;
+    for (int row = 0; row < size; row++)
+    {
+        for (int col = 0; col < size; col++)
+        {
+            if (row == size / 2 && col == size / 2) continue;
+            observers = observers && std::isinf(fastHeights.heightAboveGroundM[row][col]) && std::isinf(exactHeights.heightAboveGroundM[row][col])
+                && QueryTarget(buried, centre(row, col), Agl(2.0)).state == CellVisibility::NotVisible;
+        }
+    }
+
+    Expect(targets && observers, "TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm");
+}
+
+//TEST 80
+void TestACommandLineHeightSaysItsDatum()
+{
+    // The command line takes a height in any datum the engine can put on the terrain: a bare
+    // number, as always, above the ground; <m>:agl the same; <m>:msl above mean sea level;
+    // <m>:hae:<undulation> above the WGS84 ellipsoid. An ellipsoidal height without its
+    // undulation is refused -- never read as if the geoid lay on the ellipsoid there -- and so
+    // is anything else that isn't one of these, each with its own reason.
+    auto reads = [](const char* text, VerticalDatum datum, double valueM, std::optional<double> undulationM) {
+        HeightArg parsed = ParseHeight(text);
+        return parsed.problem == HeightArgProblem::None && parsed.height.datum == datum && parsed.height.valueM == valueM
+            && parsed.height.geoidUndulationM == undulationM;
+    };
+    auto refuses = [](const char* text, HeightArgProblem problem) { return ParseHeight(text).problem == problem; };
+
+    bool accepted = reads("2", VerticalDatum::HeightAboveGround, 2.0, std::nullopt)
+        && reads("2:agl", VerticalDatum::HeightAboveGround, 2.0, std::nullopt)
+        && reads("1937:msl", VerticalDatum::OrthometricMsl, 1937.0, std::nullopt)
+        && reads("-12.5:msl", VerticalDatum::OrthometricMsl, -12.5, std::nullopt)
+        && reads("1915.4:hae:-21.6", VerticalDatum::EllipsoidalHae, 1915.4, -21.6);
+
+    bool refused = refuses("2:hae", HeightArgProblem::EllipsoidWithoutUndulation)
+        && refuses("2:hae:", HeightArgProblem::NotANumber) && refuses("2:hae:x", HeightArgProblem::NotANumber)
+        && refuses("abc", HeightArgProblem::NotANumber) && refuses(":msl", HeightArgProblem::NotANumber)
+        && refuses("nan:msl", HeightArgProblem::NotANumber) && refuses(nullptr, HeightArgProblem::NotANumber)
+        && refuses("2:", HeightArgProblem::UnknownDatum) && refuses("2:MSL", HeightArgProblem::UnknownDatum)
+        && refuses("2:msl:5", HeightArgProblem::UnknownDatum) && refuses("2:hae:1:2", HeightArgProblem::UnknownDatum)
+        && refuses("2:feet", HeightArgProblem::UnknownDatum);
+
+    // Every datum has words for a printed height, so none is left to be guessed.
+    bool worded = std::string(VerticalDatumWords(VerticalDatum::OrthometricMsl)) == "above mean sea level"
+        && std::string(VerticalDatumWords(VerticalDatum::HeightAboveGround)) == "above the ground"
+        && std::string(VerticalDatumWords(VerticalDatum::EllipsoidalHae)) == "above the WGS84 ellipsoid";
+
+    Expect(accepted && refused && worded, "TestACommandLineHeightSaysItsDatum");
+}

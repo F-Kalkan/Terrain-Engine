@@ -6,12 +6,20 @@ namespace TerrainBench.Presentation;
 /// <summary>The profile as CSV: one row per sample, invariant numbers, voids left empty.</summary>
 public static class ProfileCsv
 {
-    public const string Header = "distance_m,latitude_deg,longitude_deg,elevation_m,curvature_corrected_elevation_m,sight_line_height_m,first_fresnel_radius_m";
+    /// <summary>
+    /// The columns, each height's name saying what it is measured from -- the datum the engine returned the
+    /// path's heights in -- so the file never leaves it to be guessed.
+    /// </summary>
+    public static string Header(HeightDatum heightsDatum)
+    {
+        string above = PlainWords.DatumColumn(heightsDatum);
+        return $"distance_m,latitude_deg,longitude_deg,elevation_m_{above},curvature_corrected_elevation_m_{above},sight_line_height_m_{above},first_fresnel_radius_m";
+    }
 
     public static string Write(PathAnalysis analysis)
     {
         var text = new StringBuilder();
-        text.Append(Header).Append("\r\n");
+        text.Append(Header(analysis.HeightsDatum)).Append("\r\n");
         foreach (var sample in analysis.Samples)
         {
             text.Append(Format.RoundTrip(sample.DistanceM)).Append(',')

@@ -256,7 +256,7 @@
                   </StackPanel>
                   <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverLatitude}" />
                   <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverLongitude}" />
-                  <views:NumberFieldView DataContext="{Binding LineOfSight.ObserverHeight}" />
+                  <views:HeightInputView DataContext="{Binding LineOfSight.ObserverHeight}" />
 
                   <StackPanel Classes="subheading">
                     <Ellipse Width="14" Height="14" Fill="#E69F00" Stroke="White" StrokeThickness="3" VerticalAlignment="Center" />
@@ -264,7 +264,7 @@
                   </StackPanel>
                   <views:NumberFieldView DataContext="{Binding LineOfSight.TargetLatitude}" />
                   <views:NumberFieldView DataContext="{Binding LineOfSight.TargetLongitude}" />
-                  <views:NumberFieldView DataContext="{Binding LineOfSight.TargetHeight}" />
+                  <views:HeightInputView DataContext="{Binding LineOfSight.TargetHeight}" />
 
                   <TextBlock Classes="heading" Text="Parameters" />
                   <views:NumberFieldView DataContext="{Binding LineOfSight.RefractionK}" />
@@ -384,7 +384,7 @@
                   </StackPanel>
                   <views:NumberFieldView DataContext="{Binding Viewshed.ObserverLatitude}" />
                   <views:NumberFieldView DataContext="{Binding Viewshed.ObserverLongitude}" />
-                  <views:NumberFieldView DataContext="{Binding Viewshed.ObserverHeight}" />
+                  <views:HeightInputView DataContext="{Binding Viewshed.ObserverHeight}" />
 
                   <TextBlock Classes="heading" Text="Parameters" />
                   <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
@@ -395,7 +395,7 @@
                             IsEnabled="{Binding Viewshed.IsIdle}" Margin="0,0,0,12" AutomationProperties.Name="Show"
                             AutomationProperties.HelpText="{x:Static p:PlainWords.ShowExplanation}" />
                   <Panel IsEnabled="{Binding Viewshed.UsesTargetHeight}">
-                    <views:NumberFieldView DataContext="{Binding Viewshed.TargetHeight}" />
+                    <views:HeightInputView DataContext="{Binding Viewshed.TargetHeight}" />
                   </Panel>
                   <views:NumberFieldView DataContext="{Binding Viewshed.RadiusKm}" />
                   <views:NumberFieldView DataContext="{Binding Viewshed.Spacing}" />
@@ -445,6 +445,7 @@
                   <StackPanel Name="ViewshedResult" IsVisible="{Binding Viewshed.ShowResult}" Spacing="6" Margin="0,8,0,0">
                     <TextBlock Name="ViewshedSummary" Text="{Binding Viewshed.Summary}" TextWrapping="Wrap" />
                     <TextBlock Classes="heading" Text="Legend" />
+                    <TextBlock Name="ViewshedLegendNote" Classes="muted" Text="{Binding Viewshed.LegendNote}" IsVisible="{Binding Viewshed.HasLegendNote}" TextWrapping="Wrap" />
                     <Border Classes="factsCard" Margin="0" Padding="6,6">
                       <ItemsControl Name="ViewshedLegend" ItemsSource="{Binding Viewshed.Legend}">
                         <ItemsControl.ItemTemplate>

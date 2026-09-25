@@ -226,6 +226,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         var fields = new Dictionary<string, string>();
         foreach (var field in LineOfSight.Fields.Concat(Viewshed.Fields)) fields[field.Key] = field.Text;
+        foreach (var height in LineOfSight.Heights.Concat(Viewshed.Heights)) fields[height.DatumKey] = height.Datum.ToString();
 
         _settings.Save(new AppSettings
         {

@@ -83,6 +83,30 @@ public enum CellState : byte
     DataNotGiven = 4,
 }
 
+/// <summary>What a height is measured from. The values are the engine's TE_DATUM_* codes.</summary>
+public enum HeightDatum
+{
+    /// <summary>Above the ground under the point.</summary>
+    AboveGround = 0,
+
+    /// <summary>Above mean sea level (the geoid): orthometric, the datum of an SRTM tile.</summary>
+    AboveSeaLevel = 1,
+
+    /// <summary>Above the WGS84 ellipsoid; needs the geoid undulation at the point.</summary>
+    AboveEllipsoid = 2,
+}
+
+/// <summary>
+/// A height and what it is measured from. Above sea level or the ellipsoid it is one altitude, whatever
+/// the ground below. Above the ellipsoid it needs <see cref="GeoidUndulationM"/>, the geoid's height above
+/// the ellipsoid at the point (ellipsoidal = sea level + undulation), and the engine refuses one without
+/// it. The default is the ground itself; a bare number converts to that many metres above the ground.
+/// </summary>
+public readonly record struct Height(double ValueM, HeightDatum Datum = HeightDatum.AboveGround, double? GeoidUndulationM = null)
+{
+    public static implicit operator Height(double aboveGroundM) => new(aboveGroundM);
+}
+
 public enum ViewshedAlgorithm
 {
     Fast = 0,
@@ -99,7 +123,8 @@ public sealed record TileInfo(
     int VoidCount,
     double PostSpacingArcsec,
     double PostSpacingNorthSouthM,
-    double PostSpacingEastWestM);
+    double PostSpacingEastWestM,
+    HeightDatum ElevationDatum = HeightDatum.AboveSeaLevel);
 
 /// <summary>
 /// Every post of a tile, row-major, row 0 the northern edge and column 0 the western edge. A post
@@ -107,14 +132,14 @@ public sealed record TileInfo(
 /// </summary>
 public sealed record TilePosts(int PostsPerSide, float[] ElevationsM, byte[] Valid);
 
-/// <summary>One observer-to-target query: heights above ground, spacing in metres.</summary>
+/// <summary>One observer-to-target query: each height in any datum, spacing in metres.</summary>
 public sealed record PathQuery(
     double ObserverLatitudeDeg,
     double ObserverLongitudeDeg,
-    double ObserverHeightAboveGroundM,
+    Height ObserverHeight,
     double TargetLatitudeDeg,
     double TargetLongitudeDeg,
-    double TargetHeightAboveGroundM,
+    Height TargetHeight,
     double SpacingM,
     double RefractionK,
     Interpolation Interpolation,
@@ -159,18 +184,19 @@ public sealed record PathAnalysis(
     bool IsVisible,
     BlockingPoint? Blocking,
     FresnelClearance? Fresnel,
-    IReadOnlyList<PathSample> Samples);
+    IReadOnlyList<PathSample> Samples,
+    HeightDatum HeightsDatum = HeightDatum.AboveSeaLevel);
 
 public sealed record ViewshedQuery(
     double ObserverLatitudeDeg,
     double ObserverLongitudeDeg,
-    double ObserverHeightAboveGroundM,
+    Height ObserverHeight,
     double RadiusKm,
     double SpacingM,
     double RefractionK,
     Interpolation Interpolation,
     ViewshedAlgorithm Algorithm,
-    double TargetHeightAboveGroundM = 0);
+    Height TargetHeight = default);
 
 /// <summary>
 /// A viewshed grid: <see cref="Cells"/> is row-major with row 0 the southernmost row, and cell
@@ -193,7 +219,8 @@ public sealed record ViewshedMap(
     double SouthWestCellLatitudeDeg,
     double SouthWestCellLongitudeDeg,
     CellState[] Cells,
-    double[]? HeightsM = null)
+    double[]? HeightsM = null,
+    HeightDatum HeightsDatum = HeightDatum.AboveGround)
 {
     public CellState At(int row, int col) => Cells[row * Cols + col];
 

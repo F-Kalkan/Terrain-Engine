@@ -129,7 +129,7 @@ public class KnownAnswerTests
 
         using var tile = Engine.OpenTile(RepositoryFiles.SampleTile, 36, -112).Value;
         var ground = tile.Viewshed(new ViewshedQuery(36.3, -111.6, 2, 3, 30, 4.0 / 3.0, Interpolation.Nearest, ViewshedAlgorithm.Fast), null, default).Value;
-        var map = tile.Viewshed(new ViewshedQuery(36.3, -111.6, 2, 3, 30, 4.0 / 3.0, Interpolation.Nearest, ViewshedAlgorithm.Fast, TargetHeightAboveGroundM: 10), null, default).Value;
+        var map = tile.Viewshed(new ViewshedQuery(36.3, -111.6, 2, 3, 30, 4.0 / 3.0, Interpolation.Nearest, ViewshedAlgorithm.Fast, TargetHeight: 10), null, default).Value;
 
         var folder = Path.Combine(Path.GetTempPath(), $"terrainbench-cli-{Guid.NewGuid():N}");
         Directory.CreateDirectory(folder);
@@ -142,7 +142,7 @@ public class KnownAnswerTests
             Assert.Equal((map.Cols, map.Rows), (width, height));
             for (int i = 0; i < map.Cells.Length; i++)
             {
-                byte expected = map.Cells[i] switch { CellState.Visible => 255, CellState.NotVisible => 0, _ => 128 };
+                byte expected = map.Cells[i] switch { CellState.Visible => 255, CellState.NotVisible => 0, CellState.DataNotGiven => 192, _ => 128 };
                 Assert.True(pixels[i] == expected, $"Cell {i}: the DLL says {map.Cells[i]}, the command line {pixels[i]}.");
             }
         }

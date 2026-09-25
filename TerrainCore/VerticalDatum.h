@@ -83,6 +83,22 @@ inline std::optional<double> EyeHeightInTerrainDatum(const DatumHeight& height, 
     return ConvertHeightBetweenDatums(height.valueM, height.datum, terrainDatum, *height.geoidUndulationM);
 }
 
+// What a height in the datum is measured from, in words for a reader: "above mean sea
+// level", so a printed height never leaves its datum to be guessed.
+//
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline const char* VerticalDatumWords(VerticalDatum datum)
+{
+    switch (datum)
+    {
+    case VerticalDatum::EllipsoidalHae: return "above the WGS84 ellipsoid";
+    case VerticalDatum::OrthometricMsl: return "above mean sea level";
+    case VerticalDatum::PressureAltitude: return "of pressure altitude";
+    case VerticalDatum::HeightAboveGround: return "above the ground";
+    default: return "in an unknown datum";
+    }
+}
+
 // Whether EyeHeightInTerrainDatum can succeed. That never depends on the ground
 // elevation, so it can be decided before the ground under the height is known.
 //

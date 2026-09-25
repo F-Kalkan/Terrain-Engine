@@ -86,7 +86,7 @@ public class BadInputTests : IDisposable
     public void A_viewshed_target_height_below_ground_or_not_a_number_is_refused(double targetHeightM)
     {
         using var tile = _engine.OpenTile(RepositoryFiles.SampleTile, 36, -112).Value;
-        AssertError(tile.Viewshed(View1() with { TargetHeightAboveGroundM = targetHeightM }, null, default).Error, EngineErrorKind.InvalidArgument, "target height");
+        AssertError(tile.Viewshed(View1() with { TargetHeight = targetHeightM }, null, default).Error, EngineErrorKind.InvalidArgument, "target height");
     }
 
     [Fact]

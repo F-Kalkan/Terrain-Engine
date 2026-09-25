@@ -46,8 +46,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
         _tile = tile;
         ObserverLatitude = new NumberField("vs-observer-lat", "Observer Latitude", "degrees", "36.5", InsideTile(true), shortLabel: "Latitude");
         ObserverLongitude = new NumberField("vs-observer-lon", "Observer Longitude", "degrees", "-111.5", InsideTile(false), shortLabel: "Longitude");
-        ObserverHeight = new NumberField("vs-observer-height", "Observer Height", "m above ground", "2", Rules.HeightAboveGround("The observer"), hint: PlainWords.HeightExplanation, shortLabel: "Height");
-        TargetHeight = new NumberField("vs-target-height", "Target Height", "m above ground", "0", Rules.HeightAboveGround("The target"), hint: PlainWords.TargetHeightExplanation);
+        ObserverHeight = new HeightInput("vs-observer-height", "Observer Height", "The observer", "2", PlainWords.HeightExplanation);
+        TargetHeight = new HeightInput("vs-target-height", "Target Height", "The target", "0", PlainWords.TargetHeightExplanation, PlainWords.TargetAltitudeExplanation);
         RadiusKm = new NumberField("vs-radius", "Radius", "km", "30", Rules.Positive("The radius", 1000), hint: PlainWords.RadiusExplanation);
         Spacing = new NumberField("vs-spacing", "Cell Spacing", "m", "30", Rules.Positive("The spacing", 100000), hint: PlainWords.CellSpacingExplanation);
         RefractionK = new NumberField("vs-k", "Refraction Factor - k", "", "4/3", Rules.Positive("k"), hint: PlainWords.RefractionExplanation);
@@ -61,17 +61,29 @@ public sealed partial class ViewshedViewModel : ObservableObject
                 OnSettingChanged(observer);
             };
         }
+        foreach (var height in Heights)
+        {
+            height.Changed += (_, _) =>
+            {
+                RunCommand.NotifyCanExecuteChanged();
+                OnSettingChanged(false);
+            };
+        }
     }
 
     public NumberField ObserverLatitude { get; }
     public NumberField ObserverLongitude { get; }
-    public NumberField ObserverHeight { get; }
-    public NumberField TargetHeight { get; }
+    public HeightInput ObserverHeight { get; }
+
+    /// <summary>What each cell is asked about: a target that high above its own ground, or one altitude over every cell.</summary>
+    public HeightInput TargetHeight { get; }
     public NumberField RadiusKm { get; }
     public NumberField Spacing { get; }
     public NumberField RefractionK { get; }
 
-    public IReadOnlyList<NumberField> Fields => [ObserverLatitude, ObserverLongitude, ObserverHeight, TargetHeight, RadiusKm, Spacing, RefractionK];
+    public IReadOnlyList<NumberField> Fields => [ObserverLatitude, ObserverLongitude, .. ObserverHeight.Fields, .. TargetHeight.Fields, RadiusKm, Spacing, RefractionK];
+
+    public IReadOnlyList<HeightInput> Heights => [ObserverHeight, TargetHeight];
 
     public IReadOnlyList<Interpolation> InterpolationChoices { get; } = [Interpolation.Nearest, Interpolation.Bilinear];
 
@@ -138,8 +150,13 @@ public sealed partial class ViewshedViewModel : ObservableObject
     private string _progressText = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasResult), nameof(ShowResult), nameof(ShowLayer), nameof(NeedsRunAgain))]
+    [NotifyPropertyChangedFor(nameof(HasResult), nameof(ShowResult), nameof(ShowLayer), nameof(NeedsRunAgain), nameof(LegendNote), nameof(HasLegendNote))]
     private ViewshedMap? _map;
+
+    /// <summary>What a minimum-visible-height legend's metres are measured from, as the engine says; null for a viewshed.</summary>
+    public string? LegendNote => Map?.HeightsM is null ? null : PlainWords.HeightsLegendNote(Map.HeightsDatum);
+
+    public bool HasLegendNote => LegendNote is not null;
 
     /// <summary>
     /// The cells the comparison marks: where fast and naive disagree (both confident, different
@@ -181,8 +198,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
         if (tile is null || !CanRun) return;
 
         var query = new ViewshedQuery(
-            ObserverLatitude.Value!.Value, ObserverLongitude.Value!.Value, ObserverHeight.Value!.Value,
-            RadiusKm.Value!.Value, Spacing.Value!.Value, RefractionK.Value!.Value, Interpolation, Algorithm, TargetHeight.Value!.Value);
+            ObserverLatitude.Value!.Value, ObserverLongitude.Value!.Value, ObserverHeight.Height,
+            RadiusKm.Value!.Value, Spacing.Value!.Value, RefractionK.Value!.Value, Interpolation, Algorithm, TargetHeight.Height);
 
         _cancellation = new CancellationTokenSource();
         var token = _cancellation.Token;
@@ -293,9 +310,9 @@ public sealed partial class ViewshedViewModel : ObservableObject
     public void AppendReport(ResultsReport report)
     {
         report.Section("Viewshed inputs")
-            .Line("Observer", $"{ObserverLatitude.Text}, {ObserverLongitude.Text} degrees, {ObserverHeight.Text} m above ground")
+            .Line("Observer", $"{ObserverLatitude.Text}, {ObserverLongitude.Text} degrees, {ObserverHeight.AsTyped}")
             .Line("Shows", ShowChoices[ShowsHeights ? 1 : 0])
-            .Line("Target height", ShowsHeights ? "not used" : TargetHeight.Text + " m above ground")
+            .Line("Target height", ShowsHeights ? "not used" : TargetHeight.AsTyped)
             .Line("Radius", RadiusKm.Text + " km")
             .Line("Cell spacing", Spacing.Text + " m")
             .Line("Refraction factor k", RefractionK.Text)
@@ -321,6 +338,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
     public void Restore(IReadOnlyDictionary<string, string> saved)
     {
+        foreach (var height in Heights) height.Restore(saved);
         foreach (var field in Fields)
         {
             if (saved.TryGetValue(field.Key, out var text)) field.Text = text;
@@ -369,8 +387,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
     private IReadOnlyList<(string Name, string Value)> Describe(ViewshedQuery query) =>
     [
         ("k", RefractionK.Text.Trim()),
-        ("height", Format.Number(query.ObserverHeightAboveGroundM) + " m"),
-        ("target height", Format.Number(query.TargetHeightAboveGroundM) + " m"),
+        ("height", PlainWords.Describe(query.ObserverHeight)),
+        ("target height", PlainWords.Describe(query.TargetHeight)),
         ("algorithm", PlainWords.Algorithm(query.Algorithm).ToLowerInvariant()),
         ("interpolation", PlainWords.Interpolation(query.Interpolation).ToLowerInvariant()),
     ];

@@ -98,10 +98,15 @@ public class PresentationTests
 
         var lines = ProfileCsv.Write(analysis).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal(ProfileCsv.Header, lines[0]);
+        Assert.Equal("distance_m,latitude_deg,longitude_deg,elevation_m_above_mean_sea_level,curvature_corrected_elevation_m_above_mean_sea_level,"
+            + "sight_line_height_m_above_mean_sea_level,first_fresnel_radius_m", lines[0]);
         Assert.Equal(4, lines.Length);
         Assert.Equal("1500.5,36.31,-111.49,,,1740,12.5", lines[2]);
         Assert.DoesNotContain(lines, line => line.Contains(";"));
+
+        // The heights' column names follow the datum the engine returned them in.
+        Assert.StartsWith("distance_m,latitude_deg,longitude_deg,elevation_m_above_wgs84_ellipsoid,",
+            ProfileCsv.Write(analysis with { HeightsDatum = HeightDatum.AboveEllipsoid }));
     }
 
     [Theory]

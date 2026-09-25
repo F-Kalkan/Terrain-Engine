@@ -78,6 +78,17 @@ internal static class NativeMethods
         public double PostSpacingArcsec;
         public double PostSpacingNorthSouthM;
         public double PostSpacingEastWestM;
+        public int ElevationDatum;
+        public int Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HeightNative
+    {
+        public double ValueM;
+        public double GeoidUndulationM;
+        public int Datum;
+        public int HasGeoidUndulation;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -85,10 +96,10 @@ internal static class NativeMethods
     {
         public double ObserverLatitudeDeg;
         public double ObserverLongitudeDeg;
-        public double ObserverHeightAboveGroundM;
+        public HeightNative ObserverHeight;
         public double TargetLatitudeDeg;
         public double TargetLongitudeDeg;
-        public double TargetHeightAboveGroundM;
+        public HeightNative TargetHeight;
         public double SpacingM;
         public double RefractionK;
         public double FrequencyMHz;
@@ -101,16 +112,16 @@ internal static class NativeMethods
     {
         public double SpacingDeg;
         public double TotalDistanceM;
+        public int HeightsDatum;
+        public int EyeHeightsKnown;
         public double ObserverEyeHeightM;
         public double TargetEyeHeightM;
-        public int EyeHeightsKnown;
         public int SampleCount;
         public int LosStatus;
         public int IsVisible;
         public int HasBlockingPoint;
         public int BlockingFeature;
         public int BlockingSampleIndex;
-        public int Reserved0;
         public double BlockingLatitudeDeg;
         public double BlockingLongitudeDeg;
         public double BlockingElevationM;
@@ -143,13 +154,13 @@ internal static class NativeMethods
     {
         public double ObserverLatitudeDeg;
         public double ObserverLongitudeDeg;
-        public double ObserverHeightAboveGroundM;
+        public HeightNative ObserverHeight;
         public double RadiusKm;
         public double SpacingM;
         public double RefractionK;
         public int Interpolation;
         public int Algorithm;
-        public double TargetHeightAboveGroundM;
+        public HeightNative TargetHeight;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -163,5 +174,7 @@ internal static class NativeMethods
         public double ColStepDeg;
         public double SouthWestCellLatitudeDeg;
         public double SouthWestCellLongitudeDeg;
+        public int HeightsDatum;
+        public int Reserved;
     }
 }

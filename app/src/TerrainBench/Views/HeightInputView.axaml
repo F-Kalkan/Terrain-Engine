@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TerrainBench.ViewModels"
+             xmlns:views="using:TerrainBench.Views"
+             xmlns:p="using:TerrainBench.Presentation"
+             x:Class="TerrainBench.Views.HeightInputView"
+             x:DataType="vm:HeightInput">
+  <!-- A height, what it is measured from, and, above the ellipsoid only, the geoid undulation it needs. -->
+  <StackPanel>
+    <views:NumberFieldView DataContext="{Binding Metres}" />
+    <StackPanel Orientation="Horizontal" Margin="0,0,0,3">
+      <TextBlock Text="Measured From" FontWeight="SemiBold" VerticalAlignment="Center" />
+      <Border Classes="help" ToolTip.Tip="{x:Static p:PlainWords.DatumExplanation}"><TextBlock /></Border>
+    </StackPanel>
+    <ComboBox Name="Datum" ItemsSource="{Binding DatumChoices}" SelectedIndex="{Binding DatumIndex}" Margin="0,0,0,12"
+              AutomationProperties.Name="{Binding DatumLabel}"
+              AutomationProperties.HelpText="{x:Static p:PlainWords.DatumExplanation}" />
+    <Panel IsVisible="{Binding NeedsUndulation}">
+      <views:NumberFieldView DataContext="{Binding Undulation}" />
+    </Panel>
+  </StackPanel>
+</UserControl>

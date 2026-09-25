@@ -43,6 +43,68 @@ public static class PlainWords
 
     public const string HeightExplanation = "The height of the eye or antenna above the terrain at that point.";
 
+    /// <summary>What each height datum is called in the Measured From list, in <see cref="HeightDatum"/> order.</summary>
+    public static IReadOnlyList<string> DatumChoices { get; } = ["Above the Ground", "Above Sea Level", "Above the WGS84 Ellipsoid"];
+
+    /// <summary>What a height in the datum is measured from, to follow a number: "1,937.00 m above mean sea level".</summary>
+    public static string DatumWords(HeightDatum datum) => datum switch
+    {
+        HeightDatum.AboveSeaLevel => "above mean sea level",
+        HeightDatum.AboveEllipsoid => "above the WGS84 ellipsoid",
+        _ => "above ground",
+    };
+
+    /// <summary>Under a minimum-visible-height legend: what its metres are measured from.</summary>
+    public static string HeightsLegendNote(HeightDatum datum) =>
+        datum == HeightDatum.AboveGround ? "Heights in m above each cell's own ground" : $"Heights in m {DatumWords(datum)}";
+
+    /// <summary>A CSV column name's datum part: "above_mean_sea_level", "above_wgs84_ellipsoid", "above_ground".</summary>
+    public static string DatumColumn(HeightDatum datum) => datum switch
+    {
+        HeightDatum.AboveSeaLevel => "above_mean_sea_level",
+        HeightDatum.AboveEllipsoid => "above_wgs84_ellipsoid",
+        _ => "above_ground",
+    };
+
+    /// <summary>The unit beside a height field: "m above ground", "m above sea level", "m above the ellipsoid".</summary>
+    public static string HeightUnit(HeightDatum datum) => datum switch
+    {
+        HeightDatum.AboveSeaLevel => "m above sea level",
+        HeightDatum.AboveEllipsoid => "m above the ellipsoid",
+        _ => "m above ground",
+    };
+
+    /// <summary>A height as the report gives it: "2 m above ground", "1915.4 m above the WGS84 ellipsoid, where the geoid is -21.6 m above it".</summary>
+    public static string Describe(Height height) =>
+        $"{Format.Number(height.ValueM)} m {DatumWords(height.Datum)}" +
+        (height.Datum == HeightDatum.AboveEllipsoid && height.GeoidUndulationM is double n ? $", where the geoid is {Format.Number(n)} m above it" : string.Empty);
+
+    /// <summary>A height as the command line takes it: "2", "1937:msl", "1915.4:hae:-21.6".</summary>
+    public static string CommandLine(Height height) => height.Datum switch
+    {
+        HeightDatum.AboveSeaLevel => Format.RoundTrip(height.ValueM) + ":msl",
+        HeightDatum.AboveEllipsoid => $"{Format.RoundTrip(height.ValueM)}:hae:{Format.RoundTrip(height.GeoidUndulationM ?? double.NaN)}",
+        _ => Format.RoundTrip(height.ValueM),
+    };
+
+    public const string AltitudeExplanation =
+        "The height above mean sea level: one altitude, whatever the ground below it -- an aircraft's, or a summit's from the map.";
+
+    public const string EllipsoidHeightExplanation =
+        "The height above the WGS84 ellipsoid, as a GPS receiver reports it. It differs from the height above sea level by the geoid undulation, which it needs.";
+
+    public const string DatumExplanation =
+        "What the height is measured from. Above the ground, it rides on the terrain under the point; above sea level or the ellipsoid, it is one altitude, whatever the ground below. A height above the ellipsoid, as GPS gives it, needs the geoid undulation there too.";
+
+    public const string UndulationExplanation =
+        "How far the geoid (mean sea level) lies above the WGS84 ellipsoid at this point, from a geoid model such as EGM2008; negative where it lies below. A height above the ellipsoid is this much more than the same height above sea level. The engine has no geoid model of its own, so it can't guess this.";
+
+    public const string UndulationRequired =
+        "A height above the ellipsoid needs the geoid undulation at this point to be put on the tile's sea level. Enter it, or measure the height from sea level instead.";
+
+    public const string TargetAltitudeExplanation =
+        "Every cell is asked whether something at this one altitude above it can be seen -- an aircraft at a fixed altitude, say. Where the ground rises above it, the target is in the ground there and hidden.";
+
     public const string PathSpacingExplanation =
         "How far apart the engine samples the terrain along the path. Smaller spacing catches narrower ridges but takes longer; the tile's own post spacing, on the Terrain panel, is a good start.";
 

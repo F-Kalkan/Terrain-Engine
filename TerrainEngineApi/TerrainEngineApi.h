@@ -84,6 +84,11 @@ extern "C" {
 #define TE_ALGORITHM_FAST           0
 #define TE_ALGORITHM_NAIVE          1
 
+// Vertical datums: what a height is measured from
+#define TE_DATUM_ABOVE_GROUND       0  // metres above the ground under the point
+#define TE_DATUM_ORTHOMETRIC        1  // metres above mean sea level (the geoid): the datum of an SRTM tile
+#define TE_DATUM_ELLIPSOIDAL        2  // metres above the WGS84 ellipsoid; needs the geoid undulation at the point
+
 // Input limits, so a request can't exhaust memory
 #define TE_MAX_PATH_SAMPLES             1000000
 #define TE_MAX_VIEWSHED_CELLS_PER_SIDE  4001
@@ -128,6 +133,10 @@ typedef struct te_tile_info
     double post_spacing_arcsec;
     double post_spacing_north_south_m;   // great-circle distance between neighbouring posts in a column
     double post_spacing_east_west_m;     // the same along the tile's middle row
+    int32_t elevation_datum;             // TE_DATUM_*: what the tile's elevations are measured from --
+                                         // te_tile_get_elevation's, te_tile_copy_posts' and every path's.
+                                         // TE_DATUM_ORTHOMETRIC for an SRTM tile.
+    int32_t reserved;
 } te_tile_info;
 
 // Opens an SRTM .hgt tile and returns a handle to it. path is UTF-16. The south-west
@@ -173,16 +182,34 @@ TE_API int32_t te_distance_m(double latitude1_deg, double longitude1_deg, double
 TE_API int32_t te_spacing_m_to_deg(double spacing_m, double* out_spacing_deg);
 
 // ---------------------------------------------------------------------------------------
+// Heights
+
+// A height and what it is measured from. Above the ground, it is 0 to 100000 m; above mean
+// sea level or the ellipsoid, -1000 to 100000 m, and it may put an eye or a target below the
+// ground under it, which then sees, or is seen, nowhere. An ellipsoidal height is put on the
+// tile's mean sea level with the geoid undulation at its point -- the geoid's height above
+// the ellipsoid, so that ellipsoidal = orthometric + undulation -- which the caller gives,
+// between -200 and 200 m. One given without it is refused with TE_ERROR_INVALID_ARGUMENT,
+// never read as if the undulation were 0. A zeroed te_height is the ground itself.
+typedef struct te_height
+{
+    double value_m;
+    double geoid_undulation_m;       // used with TE_DATUM_ELLIPSOIDAL when has_geoid_undulation is 1
+    int32_t datum;                   // TE_DATUM_*
+    int32_t has_geoid_undulation;    // 1 when geoid_undulation_m is given, else 0
+} te_height;
+
+// ---------------------------------------------------------------------------------------
 // Profile, line of sight and Fresnel clearance along one path
 
 typedef struct te_path_query
 {
     double observer_latitude_deg;
     double observer_longitude_deg;
-    double observer_height_above_ground_m;
+    te_height observer_height;
     double target_latitude_deg;
     double target_longitude_deg;
-    double target_height_above_ground_m;
+    te_height target_height;
     double spacing_m;          // sample spacing along the path, > 0
     double refraction_k;       // effective Earth radius factor, > 0; 4/3 is standard atmosphere
     double frequency_mhz;      // > 0 also computes Fresnel clearance; 0 skips it
@@ -194,9 +221,11 @@ typedef struct te_path_result
 {
     double spacing_deg;               // the spacing passed to the engine (see te_spacing_m_to_deg)
     double total_distance_m;          // great-circle length of the path
-    double observer_eye_height_m;     // metres above mean sea level; valid when eye_heights_known
+    int32_t heights_datum;            // TE_DATUM_*: what every height in this result and its samples is measured
+                                      // from -- the tile's own datum, whatever datum the query's heights came in
+    int32_t eye_heights_known;        // 0 when the ground under either end is void or past the tile
+    double observer_eye_height_m;     // in heights_datum; valid when eye_heights_known
     double target_eye_height_m;
-    int32_t eye_heights_known;        // 0 when the ground under either end is void
     int32_t sample_count;
 
     // Line of sight
@@ -205,10 +234,9 @@ typedef struct te_path_result
     int32_t has_blocking_point;
     int32_t blocking_feature;         // TE_FEATURE_*
     int32_t blocking_sample_index;    // index into the samples, -1 without a blocking point
-    int32_t reserved0;
     double blocking_latitude_deg;
     double blocking_longitude_deg;
-    double blocking_elevation_m;      // metres above mean sea level
+    double blocking_elevation_m;      // in heights_datum
     double blocking_distance_m;       // from the observer
     double clearance_deficit_m;       // how far the sight line falls short of clearing the blocking point
 
@@ -226,16 +254,17 @@ typedef struct te_path_sample
     double latitude_deg;
     double longitude_deg;
     double distance_m;                // from the observer, along the great circle
-    double elevation_m;               // metres above mean sea level; valid when has_elevation
+    double elevation_m;               // in the result's heights_datum; valid when has_elevation
     int32_t has_elevation;            // 0 where there is no data -- draw a gap, never a zero
     int32_t data_not_given;           // with has_elevation 0: 1 past the open tile, 0 for a void in it
     double curvature_corrected_elevation_m; // elevation raised by the Earth's curvature under refraction_k; valid when has_elevation
-    double sight_line_height_m;       // valid when the result's eye_heights_known
+    double sight_line_height_m;       // in heights_datum; valid when the result's eye_heights_known
     double first_fresnel_radius_m;    // 0 at the ends or when Fresnel wasn't computed
 } te_path_sample;
 
 // Samples the terrain between observer and target, decides line of sight, and -- when
-// asked -- Fresnel clearance, all over the one profile, with heights above ground. The
+// asked -- Fresnel clearance, all over the one profile, with each end's height in any
+// datum (te_height); the same eye given in two datums gets the same answer. The
 // samples carry everything needed to chart the result: terrain, curvature-corrected
 // terrain, sight line and Fresnel radius. Both points must lie inside the tile.
 // Ownership: *out_samples (result.sample_count entries) belongs to the caller; release
@@ -251,13 +280,15 @@ typedef struct te_viewshed_query
 {
     double observer_latitude_deg;
     double observer_longitude_deg;
-    double observer_height_above_ground_m;
+    te_height observer_height;
     double radius_km;          // > 0
     double spacing_m;          // grid cell size, > 0
     double refraction_k;       // > 0
     int32_t interpolation;     // TE_INTERPOLATION_*
     int32_t algorithm;         // TE_ALGORITHM_*
-    double target_height_above_ground_m;  // each cell asks about a target this high above its ground; 0 = the ground itself
+    te_height target_height;   // the target each cell asks about: above the ground, that high above each
+                               // cell's own ground (0, the ground itself); above sea level or the
+                               // ellipsoid, one altitude over every cell -- an aircraft, say
 } te_viewshed_query;
 
 typedef struct te_viewshed_grid
@@ -270,6 +301,10 @@ typedef struct te_viewshed_grid
     double col_step_deg;                // column step, widened for latitude so cells are square on the ground
     double south_west_cell_latitude_deg;  // centre of cell (row 0, col 0); rows go north, columns east
     double south_west_cell_longitude_deg;
+    int32_t heights_datum;              // what te_minimum_visible_height's heights are measured from:
+                                        // TE_DATUM_ABOVE_GROUND, each above its own cell's ground.
+                                        // te_viewshed returns no heights, and sets it the same
+    int32_t reserved;
 } te_viewshed_grid;
 
 // Called while a viewshed runs, on the thread that called te_viewshed, with the
@@ -294,7 +329,7 @@ TE_API int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_prog
 // For every cell within radius_km of the observer, the lowest height above the cell's
 // ground at which a target standing there is seen: 0 where the ground itself is. Laid
 // out, checked and refused exactly as te_viewshed, over the same grid; the query's
-// target_height_above_ground_m is not used. algorithm picks the fast version or the exact
+// target_height is not used. algorithm picks the fast version or the exact
 // reference (TE_ALGORITHM_NAIVE). *out_cells holds rows * cols TE_CELL_* values: the
 // viewshed of the ground itself -- TE_CELL_VISIBLE where the ground is seen,
 // TE_CELL_NOT_VISIBLE where only a target above it is, and TE_CELL_DEGRADED,

@@ -15,9 +15,10 @@ the ground between points:
    sampled at a stated spacing.
 2. **Line of sight** — can an observer at point A see a target at point B, each at a
    stated height? If blocked, the position, elevation, and clearance deficit of the
-   blocking point, and what kind of terrain it is. The library takes each height above
-   the ground, above mean sea level, or above the ellipsoid with its geoid undulation;
-   the DLL, the command line and TerrainBench take heights above the ground for now.
+   blocking point, and what kind of terrain it is. Each height may be given above the
+   ground, above mean sea level, or above the WGS84 ellipsoid with its geoid undulation --
+   in the library, the DLL, the command line and TerrainBench alike -- so a target can be
+   placed by altitude, and every height that comes back says what it is measured from.
 3. **Viewshed** — from one observer, which cells within a radius are visible, as a
    raster mask, for the ground itself or for a target of a given height.
 4. **Minimum visible height** — from one observer, for every cell within a radius, how
@@ -68,7 +69,7 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
 - **Every core, the same answer.** Many observers against many targets, and the exact
   viewsheds, run on every core -- about eleven times as fast on 8 cores and 16 threads --
   with the same answer, to the bit, as on one.
-- **Tested.** 78 engine tests and 145 app tests, all run by `build.ps1` and by CI on
+- **Tested.** 80 engine tests and 152 app tests, all run by `build.ps1` and by CI on
   every push. Each fix was also checked the other way: the defect put back, and a test
   going red.
 
@@ -109,7 +110,7 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 78-case test suite + demo
+TerrainEngine.exe # run the 80-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed|minheight|observer|pairs> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
@@ -131,9 +132,23 @@ CLI answer this query identically. Every numeric argument is checked before anyt
 runs: text that isn't a whole, finite number, or a spacing, `k`, frequency or grid size
 that isn't greater than zero, is reported by the argument's name with exit code 1, and
 so is a path or grid the library itself refuses -- a latitude past a pole, a spacing too
-fine to count -- with the library's reason. A `batch` queries file is a positive spacing followed by six numbers per query
+fine to count -- with the library's reason. A `batch` queries file is a positive spacing followed by six values per query
 (`aLat aLon bLat bLon hA hB`); a word where a number belongs, or a query cut short at
 the end of the file, is reported the same way rather than silently skipped.
+
+A height (`hA`, `hB`, `height`, `targetHeight`, and the heights in a queries file) is metres
+above the ground as a bare number, as it always was, or says what it is measured from:
+`2:agl` above the ground, `1937:msl` above mean sea level, or `1915.37:hae:-21.63` above
+the WGS84 ellipsoid with the geoid undulation at that point. A height above the ellipsoid
+without its undulation is refused, saying so. The same observer as above, and a target by
+altitude, 5,000 m above sea level:
+
+```
+TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.4 -111.4 0.0002697964817756191 2 5000:msl
+```
+
+Every height the answer prints says what it is measured from -- the tile's own datum, mean
+sea level for SRTM, whatever datum the heights came in.
 
 ## Documentation
 

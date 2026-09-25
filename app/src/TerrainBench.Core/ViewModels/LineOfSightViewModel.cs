@@ -36,29 +36,34 @@ public sealed partial class LineOfSightViewModel : ObservableObject
         _tile = tile;
         ObserverLatitude = new NumberField("los-observer-lat", "Observer Latitude", "degrees", "36.3", InsideTileLatitude("observer"), shortLabel: "Latitude");
         ObserverLongitude = new NumberField("los-observer-lon", "Observer Longitude", "degrees", "-111.5", InsideTileLongitude("observer"), shortLabel: "Longitude");
-        ObserverHeight = new NumberField("los-observer-height", "Observer Height", "m above ground", "2", Rules.HeightAboveGround("The observer"), hint: PlainWords.HeightExplanation, shortLabel: "Height");
+        ObserverHeight = new HeightInput("los-observer-height", "Observer Height", "The observer", "2", PlainWords.HeightExplanation);
         TargetLatitude = new NumberField("los-target-lat", "Target Latitude", "degrees", "36.35", InsideTileLatitude("target"), shortLabel: "Latitude");
         TargetLongitude = new NumberField("los-target-lon", "Target Longitude", "degrees", "-111.45", InsideTileLongitude("target"), shortLabel: "Longitude");
-        TargetHeight = new NumberField("los-target-height", "Target Height", "m above ground", "2", Rules.HeightAboveGround("The target"), hint: PlainWords.HeightExplanation, shortLabel: "Height");
+        TargetHeight = new HeightInput("los-target-height", "Target Height", "The target", "2", PlainWords.HeightExplanation);
         RefractionK = new NumberField("los-k", "Refraction Factor - k", "", "4/3", Rules.Positive("k"), hint: PlainWords.RefractionExplanation);
         Spacing = new NumberField("los-spacing", "Sample Spacing", "m along the path", "30", Rules.Positive("The spacing", 100000), hint: PlainWords.PathSpacingExplanation);
         Frequency = new NumberField("los-frequency", "Radio Frequency", "MHz, optional", "", Rules.Positive("The frequency", 1e6), optional: true,
             hint: PlainWords.FrequencyExplanation);
 
         foreach (var field in Fields) field.Changed += (_, _) => CheckCommand.NotifyCanExecuteChanged();
+        foreach (var height in Heights) height.Changed += (_, _) => CheckCommand.NotifyCanExecuteChanged();
     }
 
     public NumberField ObserverLatitude { get; }
     public NumberField ObserverLongitude { get; }
-    public NumberField ObserverHeight { get; }
+    public HeightInput ObserverHeight { get; }
     public NumberField TargetLatitude { get; }
     public NumberField TargetLongitude { get; }
-    public NumberField TargetHeight { get; }
+
+    /// <summary>The target's height: above its ground, or -- to place it by altitude -- above sea level or the ellipsoid.</summary>
+    public HeightInput TargetHeight { get; }
     public NumberField RefractionK { get; }
     public NumberField Spacing { get; }
     public NumberField Frequency { get; }
 
-    public IReadOnlyList<NumberField> Fields => [ObserverLatitude, ObserverLongitude, ObserverHeight, TargetLatitude, TargetLongitude, TargetHeight, RefractionK, Spacing, Frequency];
+    public IReadOnlyList<NumberField> Fields => [ObserverLatitude, ObserverLongitude, .. ObserverHeight.Fields, TargetLatitude, TargetLongitude, .. TargetHeight.Fields, RefractionK, Spacing, Frequency];
+
+    public IReadOnlyList<HeightInput> Heights => [ObserverHeight, TargetHeight];
 
     public IReadOnlyList<Interpolation> InterpolationChoices { get; } = [Interpolation.Nearest, Interpolation.Bilinear];
 
@@ -159,8 +164,8 @@ public sealed partial class LineOfSightViewModel : ObservableObject
         if (tile is null || !CanCheck) return;
 
         var query = new PathQuery(
-            ObserverLatitude.Value!.Value, ObserverLongitude.Value!.Value, ObserverHeight.Value!.Value,
-            TargetLatitude.Value!.Value, TargetLongitude.Value!.Value, TargetHeight.Value!.Value,
+            ObserverLatitude.Value!.Value, ObserverLongitude.Value!.Value, ObserverHeight.Height,
+            TargetLatitude.Value!.Value, TargetLongitude.Value!.Value, TargetHeight.Height,
             Spacing.Value!.Value, RefractionK.Value!.Value, Interpolation, Frequency.Value ?? 0);
 
         var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -200,10 +205,12 @@ public sealed partial class LineOfSightViewModel : ObservableObject
 
         PathDetails.Add(new ResultRow("Path Length", Format.Distance(analysis.TotalDistanceM)));
         PathDetails.Add(new ResultRow("Samples", $"{Format.Count(analysis.Samples.Count)}, every {Format.Metres(Spacing.Value!.Value)}"));
+        // Every height the engine returns is in the tile's own datum, whatever datum the query's heights came in.
+        string heightsAbove = " " + PlainWords.DatumWords(analysis.HeightsDatum);
         if (analysis.ObserverEyeHeightM is double observerEye)
         {
-            PathDetails.Add(new ResultRow("Observer Eye", Format.Metres(observerEye) + " above mean sea level"));
-            PathDetails.Add(new ResultRow("Target Eye", Format.Metres(analysis.TargetEyeHeightM!.Value) + " above mean sea level"));
+            PathDetails.Add(new ResultRow("Observer Eye", Format.Metres(observerEye) + heightsAbove));
+            PathDetails.Add(new ResultRow("Target Eye", Format.Metres(analysis.TargetEyeHeightM!.Value) + heightsAbove));
         }
 
         if (analysis.Blocking is { } blocking && Verdict == Verdict.Blocked)
@@ -211,7 +218,7 @@ public sealed partial class LineOfSightViewModel : ObservableObject
             Reason = PlainWords.BlockingSentence(blocking);
             ObstructionDetails.Add(new ResultRow("Blocked At", $"{Format.Degrees(blocking.LatitudeDeg)}, {Format.Degrees(blocking.LongitudeDeg)}"));
             ObstructionDetails.Add(new ResultRow("Distance from Observer", Format.Distance(blocking.DistanceM)));
-            ObstructionDetails.Add(new ResultRow("Terrain Height There", Format.Metres(blocking.ElevationM) + " above mean sea level"));
+            ObstructionDetails.Add(new ResultRow("Terrain Height There", Format.Metres(blocking.ElevationM) + heightsAbove));
             ObstructionDetails.Add(new ResultRow("Sight Line Falls Short By", Format.Metres(blocking.ClearanceDeficitM)));
             ObstructionDetails.Add(new ResultRow("Terrain Feature", PlainWords.Feature(blocking.Feature)));
         }
@@ -250,7 +257,7 @@ public sealed partial class LineOfSightViewModel : ObservableObject
     {
         (ObserverLatitude.Text, TargetLatitude.Text) = (TargetLatitude.Text, ObserverLatitude.Text);
         (ObserverLongitude.Text, TargetLongitude.Text) = (TargetLongitude.Text, ObserverLongitude.Text);
-        (ObserverHeight.Text, TargetHeight.Text) = (TargetHeight.Text, ObserverHeight.Text);
+        ObserverHeight.SwapWith(TargetHeight);
         if (CanCheck) Check();
     }
 
@@ -287,8 +294,8 @@ public sealed partial class LineOfSightViewModel : ObservableObject
     public void AppendReport(ResultsReport report)
     {
         report.Section("Line of sight inputs")
-            .Line("Observer", $"{ObserverLatitude.Text}, {ObserverLongitude.Text} degrees, {ObserverHeight.Text} m above ground")
-            .Line("Target", $"{TargetLatitude.Text}, {TargetLongitude.Text} degrees, {TargetHeight.Text} m above ground")
+            .Line("Observer", $"{ObserverLatitude.Text}, {ObserverLongitude.Text} degrees, {ObserverHeight.AsTyped}")
+            .Line("Target", $"{TargetLatitude.Text}, {TargetLongitude.Text} degrees, {TargetHeight.AsTyped}")
             .Line("Refraction factor k", RefractionK.Text)
             .Line("Sample spacing", Spacing.Text + " m")
             .Line("Interpolation", PlainWords.Interpolation(Interpolation))
@@ -313,12 +320,13 @@ public sealed partial class LineOfSightViewModel : ObservableObject
         report.Line("Same query on the command line",
             $"TerrainEngine.exe los <tile> <swLat> <swLon> {Format.RoundTrip(LastQuery.ObserverLatitudeDeg)} {Format.RoundTrip(LastQuery.ObserverLongitudeDeg)} " +
             $"{Format.RoundTrip(LastQuery.TargetLatitudeDeg)} {Format.RoundTrip(LastQuery.TargetLongitudeDeg)} {Format.RoundTrip(Analysis.SpacingDeg)} " +
-            $"{Format.RoundTrip(LastQuery.ObserverHeightAboveGroundM)} {Format.RoundTrip(LastQuery.TargetHeightAboveGroundM)} {Format.RoundTrip(LastQuery.RefractionK)} " +
+            $"{PlainWords.CommandLine(LastQuery.ObserverHeight)} {PlainWords.CommandLine(LastQuery.TargetHeight)} {Format.RoundTrip(LastQuery.RefractionK)} " +
             (LastQuery.Interpolation == Interpolation.Bilinear ? "bilinear" : "nearest"));
     }
 
     public void Restore(IReadOnlyDictionary<string, string> saved)
     {
+        foreach (var height in Heights) height.Restore(saved);
         foreach (var field in Fields)
         {
             if (saved.TryGetValue(field.Key, out var text)) field.Text = text;

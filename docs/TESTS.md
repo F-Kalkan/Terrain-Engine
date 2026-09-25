@@ -1,6 +1,6 @@
 # The engine's test suite
 
-78 test functions, hand-checkable apart from the real-data comparisons, which hold the
+80 test functions, hand-checkable apart from the real-data comparisons, which hold the
 fast viewshed against naive, the fast minimum visible height against its reference and the
 prepared observer against the line of sight, at several observers:
 
@@ -183,6 +183,18 @@ terrain, decides every answer.
     bilinear) and fast minimum visible height over 3 km answer on a window holding only the
     posts their box needs exactly as on the whole tile, to the bit; a post short on any side,
     every answer that changes becomes `DataNotGiven`, never a void.
+- **Heights in every datum**:
+  - *below the ground*: a target at 200 m above sea level over a 300 m plateau, and an eye at
+    50 m above sea level on 100 m ground -- the fast viewshed matches naive cell for cell,
+    hiding the plateau's cells and everything the buried eye would see but its own cell; the
+    fast minimum visible height's states match the reference's and every height is infinite
+    in both; a prepared observer answers the same;
+  - *on the command line*: a bare number is above the ground, and `:agl`, `:msl` and
+    `:hae:<undulation>` say their datum; `:hae` without an undulation is refused as such,
+    and an empty, unknown or extra part, or a word for a number, each with its own reason;
+    every datum has words for a printed height.
+  The same heights through the DLL, `TerrainEngine.exe` and TerrainBench are the app's
+  `DatumTests` ([TERRAINBENCH.md](TERRAINBENCH.md)).
 - **1-arcsecond data** (skipped when `DATA/SRTM1/N36W112.hgt` isn't present): 200
   consecutive posts read through `GetTerrainProfile` at the tile's own spacing must
   each return exactly the value stored in the file at that row and column; and the 1-
@@ -250,6 +262,11 @@ from an unknown observer; and a prepared observer forgetting data not given on i
 under a target, or answering for an unknown observer before a target height with no datum --
 each turns a test red. The
 view over a raster first survived, the test checking only the block that owns its cells; it
-checks the view too now. A suite that stays green with the defect restored verifies nothing.
+checks the view too now. And so were heights in every datum: the fast viewshed seeing a
+target in the ground or out of an eye in it, the fast minimum visible height and the prepared
+observer seeing out of it, and the command line reading `msl` as above the ground or letting
+`hae` go without its undulation, each turn one of these tests red; through the DLL and the
+app, `DatumTests` catches each surface's own. A suite that stays green with the defect
+restored verifies nothing.
 
 All of the above pass identically in Debug and Release.

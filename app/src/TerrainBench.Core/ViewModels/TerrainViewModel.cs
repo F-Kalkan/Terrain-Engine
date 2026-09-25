@@ -111,7 +111,7 @@ public sealed partial class TerrainViewModel : ObservableObject, IDisposable
         if (Tile is null) return;
         var elevation = Tile.Elevation(latitudeDeg, longitudeDeg, Interpolation.Nearest);
         string height = !elevation.IsOk ? "outside the tile"
-            : elevation.Value is double metres ? Format.WholeMetres(metres) + " above mean sea level"
+            : elevation.Value is double metres ? Format.WholeMetres(metres) + " " + PlainWords.DatumWords(Tile.Info.ElevationDatum)
             : "no data";
         CursorText = $"Latitude {Format.Degrees(latitudeDeg)}, longitude {Format.Degrees(longitudeDeg)}, elevation {height}";
     }

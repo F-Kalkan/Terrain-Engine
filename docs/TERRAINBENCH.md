@@ -59,8 +59,13 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   right-drag moves the zoomed map. Resting the pointer on the observer or the target shows
   its coordinates, ground and eye height, and on the red blocking point, why the path is
   blocked. The sight line is solid as far as the blocking point and dashed red beyond it.
-- **Line of sight.** Type the observer's and the target's latitude, longitude and height
-  above ground, or place them on the map; a button swaps them. Set `k`, the sample spacing
+- **Line of sight.** Type the observer's and the target's latitude, longitude and height,
+  or place them on the map; a button swaps them. Each height is measured from the ground,
+  from sea level or from the WGS84 ellipsoid, picked in its **Measured From** list: above sea
+  level, the target is placed by altitude -- an aircraft at 5,000 m stays at 5,000 m wherever
+  it is moved -- and above the ellipsoid, as GPS gives a height, a **Geoid Undulation** box
+  appears, which the check waits for, saying why. Every height in the answer, on the map's
+  cards and on the profile says what it is measured from. Set `k`, the sample spacing
   and the interpolation. The answer is **Visible**, **Blocked** or **No Confident Answer**,
   shown as a card with the reason in plain words; when blocked, a second card says where,
   the terrain height there, how far short the sight line falls and what kind of feature is
@@ -72,7 +77,9 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   Fresnel zone and its clearance too, with a bar for how much of the zone stays free.
 - **Viewshed.** Choose the observer, radius, height, spacing, `k`, interpolation and the
   fast or naive algorithm, and a target height: 0 asks whether the ground itself can be
-  seen, 1.8 m a person standing there, a mast's height a radio link. The result is drawn
+  seen, 1.8 m a person standing there, a mast's height a radio link -- or, measured from sea
+  level, one altitude over every cell, an aircraft's, hidden wherever the ground rises above
+  it. Both heights take a Measured From list, as on the Line of Sight panel. The result is drawn
   inside a dashed ring of the requested radius:
   visible cells in cyan, cells out of sight only darkened so the ground stays readable, cells
   with no confident answer in purple where a hole in the tile's data is the reason and slate
@@ -86,7 +93,7 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   it until the next run. **Compare With** marks cells in yellow: either where fast and naive
   disagree on the same run (with the count, ratio and both timings), or every cell that
   changed since the previous run, with the setting that changed (`k: 4/3 → 1e12 changed
-  8,135 cells.`) -- which is how changing one setting shows up even when it moves a few
+  8,001 cells.`) -- which is how changing one setting shows up even when it moves a few
   thousand cells out of four million.
 - **Minimum visible height.** **Show** on the Viewshed panel switches from which cells a
   target of one height is seen at to the minimum visible height: every cell coloured by how
@@ -105,7 +112,7 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   what it is measured from; a mistake is shown at the field, saying what is allowed, before
   the engine runs. **Copy Results** puts the inputs, outputs, app version and engine commit
   on the clipboard, including the command line that repeats a line-of-sight query exactly.
-  The profile exports as CSV and the map and viewshed as PNG. The last tile, every
+  The profile exports as CSV, its height columns named for the datum they are in, and the map and viewshed as PNG. The last tile, every
   parameter, the open panel, the panel sizes, the profile's lines and the viewshed layer's
   settings are remembered. The app follows the
   system's light or dark theme, and everything works from the keyboard:
@@ -118,7 +125,7 @@ open the bundled Grand Canyon sample tile and try each tool on it.
 
 ## Reference queries
 
-On the sample tile (south-west corner 36, -112), with 2 m above ground at both ends, 30 m
+On the sample tile (south-west corner 36, -112), with 2 m above ground at both ends unless the row says otherwise, 30 m
 spacing and `k` 4/3. The CLI takes the spacing in degrees, and 0.0002697964817756191° is
 exactly the 30 m the app uses, so both give the same answer to the precision the CLI prints.
 
@@ -126,6 +133,7 @@ exactly the 30 m the app uses, so both give the same answer to the precision the
 |---|---|---|---|
 | Blocked | Observer 36.3, -111.5; target 36.35, -111.45; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.3 -111.5 36.35 -111.45 0.0002697964817756191 2 2` | Blocked at 36.3277, -111.472; terrain 1900 m above mean sea level; the sight line falls short by 195.993 m; a falling slope |
 | Visible | Observer 36.4, -111.5; target 36.45, -111.45; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.4 -111.5 36.45 -111.45 0.0002697964817756191 2 2` | Visible (`Status: ok`) |
+| Visible, by altitude | Observer 36.3, -111.5; target 36.4, -111.4, Height 5000 **Measured From** Above Sea Level; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.3 -111.5 36.4 -111.4 0.0002697964817756191 2 5000:msl` | Visible; the target's eye 5000 m above mean sea level, the observer's 1753 m |
 | No confident answer | Observer 36.5, -111.5; target 36.5, -111.0; **bilinear** | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.5 -111.5 36.5 -111.0 0.0002697964817756191 2 2 1.3333333333333333 bilinear` | No confident answer: `Status: data not given for part of the path`. The target sits on the tile's east edge, where bilinear interpolation needs the posts beyond it, which the tile doesn't hold -- data not given, not a hole in the tile. (The CLI still prints a `Visible:` line; with that status it isn't an answer.) |
 
 ## Tests
@@ -136,7 +144,11 @@ Besides the engine's own suite, `app/` has two test projects, both run by `build
   (38.0 m) and curvature (34.79 m) cases written out as `.hgt` tiles, and the Blocked
   reference query checked against `TerrainEngine.exe` itself -- every bad input the DLL must
   survive (missing, empty and truncated files, a point outside the tile, spacing zero or
-  negative, a pole latitude, a closed handle), the minimum visible height against the DLL's
+  negative, a pole latitude, a closed handle), heights in every datum -- one line of sight
+  with its eyes given above the ground, above sea level and above the ellipsoid, through
+  the DLL, `TerrainEngine.exe` and the Line of Sight panel, the same answer each way with
+  heights agreeing to 1e-9 m, and a height above the ellipsoid without its undulation refused
+  on each with a message -- the minimum visible height against the DLL's
   own viewshed at round heights and at heights the grid holds, fast and exact, and the view
   models: validation, results,
   errors, cancellation, comparisons, remembered settings, and numbers that keep a decimal
@@ -144,7 +156,8 @@ Besides the engine's own suite, `app/` has two test projects, both run by `build
 - `TerrainBench.UI.Tests` (Avalonia.Headless.XUnit): the main flows clicked through a real
   window over the real DLL, including a naive 30 km viewshed that reports progress, leaves
   the window working and cancels, and a minimum visible height whose bands are painted on the
-  map and uncover the ground when hidden; keyboard reach and accessible names for every control;
+  map and uncover the ground when hidden, and a target placed by altitude from its Measured
+  From list; keyboard reach and accessible names for every control;
   4.5:1 text contrast in both themes; the first-run tour walked by mouse and by keyboard, with
   only its control taking clicks. With `TERRAINBENCH_SCREENSHOTS` set to a folder, it
   also renders the screenshots above.

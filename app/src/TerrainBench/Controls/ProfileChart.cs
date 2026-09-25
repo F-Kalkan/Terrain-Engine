@@ -170,6 +170,9 @@ public sealed class ProfileChart : Control
             context.DrawText(dtick, new Point(Math.Clamp(x - dtick.Width / 2, plot.X - 20, plot.Right - dtick.Width + 20), plot.Bottom + 4));
         }
 
+        // What every height on the chart is measured from: the engine's datum, whatever the heights were typed in.
+        context.DrawText(Label($"Heights in m {PlainWords.DatumWords(analysis.HeightsDatum)}", 11, muted), new Point(plot.X + 6, plot.Y + 2));
+
         using (context.PushClip(plot))
         {
             // Fresnel zone around the sight line

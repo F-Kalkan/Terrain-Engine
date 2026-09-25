@@ -173,11 +173,60 @@ namespace
         return {};
     }
 
-    std::string HeightProblem(const char* what, double value)
+    // What te_height's datum means, in the engine's words; Unknown for a code that isn't one.
+    VerticalDatum DatumOf(int32_t datum)
     {
-        if (!std::isfinite(value) || value < 0.0 || value > 100000.0)
-            return std::string("The ") + what + " height above ground must be between 0 and 100000 m.";
+        switch (datum)
+        {
+        case TE_DATUM_ABOVE_GROUND: return VerticalDatum::HeightAboveGround;
+        case TE_DATUM_ORTHOMETRIC: return VerticalDatum::OrthometricMsl;
+        case TE_DATUM_ELLIPSOIDAL: return VerticalDatum::EllipsoidalHae;
+        default: return VerticalDatum::Unknown;
+        }
+    }
+
+    // The TE_DATUM_* code a datum the engine reports goes out as.
+    int32_t DatumCode(VerticalDatum datum)
+    {
+        switch (datum)
+        {
+        case VerticalDatum::HeightAboveGround: return TE_DATUM_ABOVE_GROUND;
+        case VerticalDatum::EllipsoidalHae: return TE_DATUM_ELLIPSOIDAL;
+        default: return TE_DATUM_ORTHOMETRIC; // the only other datum a tile reader declares
+        }
+    }
+
+    // Why a height can't be used, or "" when it can. An ellipsoidal height without its geoid
+    // undulation is refused here, before anything runs, with what to do about it.
+    std::string HeightProblem(const char* what, const te_height& height)
+    {
+        VerticalDatum datum = DatumOf(height.datum);
+        if (datum == VerticalDatum::Unknown)
+            return std::string("The ") + what + " height must be above the ground, above mean sea level or above the WGS84 ellipsoid (TE_DATUM_*), not datum "
+                + std::to_string(height.datum) + ".";
+        if (datum == VerticalDatum::HeightAboveGround)
+        {
+            if (!std::isfinite(height.value_m) || height.value_m < 0.0 || height.value_m > 100000.0)
+                return std::string("The ") + what + " height above ground must be between 0 and 100000 m.";
+            return {};
+        }
+        if (!std::isfinite(height.value_m) || height.value_m < -1000.0 || height.value_m > 100000.0)
+            return std::string("The ") + what + " height " + VerticalDatumWords(datum) + " must be between -1000 and 100000 m.";
+        if (height.has_geoid_undulation != 0
+            && (!std::isfinite(height.geoid_undulation_m) || height.geoid_undulation_m < -200.0 || height.geoid_undulation_m > 200.0))
+            return std::string("The geoid undulation at the ") + what + " must be between -200 and 200 m.";
+        if (datum == VerticalDatum::EllipsoidalHae && height.has_geoid_undulation == 0)
+            return std::string("The ") + what + " height is above the WGS84 ellipsoid but no geoid undulation was given, so it can't be put on the tile's mean sea level. "
+                "Give the geoid's height above the ellipsoid at the " + what + ", or the height above mean sea level instead.";
         return {};
+    }
+
+    // A checked te_height as the engine takes it.
+    DatumHeight ToDatumHeight(const te_height& height)
+    {
+        DatumHeight converted{ height.value_m, DatumOf(height.datum) };
+        if (height.has_geoid_undulation != 0) converted.geoidUndulationM = height.geoid_undulation_m;
+        return converted;
     }
 
     std::string InterpolationProblem(int32_t interpolation)
@@ -317,6 +366,7 @@ int32_t te_tile_get_info(te_tile tile, te_tile_info* out_info)
         info.post_spacing_arcsec = 3600.0 * postDeg;
         info.post_spacing_north_south_m = GreatCircleDistanceM(GeoPoint{ middleLatitude, middleLongitude }, GeoPoint{ middleLatitude + postDeg, middleLongitude });
         info.post_spacing_east_west_m = GreatCircleDistanceM(GeoPoint{ middleLatitude, middleLongitude }, GeoPoint{ middleLatitude, middleLongitude + postDeg });
+        info.elevation_datum = DatumCode(sampler.GetDatum());
         *out_info = info;
         return Succeed();
     });
@@ -426,8 +476,8 @@ int32_t te_analyze_path(te_tile tile, const te_path_query* query, te_path_result
         const te_path_query& q = *query;
         std::string problem = PointProblem("observer", q.observer_latitude_deg, q.observer_longitude_deg);
         if (problem.empty()) problem = PointProblem("target", q.target_latitude_deg, q.target_longitude_deg);
-        if (problem.empty()) problem = HeightProblem("observer", q.observer_height_above_ground_m);
-        if (problem.empty()) problem = HeightProblem("target", q.target_height_above_ground_m);
+        if (problem.empty()) problem = HeightProblem("observer", q.observer_height);
+        if (problem.empty()) problem = HeightProblem("target", q.target_height);
         if (problem.empty()) problem = PositiveProblem("spacing", q.spacing_m, " m");
         if (problem.empty()) problem = PositiveProblem("refraction factor k", q.refraction_k, "");
         if (problem.empty() && (!std::isfinite(q.frequency_mhz) || q.frequency_mhz < 0.0))
@@ -450,12 +500,13 @@ int32_t te_analyze_path(te_tile tile, const te_path_query* query, te_path_result
         RealElevationSampler& sampler = found->Sampler(q.interpolation);
         std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacingDeg, sampler);
 
-        DatumHeight observerHeight{ q.observer_height_above_ground_m, VerticalDatum::HeightAboveGround };
-        DatumHeight targetHeight{ q.target_height_above_ground_m, VerticalDatum::HeightAboveGround };
+        DatumHeight observerHeight = ToDatumHeight(q.observer_height);
+        DatumHeight targetHeight = ToDatumHeight(q.target_height);
         LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, targetHeight, q.refraction_k);
 
         te_path_result result{};
         result.spacing_deg = spacingDeg;
+        result.heights_datum = DatumCode(sampler.GetDatum());
         result.total_distance_m = profile.back().distanceFromStartM;
         result.sample_count = (int32_t)profile.size();
 
@@ -560,8 +611,8 @@ namespace
         std::string problem = PointProblem("observer", q.observer_latitude_deg, q.observer_longitude_deg);
         if (problem.empty() && std::abs(q.observer_latitude_deg) > 89.9)
             problem = "A viewshed can't be laid out within 0.1 degree of a pole, where lines of longitude meet. Choose an observer latitude between -89.9 and 89.9 degrees.";
-        if (problem.empty()) problem = HeightProblem("observer", q.observer_height_above_ground_m);
-        if (problem.empty() && usesTargetHeight) problem = HeightProblem("target", q.target_height_above_ground_m);
+        if (problem.empty()) problem = HeightProblem("observer", q.observer_height);
+        if (problem.empty() && usesTargetHeight) problem = HeightProblem("target", q.target_height);
         if (problem.empty()) problem = PositiveProblem("radius", q.radius_km, " km");
         if (problem.empty()) problem = PositiveProblem("spacing", q.spacing_m, " m");
         if (problem.empty()) problem = PositiveProblem("refraction factor k", q.refraction_k, "");
@@ -590,7 +641,7 @@ namespace
             request.report = [progress, user_data](double fractionDone) { return progress(fractionDone, user_data) == 0; };
         }
         request.observer = GeoPoint{ q.observer_latitude_deg, q.observer_longitude_deg };
-        request.observerHeight = DatumHeight{ q.observer_height_above_ground_m, VerticalDatum::HeightAboveGround };
+        request.observerHeight = ToDatumHeight(q.observer_height);
         return TE_OK;
     }
 
@@ -622,6 +673,7 @@ namespace
         grid.col_step_deg = colStepDeg;
         grid.south_west_cell_latitude_deg = request.observer.latitudeDeg + (0 - center) * request.spacingDeg;
         grid.south_west_cell_longitude_deg = request.observer.longitudeDeg + (0 - center) * colStepDeg;
+        grid.heights_datum = TE_DATUM_ABOVE_GROUND;
         return grid;
     }
 
@@ -651,7 +703,7 @@ int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_ca
         GridRequest request;
         if (int32_t code = PrepareGrid(tile, q, true, progress, user_data, request); code != TE_OK) return code;
 
-        DatumHeight targetHeight{ q.target_height_above_ground_m, VerticalDatum::HeightAboveGround };
+        DatumHeight targetHeight = ToDatumHeight(q.target_height);
         RealElevationSampler& sampler = request.tile->Sampler(q.interpolation);
         ViewshedResult viewshed = q.algorithm == TE_ALGORITHM_NAIVE
             ? ComputeViewshedNaive(request.observer, request.observerHeight, request.gridSize, request.gridSize, request.spacingDeg, sampler, q.refraction_k, request.report, targetHeight, AllCores)
