@@ -24,6 +24,7 @@
     <ClInclude Include="MinimumVisibleHeight.h" />
     <ClInclude Include="LineOfSightPairs.h" />
     <ClInclude Include="PreparedObserver.h" />
+    <ClInclude Include="QueryExtent.h" />
     <ClInclude Include="Threads.h" />
     <ClInclude Include="TerrainProfile.h" />
     <ClInclude Include="VerticalDatum.h" />

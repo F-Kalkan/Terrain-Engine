@@ -58,6 +58,9 @@ public enum ComputationStatus
     DatumRejected = 4,
     NothingEvaluated = 5,
     InvalidInput = 6,
+
+    /// <summary>The path runs past the open tile, where the engine has no data -- not a void in it.</summary>
+    DataNotGiven = 7,
 }
 
 public enum TerrainFeature
@@ -75,6 +78,9 @@ public enum CellState : byte
     Degraded = 1,
     Visible = 2,
     NotVisible = 3,
+
+    /// <summary>No confident answer: the cell, or the way to it, lies past the open tile -- not a void in it.</summary>
+    DataNotGiven = 4,
 }
 
 public enum ViewshedAlgorithm
@@ -114,7 +120,10 @@ public sealed record PathQuery(
     Interpolation Interpolation,
     double FrequencyMHz = 0);
 
-/// <summary>One sample along a path, carrying everything a chart of the result needs.</summary>
+/// <summary>
+/// One sample along a path, carrying everything a chart of the result needs. With no elevation,
+/// <see cref="DataNotGiven"/> tells a point past the open tile from a hole in the tile's own data.
+/// </summary>
 public sealed record PathSample(
     double LatitudeDeg,
     double LongitudeDeg,
@@ -122,7 +131,8 @@ public sealed record PathSample(
     double? ElevationM,
     double? CurvatureCorrectedElevationM,
     double? SightLineHeightM,
-    double FirstFresnelRadiusM);
+    double FirstFresnelRadiusM,
+    bool DataNotGiven = false);
 
 public sealed record BlockingPoint(
     double LatitudeDeg,

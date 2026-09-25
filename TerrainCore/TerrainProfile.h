@@ -19,6 +19,10 @@ struct ProfileSample
     std::optional<double> elevationM;
     double distanceFromStartM = 0.0;
     VerticalDatum elevationDatum = VerticalDatum::Unknown; // the datum elevationM is expressed in
+
+    // With no elevation: true when the sampler was never given data here, false when the
+    // source holds a void. A sample built by hand without an elevation is a void.
+    bool dataNotGiven = false;
 };
 
 // Mean Earth radius, in metres, modelled as a sphere. Declared once here --
@@ -213,7 +217,9 @@ inline InputProblem GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, do
 
         ProfileSample sample;
         sample.point = current;
-        sample.elevationM = sampler.GetElevation(current.latitudeDeg, current.longitudeDeg);
+        ElevationSample read = sampler.Sample(current.latitudeDeg, current.longitudeDeg);
+        sample.elevationM = ElevationOf(read);
+        sample.dataNotGiven = read.data == ElevationData::NotGiven;
         sample.distanceFromStartM = t * totalDistanceM;
         sample.elevationDatum = sampler.GetDatum();
 

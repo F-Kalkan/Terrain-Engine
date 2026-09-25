@@ -179,7 +179,7 @@ struct MinimumVisibleHeightResult
     // The viewshed of the ground itself, cell for cell what ComputeViewshedNaive (or
     // ComputeViewshedFast, for the fast version) gives for a target 0 m above ground:
     // Visible where the ground is seen, NotVisible where only a target standing above
-    // it is, and NotCovered or Degraded, for the reasons the viewshed gives them,
+    // it is, and NotCovered, Degraded or DataNotGiven, for the reasons the viewshed gives them,
     // where there is no confident answer.
     std::vector<std::vector<CellVisibility>> state;
 
@@ -280,9 +280,22 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint 
     double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
 
     // The observer's own cell, as naive answers it: seen from any height when
-    // something is known about the observer, Degraded when nothing is.
-    auto observerGroundM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
-    bool observerKnown = observerGroundM.has_value() && CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
+    // something is known about the observer, and otherwise no confident answer, for
+    // the reason naive gives.
+    ElevationSample observerGround = sampler.Sample(observer.latitudeDeg, observer.longitudeDeg);
+    bool observerDatumOk = CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
+    CellVisibility observerCell = observerGround.data != ElevationData::Present ? NoAnswerFor(observerGround.data)
+        : observerDatumOk ? CellVisibility::Visible : CellVisibility::Degraded;
+
+    // With no ground known under the observer, every cell is answered for that gap, as
+    // ComputeViewshedNaive answers it.
+    if (observerGround.data != ElevationData::Present)
+    {
+        result.state.assign(gridRows, std::vector<CellVisibility>(gridCols, observerDatumOk ? NoAnswerFor(observerGround.data) : CellVisibility::Degraded));
+        result.state[centerRow][centerCol] = observerCell;
+        if (progress) progress(1.0);
+        return result;
+    }
 
     // One profile buffer per thread, reused for every cell that thread answers.
     std::vector<std::vector<ProfileSample>> profiles(ThreadsFor(threadCount));
@@ -292,11 +305,11 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint 
         {
             if (row == centerRow && col == centerCol)
             {
-                result.state[row][col] = observerKnown ? CellVisibility::Visible : CellVisibility::Degraded;
-                if (observerKnown)
+                result.state[row][col] = observerCell;
+                if (observerCell == CellVisibility::Visible)
                 {
                     result.heightAboveGroundM[row][col] = 0.0;
-                    result.groundM[row][col] = *observerGroundM;
+                    result.groundM[row][col] = observerGround.elevationM;
                 }
                 continue;
             }
@@ -306,7 +319,7 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint 
             MinimumVisibleHeightAnswer answer = MinimumVisibleHeightAlongProfile(profile, observerHeight, k);
             if (!IsOk(answer.status))
             {
-                result.state[row][col] = CellVisibility::Degraded;
+                result.state[row][col] = answer.status == ComputationStatus::DataNotGiven ? CellVisibility::DataNotGiven : CellVisibility::Degraded;
                 continue;
             }
             result.state[row][col] = answer.heightAboveGroundM == 0.0 ? CellVisibility::Visible : CellVisibility::NotVisible;
@@ -347,16 +360,20 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint obser
     VerticalDatum terrainDatum = sampler.GetDatum();
     LayOutMinimumVisibleHeightGrid(result, gridRows, gridCols, terrainDatum);
 
-    // As ComputeViewshedFast: nothing known about the observer, nothing known about any cell.
-    auto observerGroundM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
-    if (!observerGroundM.has_value() || !CanExpressInTerrainDatum(observerHeight, terrainDatum))
+    // As ComputeViewshedFast: nothing known about the observer, nothing known about any cell
+    // -- Degraded for a height with no datum, otherwise for the reason its ground is missing.
+    ElevationSample observerGround = sampler.Sample(observer.latitudeDeg, observer.longitudeDeg);
+    bool observerDatumOk = CanExpressInTerrainDatum(observerHeight, terrainDatum);
+    if (!observerDatumOk || observerGround.data != ElevationData::Present)
     {
-        result.state.assign(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::Degraded));
+        CellVisibility everyCell = !observerDatumOk ? CellVisibility::Degraded : NoAnswerFor(observerGround.data);
+        result.state.assign(gridRows, std::vector<CellVisibility>(gridCols, everyCell));
+        result.state[gridRows / 2][gridCols / 2] = observerGround.data != ElevationData::Present ? NoAnswerFor(observerGround.data) : CellVisibility::Degraded;
         if (progress) progress(1.0);
         return result;
     }
 
-    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *observerGroundM, terrainDatum);
+    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, observerGround.elevationM, terrainDatum);
     double twoKR = 2 * k * EarthRadiusM;
     bool finished = AnswerEachCellFromFastHorizons(observer, observerEyeHeightM, gridRows, gridCols, spacingDeg, sampler, k, progress, result.state,
         [&](int row, int col, double groundM, double dM, double horizon) {
@@ -380,7 +397,7 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint obser
     int centerCol = gridCols / 2;
     result.state[centerRow][centerCol] = CellVisibility::Visible;
     result.heightAboveGroundM[centerRow][centerCol] = 0.0;
-    result.groundM[centerRow][centerCol] = *observerGroundM;
+    result.groundM[centerRow][centerCol] = observerGround.elevationM;
 
     if (progress) progress(1.0);
     return result;

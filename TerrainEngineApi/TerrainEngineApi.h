@@ -63,6 +63,8 @@ extern "C" {
 #define TE_STATUS_NOTHING_EVALUATED              5  // Fresnel only: no point between the ends to evaluate
 #define TE_STATUS_INVALID_INPUT                  6  // an input outside the engine's domain; the functions here refuse
                                                     // those with TE_ERROR_INVALID_ARGUMENT first, so it isn't returned
+#define TE_STATUS_DATA_NOT_GIVEN                 7  // the path runs past the open tile, where the engine has no data --
+                                                    // not a void: a void, once met, is reported instead
 
 // Kind of terrain feature at a blocking point
 #define TE_FEATURE_UNKNOWN          0
@@ -73,9 +75,10 @@ extern "C" {
 
 // Viewshed cell states
 #define TE_CELL_NOT_COVERED         0  // no ray reached the cell
-#define TE_CELL_DEGRADED            1  // no confident answer: the line to it crosses missing data
+#define TE_CELL_DEGRADED            1  // no confident answer: a void in the tile under the cell or on the way to it
 #define TE_CELL_VISIBLE             2
 #define TE_CELL_NOT_VISIBLE         3
+#define TE_CELL_DATA_NOT_GIVEN      4  // no confident answer: the cell, or the way to it, lies past the open tile
 
 // Viewshed algorithms
 #define TE_ALGORITHM_FAST           0
@@ -145,7 +148,8 @@ TE_API int32_t te_tile_close(te_tile tile);
 TE_API int32_t te_tile_get_info(te_tile tile, te_tile_info* out_info);
 
 // Elevation, in metres above mean sea level, at a point inside the tile. A void answers
-// TE_OK with *out_has_value = 0; a point outside the tile is TE_ERROR_OUTSIDE_TILE.
+// TE_OK with *out_has_value = 0; a point outside the tile is TE_ERROR_OUTSIDE_TILE, and so
+// is one on its southern or eastern edge read bilinearly, which needs posts past the edge.
 // Complexity: O(1). Thread-safety: safe to call concurrently.
 TE_API int32_t te_tile_get_elevation(te_tile tile, double latitude_deg, double longitude_deg, int32_t interpolation, double* out_elevation_m, int32_t* out_has_value);
 
@@ -223,8 +227,8 @@ typedef struct te_path_sample
     double longitude_deg;
     double distance_m;                // from the observer, along the great circle
     double elevation_m;               // metres above mean sea level; valid when has_elevation
-    int32_t has_elevation;            // 0 where the data is void -- draw a gap, never a zero
-    int32_t reserved;
+    int32_t has_elevation;            // 0 where there is no data -- draw a gap, never a zero
+    int32_t data_not_given;           // with has_elevation 0: 1 past the open tile, 0 for a void in it
     double curvature_corrected_elevation_m; // elevation raised by the Earth's curvature under refraction_k; valid when has_elevation
     double sight_line_height_m;       // valid when the result's eye_heights_known
     double first_fresnel_radius_m;    // 0 at the ends or when Fresnel wasn't computed
@@ -293,8 +297,8 @@ TE_API int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_prog
 // target_height_above_ground_m is not used. algorithm picks the fast version or the exact
 // reference (TE_ALGORITHM_NAIVE). *out_cells holds rows * cols TE_CELL_* values: the
 // viewshed of the ground itself -- TE_CELL_VISIBLE where the ground is seen,
-// TE_CELL_NOT_VISIBLE where only a target above it is, and TE_CELL_DEGRADED or
-// TE_CELL_NOT_COVERED where there is no confident answer. *out_heights_m holds rows * cols
+// TE_CELL_NOT_VISIBLE where only a target above it is, and TE_CELL_DEGRADED,
+// TE_CELL_DATA_NOT_GIVEN or TE_CELL_NOT_COVERED where there is no confident answer. *out_heights_m holds rows * cols
 // heights in metres, in the same order: NaN where there is no confident answer, +infinity
 // where no height is seen. The viewshed for a target H above the ground is every cell
 // whose height is at most H -- exactly what te_viewshed gives for that target height, with

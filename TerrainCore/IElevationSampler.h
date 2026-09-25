@@ -11,6 +11,24 @@ enum class InterpolationMode
     Bilinear
 };
 
+// What a sampler holds at a point. A void is a hole in the source itself -- the data was
+// given, and says nothing is known there. Data not given is a place the sampler was never
+// handed data for: off its tile, outside its block, or with no tile registered. The two
+// call for different answers from a caller: nothing will fill a void, while data not given
+// can be loaded and the question asked again.
+enum class ElevationData
+{
+    Present,
+    Void,
+    NotGiven
+};
+
+struct ElevationSample
+{
+    ElevationData data = ElevationData::NotGiven;
+    double elevationM = 0.0; // meaningful only when data is Present
+};
+
 class IElevationSampler {
 public:
     virtual ~IElevationSampler() = default;
@@ -21,10 +39,28 @@ public:
     // since none of them mutate state in GetElevation.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg) = 0;
 
+    // The elevation at a point, or why there is none: a void in the source, or data this
+    // sampler was never given. Every sampler in this library says which; the default, for
+    // one that only answers GetElevation, can't tell and calls every gap a void.
+    // Complexity and thread-safety: as GetElevation.
+    virtual ElevationSample Sample(double latitudeDeg, double longitudeDeg)
+    {
+        std::optional<double> elevationM = GetElevation(latitudeDeg, longitudeDeg);
+        return elevationM.has_value() ? ElevationSample{ ElevationData::Present, *elevationM } : ElevationSample{ ElevationData::Void, 0.0 };
+    }
+
     // Which vertical datum GetElevation's returned values are expressed in.
     // Never assumed by a caller -- declared once per sampler instance.
     virtual VerticalDatum GetDatum() const = 0;
 };
+
+// An elevation as GetElevation returns it: the value, or nothing for a void or data not given.
+// Complexity: O(1). Thread-safety: pure function.
+inline std::optional<double> ElevationOf(const ElevationSample& sample)
+{
+    if (sample.data != ElevationData::Present) return std::nullopt;
+    return sample.elevationM;
+}
 
 class FakeElevationSampler : public IElevationSampler {
 public:
@@ -47,10 +83,17 @@ public:
     // multiple threads are safe as long as no thread is concurrently mutating
     // the public grid field itself.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg) {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+
+    // The grid holds no voids: anywhere off it is data not given.
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override {
+        const ElevationSample notGiven{ ElevationData::NotGiven, 0.0 };
+
         // No grid, or a coordinate off it by more than a cell -- or not a number at all --
         // names no cell. Checked as doubles: casting such a value to an int would be undefined.
-        if (grid.empty() || grid[0].empty()) return std::nullopt;
-        if (!(latitudeDeg > -2.0 && latitudeDeg < grid.size() + 1.0 && longitudeDeg > -2.0 && longitudeDeg < grid[0].size() + 1.0)) return std::nullopt;
+        if (grid.empty() || grid[0].empty()) return notGiven;
+        if (!(latitudeDeg > -2.0 && latitudeDeg < grid.size() + 1.0 && longitudeDeg > -2.0 && longitudeDeg < grid[0].size() + 1.0)) return notGiven;
 
         if (mode == InterpolationMode::Bilinear)
         {
@@ -61,7 +104,7 @@ public:
 
             if (row0 < 0 || row1 >= (int)grid.size() || col0 < 0 || col1 >= (int)grid[0].size())
             {
-                return std::nullopt;
+                return notGiven;
             }
 
             double fracRow = latitudeDeg - row0;
@@ -74,7 +117,7 @@ public:
 
             double top = v00 + (v01 - v00) * fracCol;
             double bottom = v10 + (v11 - v10) * fracCol;
-            return top + (bottom - top) * fracRow;
+            return ElevationSample{ ElevationData::Present, top + (bottom - top) * fracRow };
         }
 
         int row = (int)round(latitudeDeg);
@@ -82,10 +125,10 @@ public:
 
         if (row < 0 || row >= (int)grid.size() || col < 0 || col >= (int)grid[0].size())
         {
-            return std::nullopt;
+            return notGiven;
         }
 
-        return grid[row][col];
+        return ElevationSample{ ElevationData::Present, grid[row][col] };
     }
 
     VerticalDatum GetDatum() const override { return datum; }
@@ -126,15 +169,21 @@ public:
     // synchronised against that.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
     {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+
+    // The covering tile's own answer; where no tile is registered, data not given.
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
         for (auto& tile : tiles)
         {
             if (latitudeDeg >= tile.swLatDeg && latitudeDeg < tile.swLatDeg + 1.0 &&
                 longitudeDeg >= tile.swLonDeg && longitudeDeg < tile.swLonDeg + 1.0)
             {
-                return tile.sampler->GetElevation(latitudeDeg, longitudeDeg);
+                return tile.sampler->Sample(latitudeDeg, longitudeDeg);
             }
         }
-        return std::nullopt;
+        return ElevationSample{ ElevationData::NotGiven, 0.0 };
     }
 
     // Assumes every registered tile shares one datum (true for tiles drawn from
@@ -162,13 +211,21 @@ struct RasterBlockGeometry
     double colStepDeg = 0.0;
     int rows = 0;
     int cols = 0;
+
+    // A window into a larger raster: the block's first cell is cell (rowOffset, colOffset)
+    // of the grid whose cell (0, 0) is centred on the origin. Every window of one raster
+    // then finds a coordinate's cell with the very same arithmetic as the whole raster
+    // does, so a query answered from a window reads exactly the values it would read from
+    // the whole. 0 and 0 for a block that is its own grid.
+    int rowOffset = 0;
+    int colOffset = 0;
 };
 
-// Maps (lat, lon) to the row-major index of the nearest cell centre, or nullopt
-// outside the block. Rounding to the nearest centre is what a raster reply means by
-// its origin; reading the origin as a cell's corner instead would shift every lookup
-// by half a cell. Both raster-block samplers below use this one implementation, so
-// they cannot disagree about which cell a coordinate falls in.
+// Maps (lat, lon) to the row-major index, within the block, of the nearest cell centre,
+// or nullopt outside the block. Rounding to the nearest centre is what a raster reply
+// means by its origin; reading the origin as a cell's corner instead would shift every
+// lookup by half a cell. Both raster-block samplers below use this one implementation,
+// so they cannot disagree about which cell a coordinate falls in.
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline std::optional<size_t> RasterBlockCellIndex(const RasterBlockGeometry& geometry, double latitudeDeg, double longitudeDeg)
 {
@@ -177,8 +234,8 @@ inline std::optional<size_t> RasterBlockCellIndex(const RasterBlockGeometry& geo
     // Rounded as doubles and range-checked before any cast: a coordinate that is NaN,
     // infinite or far outside the block would otherwise be cast to an int it doesn't
     // fit, which is undefined.
-    double row = round((latitudeDeg - geometry.originCellCentreLatitudeDeg) / geometry.rowStepDeg);
-    double col = round((longitudeDeg - geometry.originCellCentreLongitudeDeg) / geometry.colStepDeg);
+    double row = round((latitudeDeg - geometry.originCellCentreLatitudeDeg) / geometry.rowStepDeg) - geometry.rowOffset;
+    double col = round((longitudeDeg - geometry.originCellCentreLongitudeDeg) / geometry.colStepDeg) - geometry.colOffset;
 
     if (!(row >= 0 && row < geometry.rows && col >= 0 && col < geometry.cols)) return std::nullopt;
 
@@ -213,12 +270,19 @@ public:
     // threads, provided nothing modifies the viewed arrays meanwhile.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
     {
-        if (elevations == nullptr || valid == nullptr) return std::nullopt;
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+
+    // Outside the block, data not given; a cell flagged invalid, a void.
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
+        if (elevations == nullptr || valid == nullptr) return ElevationSample{ ElevationData::NotGiven, 0.0 };
 
         std::optional<size_t> index = RasterBlockCellIndex(geometry, latitudeDeg, longitudeDeg);
-        if (!index.has_value() || valid[*index] == 0) return std::nullopt;
+        if (!index.has_value()) return ElevationSample{ ElevationData::NotGiven, 0.0 };
+        if (valid[*index] == 0) return ElevationSample{ ElevationData::Void, 0.0 };
 
-        return elevations[*index];
+        return ElevationSample{ ElevationData::Present, elevations[*index] };
     }
 
     VerticalDatum GetDatum() const override { return datum; }
@@ -240,12 +304,15 @@ private:
 class RasterBlockElevationSampler : public IElevationSampler
 {
 public:
-    RasterBlockElevationSampler(const std::vector<std::vector<std::optional<double>>>& block, double originCellCentreLatitudeDeg, double originCellCentreLongitudeDeg, double rowStepDeg, double colStepDeg, VerticalDatum datumIn)
+    // rowOffset and colOffset: see RasterBlockGeometry -- the block as a window into a larger raster.
+    RasterBlockElevationSampler(const std::vector<std::vector<std::optional<double>>>& block, double originCellCentreLatitudeDeg, double originCellCentreLongitudeDeg, double rowStepDeg, double colStepDeg, VerticalDatum datumIn, int rowOffset = 0, int colOffset = 0)
     {
         geometry.originCellCentreLatitudeDeg = originCellCentreLatitudeDeg;
         geometry.originCellCentreLongitudeDeg = originCellCentreLongitudeDeg;
         geometry.rowStepDeg = rowStepDeg;
         geometry.colStepDeg = colStepDeg;
+        geometry.rowOffset = rowOffset;
+        geometry.colOffset = colOffset;
         geometry.rows = (int)block.size();
         geometry.cols = geometry.rows > 0 ? (int)block[0].size() : 0;
         datum = datumIn;
@@ -272,10 +339,17 @@ public:
     // multiple threads once construction has completed.
     std::optional<double> virtual GetElevation(double latitudeDeg, double longitudeDeg)
     {
-        std::optional<size_t> index = RasterBlockCellIndex(geometry, latitudeDeg, longitudeDeg);
-        if (!index.has_value() || valid[*index] == 0) return std::nullopt;
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
 
-        return elevations[*index];
+    // Outside the block, data not given; a cell with no value, a void.
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
+        std::optional<size_t> index = RasterBlockCellIndex(geometry, latitudeDeg, longitudeDeg);
+        if (!index.has_value()) return ElevationSample{ ElevationData::NotGiven, 0.0 };
+        if (valid[*index] == 0) return ElevationSample{ ElevationData::Void, 0.0 };
+
+        return ElevationSample{ ElevationData::Present, elevations[*index] };
     }
 
     VerticalDatum GetDatum() const override { return datum; }

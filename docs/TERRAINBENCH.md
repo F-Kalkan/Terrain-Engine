@@ -75,7 +75,8 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   seen, 1.8 m a person standing there, a mast's height a radio link. The result is drawn
   inside a dashed ring of the requested radius:
   visible cells in cyan, cells out of sight only darkened so the ground stays readable, cells
-  with no confident answer in purple and cells not reached in grey. The disc is drawn where it
+  with no confident answer in purple where a hole in the tile's data is the reason and slate
+  blue where the reason is ground past the tile's edge, and cells not reached in grey. The disc is drawn where it
   overlaps the tile, and the legend counts exactly the cells drawn; when part of the circle lies
   past the tile's edge, where there is no data, the summary says so. The legend hides or shows
   each kind of cell, and a slider sets the layer's opacity.
@@ -125,7 +126,7 @@ exactly the 30 m the app uses, so both give the same answer to the precision the
 |---|---|---|---|
 | Blocked | Observer 36.3, -111.5; target 36.35, -111.45; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.3 -111.5 36.35 -111.45 0.0002697964817756191 2 2` | Blocked at 36.3277, -111.472; terrain 1900 m above mean sea level; the sight line falls short by 195.993 m; a falling slope |
 | Visible | Observer 36.4, -111.5; target 36.45, -111.45; nearest | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.4 -111.5 36.45 -111.45 0.0002697964817756191 2 2` | Visible (`Status: ok`) |
-| No confident answer | Observer 36.5, -111.5; target 36.5, -111.0; **bilinear** | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.5 -111.5 36.5 -111.0 0.0002697964817756191 2 2 1.3333333333333333 bilinear` | No confident answer: `Status: endpoint elevation missing`. The target sits on the tile's east edge, where bilinear interpolation has no post beyond it to blend with. (The CLI still prints a `Visible:` line; with that status it isn't an answer.) |
+| No confident answer | Observer 36.5, -111.5; target 36.5, -111.0; **bilinear** | `TerrainEngine.exe los DATA/N36W112.hgt 36 -112 36.5 -111.5 36.5 -111.0 0.0002697964817756191 2 2 1.3333333333333333 bilinear` | No confident answer: `Status: data not given for part of the path`. The target sits on the tile's east edge, where bilinear interpolation needs the posts beyond it, which the tile doesn't hold -- data not given, not a hole in the tile. (The CLI still prints a `Visible:` line; with that status it isn't an answer.) |
 
 ## Tests
 

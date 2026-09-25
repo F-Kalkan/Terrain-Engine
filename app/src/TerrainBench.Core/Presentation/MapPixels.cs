@@ -21,8 +21,14 @@ public static class MapPixels
     public static readonly Rgba NotReachedColour = new(170, 170, 170, 120);
     public static readonly Rgba DisagreementColour = new(255, 214, 0, 235);
 
-    /// <summary>Index of the comparison highlights in a hidden-layers array, after the four cell states.</summary>
-    public const int HighlightLayer = 4;
+    /// <summary>
+    /// Past the open tile: a slate blue, apart from the purple of a hole in the tile's own data.
+    /// The map draws only the part of a run on the tile, so this shows mostly along its edge.
+    /// </summary>
+    public static readonly Rgba DataNotGivenColour = new(84, 110, 150, 175);
+
+    /// <summary>Index of the comparison highlights in a hidden-layers array, after the five cell states.</summary>
+    public const int HighlightLayer = 5;
 
     /// <summary>
     /// The minimum-visible-height legend, low to high: each band holds the cells whose height is
@@ -125,6 +131,7 @@ public static class MapPixels
         CellState.Visible => VisibleColour,
         CellState.NotVisible => NotVisibleColour,
         CellState.Degraded => DegradedColour,
+        CellState.DataNotGiven => DataNotGivenColour,
         _ => NotReachedColour,
     };
 

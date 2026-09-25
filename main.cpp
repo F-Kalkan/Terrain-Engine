@@ -710,6 +710,9 @@ int main(int argc, char* argv[])
     TestLineOfSightPairsAreTheSameAtEveryThreadCount();
     TestLineOfSightPairsRefuseEachPairItCannotSample();
     TestReferenceGridsAreTheSameAtEveryThreadCount();
+    TestDataNotGivenIsToldApartFromAVoid();
+    TestQueryExtentsAreTheBoxesTheQueriesRead();
+    TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile();
 
     std::cout << "-------------------------" << std::endl;
 

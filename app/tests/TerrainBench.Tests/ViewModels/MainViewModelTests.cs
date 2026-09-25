@@ -103,6 +103,30 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public void Viewshed_layers_hidden_under_an_older_version_stay_hidden_in_their_new_places()
+    {
+        // Saved before cells past the tile's edge had a layer of their own: states 0-3, the
+        // highlights at 4, the height bands from 5. Here "not visible", the highlights and the
+        // first band were hidden; each must stay hidden, and the new layer start shown.
+        var older = new bool[13];
+        older[(int)CellState.NotVisible] = true;
+        older[4] = true;
+        older[5] = true;
+        _settings.Saved = new AppSettings { HiddenViewshedLayers = older };
+
+        var vm = Create();
+        vm.Start();
+
+        var hidden = vm.Viewshed.HiddenLayers;
+        Assert.Equal(Presentation.MapPixels.LayerCount, hidden.Length);
+        Assert.True(hidden[(int)CellState.NotVisible]);
+        Assert.True(hidden[Presentation.MapPixels.HighlightLayer]);
+        Assert.True(hidden[Presentation.MapPixels.FirstHeightLayer]);
+        Assert.False(hidden[(int)CellState.DataNotGiven]);
+        Assert.Equal(3, hidden.Count(h => h));
+    }
+
+    [Fact]
     public void The_last_tile_and_every_parameter_are_remembered_between_runs()
     {
         var tilePath = Path.Combine(_folder, "N36W112.hgt");

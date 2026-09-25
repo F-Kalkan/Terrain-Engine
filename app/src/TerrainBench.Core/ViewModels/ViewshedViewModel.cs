@@ -314,7 +314,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
         foreach (var row in Legend) report.Line(row.Name, row.Count);
         if (_engineCounts is { } all)
         {
-            report.Line("Engine counts, whole grid", $"visible {Format.Count(all[(int)CellState.Visible])}, not visible {Format.Count(all[(int)CellState.NotVisible])}, no confident answer {Format.Count(all[(int)CellState.Degraded])}, not reached {Format.Count(all[(int)CellState.NotCovered])}");
+            report.Line("Engine counts, whole grid", $"visible {Format.Count(all[(int)CellState.Visible])}, not visible {Format.Count(all[(int)CellState.NotVisible])}, no confident answer: a hole in the data {Format.Count(all[(int)CellState.Degraded])}, past the tile's edge {Format.Count(all[(int)CellState.DataNotGiven])}, not reached {Format.Count(all[(int)CellState.NotCovered])}");
         }
         if (Summary is not null) report.Line("Summary", Summary);
     }
@@ -448,7 +448,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
 
     private void Show(ViewshedMap map, bool[]? highlights, string highlightName, ViewshedQuery query, bool[] drawn)
     {
-        int[] counts = new int[4];
+        int[] counts = new int[StateCount];
         int highlighted = 0;
         for (int i = 0; i < map.Cells.Length; i++)
         {
@@ -460,8 +460,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
         Legend.Clear();
         AddLegendRow("Visible", MapPixels.VisibleColour, counts[(int)CellState.Visible], (int)CellState.Visible);
         AddLegendRow("Not Visible", MapPixels.NotVisibleColour, counts[(int)CellState.NotVisible], (int)CellState.NotVisible);
-        AddLegendRow("No Confident Answer (Missing Data on the Way)", MapPixels.DegradedColour, counts[(int)CellState.Degraded], (int)CellState.Degraded);
-        AddLegendRow("Not Reached", MapPixels.NotReachedColour, counts[(int)CellState.NotCovered], (int)CellState.NotCovered);
+        AddNoAnswerRows(counts);
         if (highlights is not null)
         {
             AddLegendRow(highlightName, MapPixels.DisagreementColour, highlighted, MapPixels.HighlightLayer);
@@ -477,7 +476,7 @@ public sealed partial class ViewshedViewModel : ObservableObject
     private void ShowHeights(ViewshedMap map, ViewshedQuery query, bool[] drawn)
     {
         int[] bands = new int[MapPixels.HeightBands.Count];
-        int[] states = new int[4];
+        int[] states = new int[StateCount];
         for (int i = 0; i < map.Cells.Length; i++)
         {
             if (!drawn[i]) continue;
@@ -491,16 +490,29 @@ public sealed partial class ViewshedViewModel : ObservableObject
         {
             AddLegendRow(MapPixels.HeightBands[band].Name, MapPixels.HeightBands[band].Colour, bands[band], MapPixels.FirstHeightLayer + band);
         }
-        AddLegendRow("No Confident Answer (Missing Data on the Way)", MapPixels.DegradedColour, states[(int)CellState.Degraded], (int)CellState.Degraded);
-        AddLegendRow("Not Reached", MapPixels.NotReachedColour, states[(int)CellState.NotCovered], (int)CellState.NotCovered);
+        AddNoAnswerRows(states);
 
         Present(map, null, query);
+    }
+
+    /// <summary>How many cell states the engine reports: <see cref="CellState"/>'s values, 0 up.</summary>
+    private const int StateCount = (int)CellState.DataNotGiven + 1;
+
+    /// <summary>
+    /// The legend rows for cells with no confident answer, one per reason: a hole in the tile's own
+    /// data, the tile's edge, and no ray reaching the cell.
+    /// </summary>
+    private void AddNoAnswerRows(int[] counts)
+    {
+        AddLegendRow("No Confident Answer (Hole in the Data)", MapPixels.DegradedColour, counts[(int)CellState.Degraded], (int)CellState.Degraded);
+        AddLegendRow("No Confident Answer (Past the Tile's Edge)", MapPixels.DataNotGivenColour, counts[(int)CellState.DataNotGiven], (int)CellState.DataNotGiven);
+        AddLegendRow("Not Reached", MapPixels.NotReachedColour, counts[(int)CellState.NotCovered], (int)CellState.NotCovered);
     }
 
     private void Present(ViewshedMap map, bool[]? highlights, ViewshedQuery query)
     {
         // The engine's own counts, over its whole square grid, for the copied report.
-        _engineCounts = new int[4];
+        _engineCounts = new int[StateCount];
         foreach (var cell in map.Cells) _engineCounts[(int)cell]++;
 
         RadiusLabel = Format.Number(query.RadiusKm) + " km";

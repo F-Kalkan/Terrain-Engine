@@ -69,12 +69,43 @@ enum class ComputationStatus
 {
     Ok,
     EmptyOrSingleSampleProfile, // profile.size() < 2 -- nothing to walk
-    EndpointMissing,            // the observer's or target's own elevation is void
-    VoidInProfile,              // some interior sample along the path is void
+    EndpointMissing,            // the observer's or target's own elevation is a void in the source
+    VoidInProfile,              // some interior sample along the path is a void in the source
     DatumRejected,              // a height and the terrain can't be put on one common datum -- see EyeHeightInTerrainDatum
     NothingEvaluated,           // Fresnel only: no interior sample existed to test at all
-    InvalidInput                // an input outside the function's domain; the result's inputProblem says which
+    InvalidInput,               // an input outside the function's domain; the result's inputProblem says which
+    DataNotGiven                // the path reaches ground the sampler was never given data for -- not a void
 };
+
+// Whether any sample of the profile lies where the sampler was never given data.
+//
+// Complexity: O(profile.size()). Thread-safety: pure function, safe to call concurrently.
+inline bool ReachesDataNotGiven(const std::vector<ProfileSample>& profile)
+{
+    for (const auto& sample : profile)
+    {
+        if (sample.dataNotGiven) return true;
+    }
+    return false;
+}
+
+// Why a profile with a gap in it has no answer. A void in the source wins over ground never
+// given, once known -- nothing loaded will fill it -- at an end (EndpointMissing) or between
+// them (VoidInProfile); with no void known, the ground not given (DataNotGiven), which given
+// the data may yet be answered. Ok for a profile with no gap.
+//
+// Complexity: O(profile.size()). Thread-safety: pure function, safe to call concurrently.
+inline ComputationStatus NoAnswerStatus(const std::vector<ProfileSample>& profile)
+{
+    auto isVoid = [](const ProfileSample& sample) { return !sample.elevationM.has_value() && !sample.dataNotGiven; };
+    if (profile.empty()) return ComputationStatus::Ok;
+    if (isVoid(profile.front()) || isVoid(profile.back())) return ComputationStatus::EndpointMissing;
+    for (const auto& sample : profile)
+    {
+        if (isVoid(sample)) return ComputationStatus::VoidInProfile;
+    }
+    return ReachesDataNotGiven(profile) ? ComputationStatus::DataNotGiven : ComputationStatus::Ok;
+}
 
 // The one datum every sample's elevation is expressed in, if there is exactly
 // one and terrain can be described in it; nullopt for a mixed profile, or one
@@ -109,6 +140,7 @@ inline std::string ComputationStatusToString(ComputationStatus status)
     case ComputationStatus::DatumRejected: return "datum rejected";
     case ComputationStatus::NothingEvaluated: return "nothing evaluated";
     case ComputationStatus::InvalidInput: return "invalid input";
+    case ComputationStatus::DataNotGiven: return "data not given for part of the path";
     default: return "unknown";
     }
 }
@@ -246,9 +278,12 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
         return result;
     }
 
-    if (!profile.front().elevationM.has_value() || !profile.back().elevationM.has_value())
+    // A gap in the path leaves no answer. A void in the source, once known, wins: nothing
+    // loaded will fill it. Ground never given, with no void known, is DataNotGiven -- given
+    // the data, the path may yet be answered.
+    if (ReachesDataNotGiven(profile) || !profile.front().elevationM.has_value() || !profile.back().elevationM.has_value())
     {
-        result.status = ComputationStatus::EndpointMissing;
+        result.status = NoAnswerStatus(profile);
         return result;
     }
 
@@ -345,9 +380,12 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
         return result;
     }
 
-    if (!profile.front().elevationM.has_value() || !profile.back().elevationM.has_value())
+    // A gap in the path leaves no answer. A void in the source, once known, wins: nothing
+    // loaded will fill it. Ground never given, with no void known, is DataNotGiven -- given
+    // the data, the path may yet be answered.
+    if (ReachesDataNotGiven(profile) || !profile.front().elevationM.has_value() || !profile.back().elevationM.has_value())
     {
-        result.status = ComputationStatus::EndpointMissing;
+        result.status = NoAnswerStatus(profile);
         return result;
     }
 

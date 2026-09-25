@@ -55,16 +55,21 @@ struct PreparedObserver
     VerticalDatum terrainDatum = VerticalDatum::Unknown;
     IElevationSampler* sampler = nullptr; // not owned; reads the ground under each target
 
-    // False when nothing is known about the observer -- it stands on a void, or its height
-    // can't be put on the terrain's datum: every target is then Degraded, as in a viewshed.
+    // False when nothing is known about the observer -- its ground is a void or wasn't given,
+    // or its height can't be put on the terrain's datum: every target then gets
+    // unknownObserverAnswer, DataNotGiven for ground not given and Degraded otherwise, as in
+    // a viewshed.
     bool observerKnown = false;
+    CellVisibility unknownObserverAnswer = CellVisibility::Degraded;
 
     // Ray r points at bearing 2 pi r / rayCount. horizon[r * samplesPerRay + i] is its
     // horizon over samples 1 to i + 1, sample j lying j * stepM from the observer.
     std::vector<float> horizon;
 
-    // Per ray, how far out its first void lies; infinity when it has none.
+    // Per ray, how far out its first void lies, and the first ground it wasn't given;
+    // infinity when it has none.
     std::vector<float> firstVoidM;
+    std::vector<float> firstNotGivenM;
 
     bool cancelled = false;
     InputProblem inputProblem = InputProblem::None;
@@ -72,7 +77,8 @@ struct PreparedObserver
 
 struct TargetAnswer
 {
-    // Visible or NotVisible; NotCovered for a target beyond the prepared radius; Degraded
+    // Visible or NotVisible; NotCovered for a target beyond the prepared radius; DataNotGiven
+    // where ground under the target or on the way to it wasn't given to the sampler; Degraded
     // where the answer isn't confident -- a void on the way or under the target, a height
     // that can't be put on the terrain's datum, nothing known about the observer.
     CellVisibility state = CellVisibility::NotCovered;
@@ -116,14 +122,16 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
     prepared.rayCount = rayCount > 0 ? rayCount : RaysForRadius(radiusM, spacingM);
     prepared.leaveOutM = spacingM / 2;
 
-    auto observerGroundM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
-    prepared.observerKnown = observerGroundM.has_value() && CanExpressInTerrainDatum(observerHeight, prepared.terrainDatum);
+    ElevationSample observerGround = sampler.Sample(observer.latitudeDeg, observer.longitudeDeg);
+    bool observerDatumOk = CanExpressInTerrainDatum(observerHeight, prepared.terrainDatum);
+    prepared.observerKnown = observerGround.data == ElevationData::Present && observerDatumOk;
     if (!prepared.observerKnown)
     {
+        prepared.unknownObserverAnswer = observerDatumOk ? NoAnswerFor(observerGround.data) : CellVisibility::Degraded;
         if (progress) progress(1.0);
         return prepared;
     }
-    prepared.observerEyeM = *EyeHeightInTerrainDatum(observerHeight, *observerGroundM, prepared.terrainDatum);
+    prepared.observerEyeM = *EyeHeightInTerrainDatum(observerHeight, observerGround.elevationM, prepared.terrainDatum);
 
     const double twoPi = 2 * 3.14159265358979323846;
     std::vector<ProfileSample> profile;
@@ -143,6 +151,7 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
             prepared.stepM = profile.back().distanceFromStartM / prepared.samplesPerRay;
             prepared.horizon.resize((size_t)prepared.rayCount * prepared.samplesPerRay);
             prepared.firstVoidM.assign(prepared.rayCount, INFINITY);
+            prepared.firstNotGivenM.assign(prepared.rayCount, INFINITY);
         }
 
         float* horizon = prepared.horizon.data() + (size_t)r * prepared.samplesPerRay;
@@ -153,7 +162,11 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
         {
             if (s < (int)profile.size())
             {
-                if (!profile[s].elevationM.has_value())
+                if (profile[s].dataNotGiven)
+                {
+                    if (std::isinf(prepared.firstNotGivenM[r])) prepared.firstNotGivenM[r] = (float)profile[s].distanceFromStartM;
+                }
+                else if (!profile[s].elevationM.has_value())
                 {
                     if (std::isinf(prepared.firstVoidM[r])) prepared.firstVoidM[r] = (float)profile[s].distanceFromStartM;
                 }
@@ -195,34 +208,41 @@ inline TargetAnswer QueryTarget(const PreparedObserver& prepared, GeoPoint targe
 
     double dM = GreatCircleDistanceM(prepared.observer, target);
     if (dM > prepared.radiusM) return answer; // NotCovered
+
+    // A height with no datum to put it on, Degraded, whatever is known of the observer: a line
+    // of sight checks the heights first, and so does a viewshed.
+    if (!CanExpressInTerrainDatum(targetHeight, prepared.terrainDatum))
+    {
+        answer.state = CellVisibility::Degraded;
+        return answer;
+    }
     if (!prepared.observerKnown)
     {
-        answer.state = CellVisibility::Degraded;
+        answer.state = prepared.unknownObserverAnswer;
         return answer;
     }
 
-    auto groundM = prepared.sampler->GetElevation(target.latitudeDeg, target.longitudeDeg);
-    std::optional<double> targetEyeM = groundM.has_value() ? EyeHeightInTerrainDatum(targetHeight, *groundM, prepared.terrainDatum) : std::nullopt;
-    if (!targetEyeM.has_value())
-    {
-        answer.state = CellVisibility::Degraded;
-        return answer;
-    }
-    if (dM <= 0.0)
-    {
-        answer.state = CellVisibility::Visible;
-        return answer;
-    }
-
+    // As a line of sight answers, a void under the target or on either ray before it wins
+    // over ground not given.
     const double twoPi = 2 * 3.14159265358979323846;
     double position = InitialBearingRad(prepared.observer, target) / twoPi * prepared.rayCount;
     int a = (int)std::floor(position);
     double t = position - a;
     a = ((a % prepared.rayCount) + prepared.rayCount) % prepared.rayCount;
     int b = (a + 1) % prepared.rayCount;
-    if (prepared.firstVoidM[a] < dM || prepared.firstVoidM[b] < dM)
+
+    ElevationSample ground = prepared.sampler->Sample(target.latitudeDeg, target.longitudeDeg);
+    bool notGiven = ground.data == ElevationData::NotGiven || prepared.firstNotGivenM[a] < dM || prepared.firstNotGivenM[b] < dM;
+    bool hole = ground.data == ElevationData::Void || prepared.firstVoidM[a] < dM || prepared.firstVoidM[b] < dM;
+    if (notGiven || hole)
     {
-        answer.state = CellVisibility::Degraded;
+        answer.state = hole ? CellVisibility::Degraded : CellVisibility::DataNotGiven;
+        return answer;
+    }
+    double targetEyeM = *EyeHeightInTerrainDatum(targetHeight, ground.elevationM, prepared.terrainDatum);
+    if (dM <= 0.0)
+    {
+        answer.state = CellVisibility::Visible;
         return answer;
     }
 
@@ -238,7 +258,7 @@ inline TargetAnswer QueryTarget(const PreparedObserver& prepared, GeoPoint targe
         horizon = std::isinf(ha) || std::isinf(hb) ? (std::max)(ha, hb) : ha + t * (hb - ha);
     }
 
-    bool seen = *targetEyeM >= *groundM && CurvatureAdjustedSlope(*targetEyeM, prepared.observerEyeM, dM, prepared.k) >= horizon;
+    bool seen = targetEyeM >= ground.elevationM && CurvatureAdjustedSlope(targetEyeM, prepared.observerEyeM, dM, prepared.k) >= horizon;
     answer.state = seen ? CellVisibility::Visible : CellVisibility::NotVisible;
     return answer;
 }

@@ -339,10 +339,15 @@ int32_t te_tile_get_elevation(te_tile tile, double latitude_deg, double longitud
         problem = OutsideTileProblem("point", latitude_deg, longitude_deg, found->nearest);
         if (!problem.empty()) return Fail(TE_ERROR_OUTSIDE_TILE, problem);
 
-        std::optional<double> elevation = found->Sampler(interpolation).GetElevation(latitude_deg, longitude_deg);
-        if (elevation.has_value())
+        // On the tile, a point can still need posts past it: bilinear interpolation on its southern
+        // or eastern edge. That is ground the engine wasn't given, not a void in the tile.
+        ElevationSample sample = found->Sampler(interpolation).Sample(latitude_deg, longitude_deg);
+        if (sample.data == ElevationData::NotGiven)
+            return Fail(TE_ERROR_OUTSIDE_TILE, "The point (" + Number(latitude_deg) + ", " + Number(longitude_deg)
+                + ") is on the tile's edge, where bilinear interpolation needs posts past it. Use nearest there.");
+        if (sample.data == ElevationData::Present)
         {
-            *out_elevation_m = *elevation;
+            *out_elevation_m = sample.elevationM;
             *out_has_value = 1;
         }
         return Succeed();
@@ -515,6 +520,7 @@ int32_t te_analyze_path(te_tile tile, const te_path_query* query, te_path_result
                 s.elevation_m = *p.elevationM;
                 s.curvature_corrected_elevation_m = *p.elevationM + CurvatureDropM(d1M, d2M, q.refraction_k);
             }
+            s.data_not_given = p.dataNotGiven ? 1 : 0;
             if (eyesKnown)
             {
                 s.sight_line_height_m = SightLineHeightM(result.observer_eye_height_m, result.target_eye_height_m, d1M, result.total_distance_m);

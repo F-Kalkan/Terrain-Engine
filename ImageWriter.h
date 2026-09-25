@@ -28,6 +28,9 @@ inline void WriteViewshedPGM(const ViewshedResult& viewshed, std::string filePat
             case CellVisibility::NotVisible:
                 pixel = 0;
                 break;
+            case CellVisibility::DataNotGiven: // past the data given -- a lighter grey than a void
+                pixel = 192;
+                break;
             default: // Degraded or NotCovered -- both render as "unknown"
                 pixel = 128;
                 break;

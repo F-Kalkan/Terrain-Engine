@@ -49,6 +49,29 @@ public class KnownAnswerTests
     }
 
     [Fact]
+    public void A_path_needing_data_past_the_tile_is_told_apart_from_one_crossing_a_hole()
+    {
+        // With bilinear interpolation a target on the tile's east edge needs posts past it: data the
+        // engine wasn't given. A path across a -32768 post in the tile crosses a hole in data it was
+        // given. Both have no confident answer, each for its own reason, down to the sample.
+        using var sample = Engine.OpenTile(RepositoryFiles.SampleTile, 36, -112).Value;
+        var edge = sample.AnalyzePath(new PathQuery(36.5, -111.5, 2, 36.5, -111.0, 2, 30, 4.0 / 3.0, Interpolation.Bilinear)).Value;
+        Assert.Equal(ComputationStatus.DataNotGiven, edge.LineOfSightStatus);
+        Assert.Null(edge.Samples[^1].ElevationM);
+        Assert.True(edge.Samples[^1].DataNotGiven);
+
+        const int row = 600, col = 600;
+        using var holed = SyntheticTile.Write(10, posts => posts[SyntheticTile.Index(row, col)] = -32768);
+        using var opened = Engine.OpenTile(holed.Path, 36, -112).Value;
+        double lon = SyntheticTile.ColLongitude(-112, col);
+        var across = opened.AnalyzePath(new PathQuery(
+            SyntheticTile.RowLatitude(36, row - 2), lon, 2, SyntheticTile.RowLatitude(36, row + 2), lon, 2, 30, 4.0 / 3.0, Interpolation.Nearest)).Value;
+        Assert.Equal(ComputationStatus.VoidInProfile, across.LineOfSightStatus);
+        Assert.Contains(across.Samples, s => s.ElevationM is null && !s.DataNotGiven);
+        Assert.DoesNotContain(across.Samples, s => s.DataNotGiven);
+    }
+
+    [Fact]
     public void Curvature_hides_flat_ground_50_km_away_by_34_79_m()
     {
         // Tests.h's curvature case: flat ground at sea level, 2 m eyes, 50 km apart. Midway the Earth

@@ -205,7 +205,7 @@ public class MainFlowTests
         app.WaitUntil(() => app.ViewModel.Viewshed.HasResult, TimeSpan.FromSeconds(30), "the viewshed");
 
         Assert.Equal(133, app.ViewModel.Viewshed.Map!.Rows);
-        Assert.Equal(4, app.ViewModel.Viewshed.Legend.Count);
+        Assert.Equal(5, app.ViewModel.Viewshed.Legend.Count);
         Assert.StartsWith("Fast viewshed of 133 × 133 cells", app.Find<TextBlock>("ViewshedSummary").Text);
         Assert.True(app.Find<MapView>("Map").ShowViewshed);
     }

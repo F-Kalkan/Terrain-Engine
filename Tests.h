@@ -19,6 +19,7 @@
 #include "ViewshedAgreement.h"
 #include "MinimumVisibleHeight.h"
 #include "PreparedObserver.h"
+#include "QueryExtent.h"
 #include "LineOfSightPairs.h"
 #include "RealElevationSampler.h"
 #include "CliArguments.h"
@@ -225,15 +226,16 @@ void TestVoidPointIsDegraded()
 void TestViewshedDetectsVoid()
 {
     // A 7x7 viewshed over a 5x5 raster of 30 m cells: the outer ring of viewshed
-    // cells lies off the raster, where elevation is void, and must come back
-    // Degraded; every cell over real data must come back with a confident answer.
+    // cells lies off the raster, where the sampler was given no data, and must come
+    // back DataNotGiven -- not a void, which is a hole in data it was given; every
+    // cell over real data must come back with a confident answer.
     const double spacingDeg = MetersToLatitudeDeg(30.0);
     const GeoPoint observer{ 36.5, -111.5 };
     RasterBlockElevationSampler sampler = MakeViewshedAlignedRaster(MakeFlatCells(5, 10.0), observer, spacingDeg);
 
     ViewshedResult viewshed = ComputeViewshedNaive(observer, Agl(2.0), 7, 7, spacingDeg, sampler);
 
-    bool ringDegraded = true;
+    bool ringNotGiven = true;
     bool interiorConfident = true;
     for (int row = 0; row < 7; row++)
     {
@@ -241,11 +243,11 @@ void TestViewshedDetectsVoid()
         {
             bool overRaster = row >= 1 && row <= 5 && col >= 1 && col <= 5;
             if (overRaster && !IsConfident(viewshed.visible[row][col])) interiorConfident = false;
-            if (!overRaster && viewshed.visible[row][col] != CellVisibility::Degraded) ringDegraded = false;
+            if (!overRaster && viewshed.visible[row][col] != CellVisibility::DataNotGiven) ringNotGiven = false;
         }
     }
 
-    Expect(ringDegraded && interiorConfident, "TestViewshedDetectsVoid");
+    Expect(ringNotGiven && interiorConfident, "TestViewshedDetectsVoid");
 }
 
 // TEST 6
@@ -2117,8 +2119,13 @@ public:
 
     std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
     {
-        if (CheckPoint({ latitudeDeg, longitudeDeg }) != InputProblem::None) return std::nullopt;
-        return latitudeDeg >= ridgeFromLatDeg && latitudeDeg <= ridgeToLatDeg ? ridgeM : groundM;
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+    // Everywhere on the Earth is given; a point that isn't on it is data never given.
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
+        if (CheckPoint({ latitudeDeg, longitudeDeg }) != InputProblem::None) return ElevationSample{ ElevationData::NotGiven, 0.0 };
+        return ElevationSample{ ElevationData::Present, latitudeDeg >= ridgeFromLatDeg && latitudeDeg <= ridgeToLatDeg ? ridgeM : groundM };
     }
     VerticalDatum GetDatum() const override { return VerticalDatum::OrthometricMsl; }
 
@@ -2565,7 +2572,8 @@ void TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight()
     // well as at round heights.
     //
     // The wall scene with a void beyond the wall, on a 25 x 25 grid over 21 x 21 cells of
-    // data: the outer ring has no data under it, so no confident answer either. Then the
+    // data: none of the 184-cell outer ring has an answer -- data not given, or the void where
+    // a line crosses it -- and the cells behind the void have none either. Then the
     // 1-arcsecond tile at the observer with the most uneven view, over a 1 km radius.
     const double spacingDeg = MetersToLatitudeDeg(30.0);
     const GeoPoint observer{ 36.5, -111.5 };
@@ -2596,7 +2604,9 @@ void TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight()
     };
 
     MinimumVisibleHeightResult sceneResult = ComputeMinimumVisibleHeightReference(observer, Agl(2.0), 25, 25, spacingDeg, scene);
-    bool sceneHasNoAnswerCells = CountCells(ViewshedAtTargetHeight(sceneResult, 0.0), CellVisibility::Degraded) > 25 * 25 - 21 * 21;
+    ViewshedResult sceneAtGround = ViewshedAtTargetHeight(sceneResult, 0.0);
+    int notGiven = CountCells(sceneAtGround, CellVisibility::DataNotGiven), voids = CountCells(sceneAtGround, CellVisibility::Degraded);
+    bool sceneHasNoAnswerCells = notGiven > 0 && voids > 0 && notGiven + voids > 25 * 25 - 21 * 21;
     bool sceneAgrees = agreesAtEveryHeight(observer, 25, scene, 1, false) && agreesAtEveryHeight(observer, 25, scene, 1, true);
 
     RealElevationSampler tile("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
@@ -3118,11 +3128,15 @@ public:
 
     std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
     {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
         {
             std::lock_guard<std::mutex> lock(mutex);
             threads.insert(std::this_thread::get_id());
         }
-        return inner.GetElevation(latitudeDeg, longitudeDeg);
+        return inner.Sample(latitudeDeg, longitudeDeg);
     }
     VerticalDatum GetDatum() const override { return inner.GetDatum(); }
 
@@ -3257,4 +3271,331 @@ void TestReferenceGridsAreTheSameAtEveryThreadCount()
         [&](double) { reports++; return false; }, ground, 0);
 
     Expect(same && reportedHere && stopped.cancelled && reports == 1, "TestReferenceGridsAreTheSameAtEveryThreadCount");
+}
+
+// A sampler that answers only GetElevation, as one written before Sample existed would.
+class GetElevationOnlySampler : public IElevationSampler
+{
+public:
+    std::optional<double> GetElevation(double latitudeDeg, double) override
+    {
+        if (latitudeDeg > 36.6) return std::nullopt;
+        return 10.0;
+    }
+    VerticalDatum GetDatum() const override { return VerticalDatum::OrthometricMsl; }
+};
+
+//TEST 76
+void TestDataNotGivenIsToldApartFromAVoid()
+{
+    // A void is a hole in data the sampler was given; data not given is ground it never had.
+    // Every sampler says which: the raster block and a view over one (a cell with no value,
+    // and outside the block), a window of it, the .hgt reader (a -32768 post, off the tile, a window of it, a
+    // tile that didn't load), the multi-tile sampler (no tile registered) and the fake grid.
+    // A sampler that only answers GetElevation can't tell, and calls every gap a void. Then
+    // the distinction reaches every answer -- a void, once known, winning over data not given,
+    // since nothing loaded will fill it: the line of sight's status, both viewsheds' cells,
+    // both minimum visible heights' cells, and a prepared observer's targets.
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.5, -111.5 };
+    const double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
+    auto centre = [&](int row, int col) { return GeoPoint{ observer.latitudeDeg + (row - 2) * spacingDeg, observer.longitudeDeg + (col - 2) * lonSpacingDeg }; };
+    auto data = [](IElevationSampler& s, GeoPoint p) { return s.Sample(p.latitudeDeg, p.longitudeDeg).data; };
+
+    // 5 x 5 cells of flat ground at 100 m around the observer, with a void north-east of it.
+    ElevationCells cells = MakeFlatCells(5, 100.0);
+    cells[3][3] = std::nullopt;
+    RasterBlockElevationSampler block = MakeViewshedAlignedRaster(cells, observer, spacingDeg);
+    RasterBlockElevationSampler window({ { 100.0 } }, observer.latitudeDeg - 2 * spacingDeg, observer.longitudeDeg - 2 * lonSpacingDeg,
+        spacingDeg, lonSpacingDeg, VerticalDatum::OrthometricMsl, 1, 2);
+
+    // The same 2 x 1 corner of it as a view over someone else's arrays, the second cell flagged invalid.
+    const double viewedM[2] = { 100.0, 0.0 };
+    const uint8_t viewedValid[2] = { 1, 0 };
+    RasterBlockGeometry viewGeometry;
+    viewGeometry.originCellCentreLatitudeDeg = observer.latitudeDeg - 2 * spacingDeg;
+    viewGeometry.originCellCentreLongitudeDeg = observer.longitudeDeg - 2 * lonSpacingDeg;
+    viewGeometry.rowStepDeg = spacingDeg;
+    viewGeometry.colStepDeg = lonSpacingDeg;
+    viewGeometry.rows = 1;
+    viewGeometry.cols = 2;
+    RasterBlockViewElevationSampler view(viewedM, viewedValid, viewGeometry, VerticalDatum::OrthometricMsl);
+
+    bool samplers = data(block, centre(0, 0)) == ElevationData::Present && data(block, centre(3, 3)) == ElevationData::Void
+        && data(block, centre(6, 6)) == ElevationData::NotGiven && data(block, GeoPoint{ std::nan(""), -111.5 }) == ElevationData::NotGiven
+        && data(view, centre(0, 0)) == ElevationData::Present && data(view, centre(0, 1)) == ElevationData::Void
+        && data(view, centre(1, 0)) == ElevationData::NotGiven
+        && data(window, centre(1, 2)) == ElevationData::Present && window.Sample(centre(1, 2).latitudeDeg, centre(1, 2).longitudeDeg).elevationM == 100.0
+        && data(window, centre(2, 2)) == ElevationData::NotGiven;
+
+    // A 2 x 2 .hgt tile over one degree, its north-east post a void.
+    const std::string path = "not_given_tile.hgt";
+    {
+        std::ofstream file(path, std::ios::binary);
+        const int16_t posts[4] = { 500, -32768, 520, 530 };
+        for (int16_t value : posts)
+        {
+            unsigned char bytes[2] = { (unsigned char)((value >> 8) & 0xFF), (unsigned char)(value & 0xFF) };
+            file.write((const char*)bytes, 2);
+        }
+    }
+    RealElevationSampler tile(path, 36.0, -112.0);
+    RealElevationSampler tileWindow = tile.Window(PostWindow{ 1, 1, 0, 1 });
+    std::remove(path.c_str());
+    RealElevationSampler missing("no_such_tile.hgt", 36.0, -112.0);
+    samplers = samplers && data(tile, { 37.0, -112.0 }) == ElevationData::Present && data(tile, { 37.0, -111.0 }) == ElevationData::Void
+        && data(tile, { 38.5, -111.5 }) == ElevationData::NotGiven && data(missing, { 36.5, -111.5 }) == ElevationData::NotGiven
+        && data(tileWindow, { 36.0, -111.0 }) == ElevationData::Present && data(tileWindow, { 37.0, -112.0 }) == ElevationData::NotGiven
+        && tileWindow.Posts().size() == 2 && tileWindow.Posts().capacity() < tile.Posts().size(); // holds its own posts, not the tile's
+
+    MultiTileElevationSampler tiles;
+    tiles.AddTile(36.0, -112.0, block);
+    FakeElevationSampler fake({ { 1.0, 2.0 }, { 3.0, 4.0 } });
+    GetElevationOnlySampler older;
+    samplers = samplers && data(tiles, centre(3, 3)) == ElevationData::Void && data(tiles, { 36.5, -110.5 }) == ElevationData::NotGiven
+        && data(tiles, centre(6, 6)) == ElevationData::NotGiven && data(fake, { 0.0, 1.0 }) == ElevationData::Present
+        && data(fake, { 5.0, 5.0 }) == ElevationData::NotGiven && data(older, { 37.0, -111.5 }) == ElevationData::Void;
+
+    // Lines of sight from the observer: across the void, off the block, onto the void, and
+    // across the void and off the block at once.
+    auto status = [&](GeoPoint target) {
+        return ComputeLineOfSight(GetTerrainProfile(observer, target, spacingDeg, block), Agl(2.0), Agl(2.0)).status;
+    };
+    bool lines = status(centre(0, 0)) == ComputationStatus::Ok && status(centre(4, 4)) == ComputationStatus::VoidInProfile
+        && status(centre(2, 6)) == ComputationStatus::DataNotGiven && status(centre(3, 3)) == ComputationStatus::EndpointMissing
+        && status(centre(5, 5)) == ComputationStatus::VoidInProfile;
+
+    // Viewsheds and minimum visible heights over 7 x 7 cells: the outer ring of 24 has no
+    // data under it. A ring cell whose line crosses the void has no answer for that reason,
+    // the others for the data not given -- naive exactly so, line by line; fast, whose rays
+    // pass beside the lines, with both kinds in the ring and none of it confident. Observed
+    // from off the block every cell is data not given, and from the void every cell Degraded.
+    bool grids = true;
+    const int ringSize = 24;
+    auto inRing = [](int row, int col) { return row == 0 || row == 6 || col == 0 || col == 6; };
+    for (bool fast : { false, true })
+    {
+        auto viewshed = [&](GeoPoint from, IElevationSampler& s) {
+            return fast ? ComputeViewshedFast(from, Agl(2.0), 7, 7, spacingDeg, s) : ComputeViewshedNaive(from, Agl(2.0), 7, 7, spacingDeg, s);
+        };
+        auto heights = [&](GeoPoint from, IElevationSampler& s) {
+            return fast ? ComputeMinimumVisibleHeightFast(from, Agl(2.0), 7, 7, spacingDeg, s) : ComputeMinimumVisibleHeightReference(from, Agl(2.0), 7, 7, spacingDeg, s);
+        };
+        ViewshedResult seen = viewshed(observer, block);
+        int ringNotGiven = 0, ringVoid = 0;
+        for (int row = 0; row < 7; row++)
+        {
+            for (int col = 0; col < 7; col++)
+            {
+                if (!inRing(row, col)) continue;
+                CellVisibility cell = seen.visible[row][col];
+                ringNotGiven += cell == CellVisibility::DataNotGiven ? 1 : 0;
+                ringVoid += cell == CellVisibility::Degraded ? 1 : 0;
+                if (!fast)
+                {
+                    // Naive: the reason is the one its own line gives.
+                    ComputationStatus reason = NoAnswerStatus(GetTerrainProfile(observer, centre(row - 1, col - 1), spacingDeg, block));
+                    grids = grids && cell == (reason == ComputationStatus::DataNotGiven ? CellVisibility::DataNotGiven : CellVisibility::Degraded);
+                }
+            }
+        }
+        GeoPoint offBlock = centre(6, 2), onVoid = centre(3, 3);
+        grids = grids && ringNotGiven + ringVoid == ringSize && ringNotGiven > 0 && ringVoid > 0
+            && heights(observer, block).state == seen.visible
+            && CountCells(viewshed(offBlock, block), CellVisibility::DataNotGiven) == 49 && heights(offBlock, block).state == viewshed(offBlock, block).visible
+            && CountCells(viewshed(onVoid, block), CellVisibility::Degraded) == 49 && heights(onVoid, block).state == viewshed(onVoid, block).visible;
+    }
+
+    // A prepared observer: a target off the block, and one observer standing off it.
+    PreparedObserver prepared = PrepareObserver(observer, Agl(2.0), 150.0, spacingDeg, block);
+    PreparedObserver offTheBlock = PrepareObserver(centre(6, 2), Agl(2.0), 150.0, spacingDeg, block);
+    bool targets = QueryTarget(prepared, centre(2, 4), Agl(2.0)).state == CellVisibility::Visible
+        && QueryTarget(prepared, centre(2, 6), Agl(2.0)).state == CellVisibility::DataNotGiven
+        && QueryTarget(prepared, centre(3, 3), Agl(2.0)).state == CellVisibility::Degraded
+        && QueryTarget(offTheBlock, centre(2, 2), Agl(2.0)).state == CellVisibility::DataNotGiven
+        // A target height with no datum is Degraded whatever is known of the observer, as in a viewshed.
+        && QueryTarget(offTheBlock, centre(2, 2), DatumHeight{ 2.0, VerticalDatum::EllipsoidalHae }).state == CellVisibility::Degraded
+        && ComputeViewshedFast(centre(6, 2), Agl(2.0), 7, 7, spacingDeg, block, 4.0 / 3.0, nullptr, DatumHeight{ 2.0, VerticalDatum::EllipsoidalHae }).visible[2][2] == CellVisibility::Degraded;
+
+    Expect(samplers && lines && grids && targets, "TestDataNotGivenIsToldApartFromAVoid");
+}
+
+// Reads through another sampler and keeps the box around every point it was asked for.
+class ExtentRecordingSampler : public IElevationSampler
+{
+public:
+    explicit ExtentRecordingSampler(IElevationSampler& inner) : inner(inner) {}
+
+    std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
+    {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
+        read.Include(GeoPoint{ latitudeDeg, longitudeDeg });
+        return inner.Sample(latitudeDeg, longitudeDeg);
+    }
+    VerticalDatum GetDatum() const override { return inner.GetDatum(); }
+
+    GeoExtent read;
+
+private:
+    IElevationSampler& inner;
+};
+
+//TEST 77
+void TestQueryExtentsAreTheBoxesTheQueriesRead()
+{
+    // Asked before it runs, a query says which box of latitude and longitude it will read;
+    // run through a sampler that keeps the box around every point it is asked for, it must
+    // read exactly that box, to the bit. For profiles: north-south, diagonal, reversed, a
+    // few metres, and 60 km east-west at 60 degrees north, where the great circle bulges
+    // toward the pole -- a box around its ends alone would miss its northern edge. For the
+    // naive and fast viewsheds and both minimum visible heights, at 60 degrees north. A
+    // request the query would refuse reads nothing: an empty box, carrying the reason.
+    LevelGroundSampler level(100.0);
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    auto profileRight = [&](GeoPoint a, GeoPoint b) {
+        ExtentRecordingSampler recording(level);
+        GetTerrainProfile(a, b, spacingDeg, recording);
+        return ProfileExtent(a, b, spacingDeg) == recording.read;
+    };
+    const GeoPoint north60{ 60.0, 10.0 };
+    GeoPoint east60 = GeoPoint{ 60.0, 10.0 + 60000.0 / (EarthRadiusM * DegToRad * std::cos(60.0 * DegToRad)) };
+    GeoExtent bulge = ProfileExtent(north60, east60, spacingDeg);
+
+    bool profiles = profileRight({ 36.5, -111.5 }, { 36.7, -111.5 }) && profileRight({ 36.5, -111.5 }, { 36.8, -111.2 })
+        && profileRight({ 36.8, -111.2 }, { 36.5, -111.5 }) && profileRight({ 36.5, -111.5 }, { 36.50001, -111.5 })
+        && profileRight(north60, east60) && profileRight(east60, north60)
+        && bulge.northLatDeg > 60.0 + MetersToLatitudeDeg(50.0)
+        && ProfileExtent({ 36.5, -111.5 }, { 36.7, -111.5 }, 0.0).empty
+        && ProfileExtent({ 36.5, -111.5 }, { 36.7, -111.5 }, 0.0).inputProblem == InputProblem::SpacingNotPositive
+        && ProfileExtent({ 36.5, -111.5 }, { 36.7, -111.5 }, spacingDeg).inputProblem == InputProblem::None;
+
+    bool grids = true;
+    const GeoPoint observer{ 60.0, 10.0 };
+    const double cellDeg = MetersToLatitudeDeg(300.0);
+    for (bool fast : { false, true })
+    {
+        GeoExtent expected = fast ? FastViewshedExtent(observer, 41, 41, cellDeg) : NaiveViewshedExtent(observer, 41, 41, cellDeg);
+        ExtentRecordingSampler viewshedRead(level), heightsRead(level);
+        if (fast)
+        {
+            ComputeViewshedFast(observer, Agl(2.0), 41, 41, cellDeg, viewshedRead);
+            ComputeMinimumVisibleHeightFast(observer, Agl(2.0), 41, 41, cellDeg, heightsRead);
+        }
+        else
+        {
+            ComputeViewshedNaive(observer, Agl(2.0), 41, 41, cellDeg, viewshedRead);
+            ComputeMinimumVisibleHeightReference(observer, Agl(2.0), 41, 41, cellDeg, heightsRead);
+        }
+        grids = grids && expected == viewshedRead.read && expected == heightsRead.read;
+    }
+    // No cells reads nothing, and is no refusal; a grid reaching a pole is refused, and says so.
+    GeoExtent noCells = NaiveViewshedExtent(observer, 0, 41, cellDeg), pastThePole = FastViewshedExtent({ 89.99, 10.0 }, 41, 41, cellDeg);
+    grids = grids && noCells.empty && noCells.inputProblem == InputProblem::None
+        && pastThePole.empty && pastThePole.inputProblem == InputProblem::GridBeyondPole
+        && NaiveViewshedExtent({ 89.99, 10.0 }, 41, 41, cellDeg).inputProblem == InputProblem::GridBeyondPole;
+
+    Expect(profiles && grids, "TestQueryExtentsAreTheBoxesTheQueriesRead");
+}
+
+//TEST 78
+void TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile()
+{
+    // Each query is run twice on the 1-arcsecond tile: once on the whole tile, once on a
+    // window of it holding only the posts its reported box needs (PostsCovering). The two
+    // answers must be the same to the bit: lines of sight to five targets, the naive viewshed
+    // and the exact minimum visible height over 1 km, the fast viewshed and fast minimum
+    // visible height over 3 km -- nearest, and the fast viewshed bilinear too. Then with the
+    // window a post short on each side in turn, the query must report the data it wasn't
+    // given: something changes, and everything that changes is DataNotGiven, never a void.
+    RealElevationSampler nearest("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    if (!nearest.IsLoaded())
+    {
+        Skip("TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile", "DATA/SRTM1/N36W112.hgt not found from this working directory");
+        return;
+    }
+    RealElevationSampler bilinear = nearest.WithInterpolationMode(InterpolationMode::Bilinear);
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.55861, -111.81361 };
+
+    auto windowFor = [](const RealElevationSampler& tile, const GeoExtent& box) {
+        return tile.PostsCovering(box.southLatDeg, box.northLatDeg, box.westLonDeg, box.eastLonDeg);
+    };
+    auto shortOn = [](PostWindow w, int side) {
+        if (side == 0) w.firstRow++;       // north
+        else if (side == 1) w.lastRow--;   // south
+        else if (side == 2) w.firstCol++;  // west
+        else w.lastCol--;                  // east
+        return w;
+    };
+
+    bool same = true, reported = true;
+
+    // Lines of sight.
+    std::vector<ProfileSample> buffer;
+    for (int i = 0; i < 5; i++)
+    {
+        GeoPoint target = GreatCircleDestination(observer, 1.3 * i + 0.4, 2000.0 + 2000.0 * i);
+        GeoExtent box = LineOfSightExtent(observer, target, spacingDeg);
+        auto losOn = [&](IElevationSampler& s) {
+            GetTerrainProfile(observer, target, spacingDeg, s, buffer);
+            return ComputeLineOfSight(buffer, Agl(2.0), Agl(2.0));
+        };
+        RealElevationSampler part = nearest.Window(windowFor(nearest, box));
+        same = same && SameLineOfSight(losOn(part), losOn(nearest));
+        for (int side = 0; side < 4; side++)
+        {
+            RealElevationSampler smaller = nearest.Window(shortOn(windowFor(nearest, box), side));
+            reported = reported && losOn(smaller).status == ComputationStatus::DataNotGiven;
+        }
+    }
+
+    // Grids: whatever changes with a post short must be data not given.
+    auto onlyNotGiven = [](const std::vector<std::vector<CellVisibility>>& shortOne, const std::vector<std::vector<CellVisibility>>& whole) {
+        int changed = 0;
+        for (size_t row = 0; row < whole.size(); row++)
+        {
+            for (size_t col = 0; col < whole[row].size(); col++)
+            {
+                if (shortOne[row][col] == whole[row][col]) continue;
+                if (shortOne[row][col] != CellVisibility::DataNotGiven) return false;
+                changed++;
+            }
+        }
+        return changed > 0;
+    };
+    const int oneKm = (int)(2 * MetersToLatitudeDeg(1000.0) / spacingDeg);
+    const int threeKm = (int)(2 * MetersToLatitudeDeg(3000.0) / spacingDeg);
+    struct GridQuery { bool fast; bool heights; int size; RealElevationSampler* tile; };
+    const GridQuery queries[] = {
+        { false, false, oneKm, &nearest }, { false, true, oneKm, &nearest },
+        { true, false, threeKm, &nearest }, { true, true, threeKm, &nearest }, { true, false, threeKm, &bilinear },
+    };
+    for (const GridQuery& q : queries)
+    {
+        GeoExtent box = q.fast ? FastViewshedExtent(observer, q.size, q.size, spacingDeg) : NaiveViewshedExtent(observer, q.size, q.size, spacingDeg);
+        auto cellsOn = [&](IElevationSampler& s) {
+            if (q.heights)
+            {
+                return q.fast ? ComputeMinimumVisibleHeightFast(observer, Agl(2.0), q.size, q.size, spacingDeg, s)
+                              : ComputeMinimumVisibleHeightReference(observer, Agl(2.0), q.size, q.size, spacingDeg, s);
+            }
+            MinimumVisibleHeightResult asStates;
+            asStates.state = (q.fast ? ComputeViewshedFast(observer, Agl(2.0), q.size, q.size, spacingDeg, s)
+                                     : ComputeViewshedNaive(observer, Agl(2.0), q.size, q.size, spacingDeg, s)).visible;
+            return asStates;
+        };
+        MinimumVisibleHeightResult whole = cellsOn(*q.tile);
+        RealElevationSampler part = q.tile->Window(windowFor(*q.tile, box));
+        same = same && SameMinimumVisibleHeights(cellsOn(part), whole);
+        for (int side = 0; side < 4; side++)
+        {
+            RealElevationSampler smaller = q.tile->Window(shortOn(windowFor(*q.tile, box), side));
+            reported = reported && onlyNotGiven(cellsOn(smaller).state, whole.state);
+        }
+    }
+
+    Expect(same && reported, "TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile");
 }

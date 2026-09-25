@@ -14,10 +14,21 @@
 enum class CellVisibility
 {
     NotCovered,
-    Degraded,
+    Degraded,       // no confident answer: a void in the source under the cell or on the way to it, or
+                    // a height that can't be put on the terrain's datum
     Visible,
-    NotVisible
+    NotVisible,
+    DataNotGiven    // no confident answer yet: ground under the cell or on the way to it the sampler was
+                    // never given, and no void known -- given that ground, the cell may be answered
 };
+
+// The state of a cell with no confident answer, from what kept it from one. A void, once
+// known, wins over data not given, as in ComputeLineOfSight: nothing loaded will fill it.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline CellVisibility NoAnswerFor(ElevationData data)
+{
+    return data == ElevationData::NotGiven ? CellVisibility::DataNotGiven : CellVisibility::Degraded;
+}
 
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline bool IsConfident(CellVisibility v)
@@ -148,18 +159,33 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
     double lonSpacingDeg = LongitudeSpacingForLatitude(spacingDeg, observer.latitudeDeg);
 
     // The observer's own cell is only Visible if something is known about the
-    // observer: ground under it that isn't void, and a height that can be put on
-    // the terrain's datum. Otherwise it is Degraded like every other cell --
-    // the same answer ComputeViewshedFast gives.
-    bool observerKnown = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg).has_value()
-        && CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
+    // observer: ground under it that is given and isn't void, and a height that can be
+    // put on the terrain's datum. Otherwise it has no confident answer, like every
+    // other cell -- the same answer ComputeViewshedFast gives.
+    ElevationSample observerGround = sampler.Sample(observer.latitudeDeg, observer.longitudeDeg);
+    bool observerDatumOk = CanExpressInTerrainDatum(observerHeight, sampler.GetDatum());
+    CellVisibility observerCell = observerGround.data != ElevationData::Present ? NoAnswerFor(observerGround.data)
+        : observerDatumOk ? CellVisibility::Visible : CellVisibility::Degraded;
+
+    // With no ground known under the observer, every line starts from a gap, and every
+    // cell is answered for that gap -- Degraded if the heights have no datum to go on
+    // first, as ComputeLineOfSight checks that first -- rather than for whatever else each
+    // line crosses. ComputeViewshedFast answers the same, never casting a ray.
+    if (observerGround.data != ElevationData::Present)
+    {
+        bool datumsOk = observerDatumOk && CanExpressInTerrainDatum(targetHeight, sampler.GetDatum());
+        result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, datumsOk ? NoAnswerFor(observerGround.data) : CellVisibility::Degraded));
+        result.visible[centerRow][centerCol] = observerCell;
+        if (progress) progress(1.0);
+        return result;
+    }
 
     bool finished = ForEachRowOnThreads(gridRows, threadCount, progress, [&](int row, int) {
         for (int col = 0; col < gridCols; col++)
         {
             if (row == centerRow && col == centerCol)
             {
-                result.visible[row][col] = observerKnown ? CellVisibility::Visible : CellVisibility::Degraded;
+                result.visible[row][col] = observerCell;
                 continue;
             }
 
@@ -170,7 +196,7 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 
             if (!IsOk(los.status))
             {
-                result.visible[row][col] = CellVisibility::Degraded;
+                result.visible[row][col] = los.status == ComputationStatus::DataNotGiven ? CellVisibility::DataNotGiven : CellVisibility::Degraded;
             }
 
             else
@@ -214,8 +240,9 @@ inline double CurvatureAdjustedSlope(double heightM, double eyeM, double dM, dou
 // centre, taken from the two rays either side of it and blended by the cell's
 // direction between them. The ray's terrain within half a cell of the target is left
 // out of its horizon: it lies in the target's own cell, beside the line to the centre
-// rather than on it. A cell with no ground under its centre, or whose rays met a void
-// before reaching it, is marked Degraded in `cells` and not visited.
+// rather than on it. A cell with no ground under its centre, or whose rays met a gap
+// before reaching it, is marked in `cells` and not visited: Degraded when either gap is a
+// void in the source, DataNotGiven when every gap is ground the sampler wasn't given.
 //
 // answerCell(row, col, groundM, dM, horizon) is called for every other cell, with the
 // ground under its centre, its distance from the observer and the horizon in front of
@@ -255,7 +282,8 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
     {
         double direction = 0;
         double stepM = 0;
-        double firstVoidM = INFINITY;
+        double firstVoidM = INFINITY;       // where the ray first meets a void in the source
+        double firstNotGivenM = INFINITY;   // where it first meets ground the sampler wasn't given
         std::vector<float> horizon;
     };
     std::vector<std::pair<int, int>> ends;
@@ -289,7 +317,11 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
         for (size_t s = 1; s < profile.size(); s++)
         {
             double dM = profile[s].distanceFromStartM;
-            if (!profile[s].elevationM.has_value())
+            if (profile[s].dataNotGiven)
+            {
+                ray.firstNotGivenM = (std::min)(ray.firstNotGivenM, dM);
+            }
+            else if (!profile[s].elevationM.has_value())
             {
                 ray.firstVoidM = (std::min)(ray.firstVoidM, dM);
             }
@@ -322,10 +354,10 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
             if (row == centerRow && col == centerCol) continue;
 
             GeoPoint centre = cellCentre(row, col);
-            auto groundM = sampler.GetElevation(centre.latitudeDeg, centre.longitudeDeg);
-            if (!groundM.has_value() || rays.empty())
+            ElevationSample ground = sampler.Sample(centre.latitudeDeg, centre.longitudeDeg);
+            if (rays.empty())
             {
-                cells[row][col] = CellVisibility::Degraded;
+                cells[row][col] = NoAnswerFor(ground.data == ElevationData::Present ? ElevationData::Void : ground.data);
                 continue;
             }
 
@@ -341,10 +373,14 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
             if (past < 0) past += 2 * pi;
             double t = (std::min)(1.0, past / span);
 
+            // No ground under the centre, or a ray either side that met a gap before reaching
+            // the cell: no confident answer -- a void if either gap is one, else data not given.
             double dM = GreatCircleDistanceM(observer, centre);
-            if (rays[a].firstVoidM < dM || rays[b].firstVoidM < dM)
+            bool notGiven = ground.data == ElevationData::NotGiven || rays[a].firstNotGivenM < dM || rays[b].firstNotGivenM < dM;
+            bool hole = ground.data == ElevationData::Void || rays[a].firstVoidM < dM || rays[b].firstVoidM < dM;
+            if (notGiven || hole)
             {
-                cells[row][col] = CellVisibility::Degraded;
+                cells[row][col] = hole ? CellVisibility::Degraded : CellVisibility::DataNotGiven;
                 continue;
             }
 
@@ -352,7 +388,7 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
             double hb = horizonBefore(rays[b], dM - halfCellM);
             double horizon = std::isinf(ha) || std::isinf(hb) ? (std::max)(ha, hb) : ha + t * (hb - ha);
 
-            answerCell(row, col, *groundM, dM, horizon);
+            answerCell(row, col, ground.elevationM, dM, horizon);
         }
     }
     return true;
@@ -384,36 +420,33 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
     result.inputProblem = CheckViewshedRequest(observer, observerHeight, gridRows, spacingDeg, k, targetHeight);
     if (result.inputProblem != InputProblem::None) return result;
 
-    // Naive delegates these checks to ComputeLineOfSight per cell; fast does its
-    // own curvature math and never calls it, so it checks here. An observer whose
-    // height can't be put on the terrain's datum, or who stands on a void, leaves
-    // nothing known about any cell: every cell is Degraded, the observer's own
-    // included -- exactly what naive reports for the same case.
+    // Naive delegates these checks to ComputeLineOfSight per cell; fast does its own
+    // curvature math and never calls it, so it checks here, and answers as naive's
+    // line of sight would. A height that can't be put on the terrain's datum leaves every
+    // cell Degraded; otherwise ground under the observer that is a void, or wasn't given,
+    // leaves every cell without an answer for that reason. The observer's own cell is
+    // Visible when its ground is known and its height has a datum -- as in naive.
     VerticalDatum terrainDatum = sampler.GetDatum();
-    auto observerElevationM = sampler.GetElevation(observer.latitudeDeg, observer.longitudeDeg);
-    if (!observerElevationM.has_value() || !CanExpressInTerrainDatum(observerHeight, terrainDatum))
-    {
-        result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::Degraded));
-        if (progress) progress(1.0);
-        return result;
-    }
+    ElevationSample observerGround = sampler.Sample(observer.latitudeDeg, observer.longitudeDeg);
+    bool observerDatumOk = CanExpressInTerrainDatum(observerHeight, terrainDatum);
+    bool targetDatumOk = CanExpressInTerrainDatum(targetHeight, terrainDatum);
 
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
 
-    // A target height that can't be put on the terrain's datum leaves nothing known about
-    // any cell but the observer's own -- what naive's per-cell ComputeLineOfSight reports.
-    if (!CanExpressInTerrainDatum(targetHeight, terrainDatum))
+    if (!observerDatumOk || !targetDatumOk || observerGround.data != ElevationData::Present)
     {
-        result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::Degraded));
-        result.visible[centerRow][centerCol] = CellVisibility::Visible;
+        CellVisibility everyCell = !observerDatumOk || !targetDatumOk ? CellVisibility::Degraded : NoAnswerFor(observerGround.data);
+        result.visible.assign(gridRows, std::vector<CellVisibility>(gridCols, everyCell));
+        result.visible[centerRow][centerCol] = observerGround.data != ElevationData::Present ? NoAnswerFor(observerGround.data)
+            : observerDatumOk ? CellVisibility::Visible : CellVisibility::Degraded;
         if (progress) progress(1.0);
         return result;
     }
 
     result.visible.resize(gridRows, std::vector<CellVisibility>(gridCols, CellVisibility::NotCovered));
 
-    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, *observerElevationM, terrainDatum);
+    double observerEyeHeightM = *EyeHeightInTerrainDatum(observerHeight, observerGround.elevationM, terrainDatum);
     bool finished = AnswerEachCellFromFastHorizons(observer, observerEyeHeightM, gridRows, gridCols, spacingDeg, sampler, k, progress, result.visible,
         [&](int row, int col, double groundM, double dM, double horizon) {
             double targetM = *EyeHeightInTerrainDatum(targetHeight, groundM, terrainDatum);

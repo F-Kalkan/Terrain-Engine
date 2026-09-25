@@ -132,7 +132,7 @@ internal static class NativeMethods
         public double DistanceM;
         public double ElevationM;
         public int HasElevation;
-        public int Reserved;
+        public int DataNotGiven;
         public double CurvatureCorrectedElevationM;
         public double SightLineHeightM;
         public double FirstFresnelRadiusM;

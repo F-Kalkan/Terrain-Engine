@@ -7,9 +7,10 @@ public static class PlainWords
 {
     public static string WhyNoConfidentAnswer(ComputationStatus status) => status switch
     {
-        ComputationStatus.EndpointMissing =>
-            "There's no terrain data under the observer or the target. With bilinear interpolation this also happens on the tile's north or east edge.",
-        ComputationStatus.VoidInProfile => "The path crosses missing data, so part of the terrain between the points is unknown.",
+        ComputationStatus.EndpointMissing => "The tile has a hole in its data under the observer or the target.",
+        ComputationStatus.VoidInProfile => "The path crosses a hole in the tile's data, so part of the terrain between the points is unknown.",
+        ComputationStatus.DataNotGiven =>
+            "Part of the path needs terrain past the edge of the open tile, where there's no data. With bilinear interpolation this also happens on the tile's north or east edge.",
         ComputationStatus.EmptyOrSingleSampleProfile => "The path has no length to sample.",
         ComputationStatus.DatumRejected => "The heights couldn't be put on the terrain's vertical datum.",
         ComputationStatus.NothingEvaluated => "The path is too short to have any point between its ends to evaluate.",

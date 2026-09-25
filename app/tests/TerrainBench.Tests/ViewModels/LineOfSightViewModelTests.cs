@@ -118,8 +118,9 @@ public class LineOfSightViewModelTests
     }
 
     [Theory]
-    [InlineData(ComputationStatus.VoidInProfile, "The path crosses missing data")]
-    [InlineData(ComputationStatus.EndpointMissing, "no terrain data under the observer or the target")]
+    [InlineData(ComputationStatus.VoidInProfile, "The path crosses a hole in the tile's data")]
+    [InlineData(ComputationStatus.EndpointMissing, "a hole in its data under the observer or the target")]
+    [InlineData(ComputationStatus.DataNotGiven, "past the edge of the open tile")]
     public void No_confident_answer_explains_why_from_the_engine_status(ComputationStatus status, string words)
     {
         _tile.OnAnalyze = _ => EngineResult<PathAnalysis>.Ok(Analyses.NoConfidentAnswer(status));

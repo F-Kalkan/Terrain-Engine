@@ -62,6 +62,9 @@ public class BadInputTests : IDisposable
     {
         using var tile = _engine.OpenTile(RepositoryFiles.SampleTile, 36, -112).Value;
         AssertError(tile.Elevation(35.5, -111.5, Interpolation.Nearest).Error, EngineErrorKind.OutsideTile, "outside the open tile");
+        // On the southern edge, bilinear needs the row past it: not a void, but ground not given.
+        AssertError(tile.Elevation(36.0, -111.5, Interpolation.Bilinear).Error, EngineErrorKind.OutsideTile, "needs posts past it");
+        Assert.NotNull(tile.Elevation(36.0, -111.5, Interpolation.Nearest).Value);
         AssertError(tile.AnalyzePath(Path1() with { TargetLatitudeDeg = 37.5 }).Error, EngineErrorKind.OutsideTile, "outside the open tile");
     }
 

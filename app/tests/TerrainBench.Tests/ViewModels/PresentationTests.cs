@@ -144,6 +144,24 @@ public class PresentationTests
     }
 
     [Fact]
+    public void A_cell_past_the_tile_has_its_own_colour_and_its_own_layer()
+    {
+        // Engine row 0: a hole in the tile's data, and a cell past its edge.
+        var map = Maps.Of(CellState.Degraded, CellState.DataNotGiven, CellState.Visible, CellState.NotVisible);
+        var hidden = new bool[MapPixels.LayerCount];
+
+        var image = MapPixels.Viewshed(map, hidden: hidden);
+        Assert.Equal(PixelOf(MapPixels.DegradedColour), image[8..12]);
+        Assert.Equal(PixelOf(MapPixels.DataNotGivenColour), image[12..16]);
+        Assert.NotEqual(MapPixels.DegradedColour, MapPixels.DataNotGivenColour);
+
+        hidden[(int)CellState.DataNotGiven] = true;
+        image = MapPixels.Viewshed(map, hidden: hidden);
+        Assert.Equal(new byte[4], image[12..16]);
+        Assert.Equal(PixelOf(MapPixels.DegradedColour), image[8..12]);
+    }
+
+    [Fact]
     public void A_minimum_visible_height_map_is_coloured_by_its_band_and_a_hidden_band_is_left_out()
     {
         // Engine row 0 (the image's bottom): the ground seen, and 12.5 m. Row 1: no confident

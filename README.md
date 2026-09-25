@@ -45,13 +45,17 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
 
 ## At a glance
 
-- **Real data.** SRTM `.hgt` tiles at 3 arcseconds (~90 m) and 1 arcsecond (~30 m); a
-  3-arcsecond tile of the Grand Canyon is included in `DATA/`.
+- **Real data.** SRTM `.hgt` tiles at 3 arcseconds (~90 m) and 1 arcsecond (~30 m); the
+  Grand Canyon tile at both resolutions is included in `DATA/`.
 - **Honest answers.** Missing data is never read as sea level: a path that crosses a
-  void is reported as "no confident answer", not as visible. An input the library
+  void is reported as "no confident answer", not as visible -- and a hole in the data is told
+  apart from ground the engine was never given. A line of sight, a viewshed or a minimum
+  visible height can say beforehand exactly which ground it will read, so a host can load just
+  that and get the same answer, to the bit. An input the library
   can't answer — a spacing of zero, a coordinate or height that isn't a number, a grid
   at a pole — is refused with the reason, by the library itself.
-- **Fast, and measured against exact.** A 50 km profile takes under half a millisecond;
+- **Fast, and measured against exact.** On the machine every figure here comes from (an
+  8-core Ryzen 7 3800X; see [docs/ENGINE.md](docs/ENGINE.md)), a 50 km profile takes under half a millisecond;
   a 30 km-radius viewshed (2000 × 2000 cells) under two seconds — some 180 times
   faster than checking every cell on its own. Over the cells either one finds visible,
   the two differ on at most 26% at three test observers, almost all of it the boundary
@@ -64,7 +68,7 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
 - **Every core, the same answer.** Many observers against many targets, and the exact
   viewsheds, run on every core -- about eleven times as fast on 8 cores and 16 threads --
   with the same answer, to the bit, as on one.
-- **Tested.** 75 engine tests and 141 app tests, all run by `build.ps1` and by CI on
+- **Tested.** 78 engine tests and 145 app tests, all run by `build.ps1` and by CI on
   every push. Each fix was also checked the other way: the defect put back, and a test
   going red.
 
@@ -92,10 +96,9 @@ Build Tools); the app also needs the .NET 10 SDK.
 
 - **Engine only.** Open `TerrainEngine.sln`, build `x64` (`Release` for real use), and
   run `TerrainEngine.exe` with no arguments: it runs the test suite and a small demo on
-  the included tile, writing `profile_output.pgm` / `viewshed_output.pgm`. If the
-  1-arcsecond tile for the same square degree is at `DATA/SRTM1/N36W112.hgt` (NASA
-  SRTMGL1 v003, `N36W112.SRTMGL1.hgt.zip`, unzipped), the tests and benchmark run
-  against it too; without it, those parts skip.
+  the included tiles, writing `profile_output.pgm` / `viewshed_output.pgm`. The
+  1-arcsecond tile, `DATA/SRTM1/N36W112.hgt`, is NASA SRTMGL1 v003
+  (`N36W112.SRTMGL1.hgt.zip`, unzipped); in a copy without it, the parts that need it skip.
 - **Everything.** From the repository root:
 
   ```
@@ -106,7 +109,7 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 75-case test suite + demo
+TerrainEngine.exe # run the 78-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed|minheight|observer|pairs> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]

@@ -33,6 +33,9 @@
     <ClInclude Include="Threads.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="QueryExtent.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="PreparedObserver.h">
       <Filter>Header Files</Filter>
     </ClInclude>

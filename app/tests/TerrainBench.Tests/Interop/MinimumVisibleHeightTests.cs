@@ -62,7 +62,7 @@ public class MinimumVisibleHeightTests
         var ground = tile.Viewshed(new ViewshedQuery(36.3, -111.98, 2, 3, 30, 4.0 / 3.0, Interpolation.Nearest, ViewshedAlgorithm.Fast), null, default).Value;
 
         Assert.Equal(ground.Cells, map.Cells);
-        Assert.Contains(CellState.Degraded, map.Cells);
+        Assert.Contains(CellState.DataNotGiven, map.Cells);
         for (int i = 0; i < map.Cells.Length; i++)
         {
             double h = map.HeightsM![i];

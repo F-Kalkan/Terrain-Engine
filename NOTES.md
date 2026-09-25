@@ -448,6 +448,43 @@ naive viewshed runs on every core too, so TerrainBench's 30 km comparison of fas
 takes tens of seconds instead of four minutes. The fast viewshed stays on one thread; at
 under two seconds for 30 km there is little to win.
 
+## Update: a hole in the data, or data never given
+
+Until now a sampler answered `nullopt` for a `-32768` post and for a point off its tile
+alike, so a viewshed running past the tile's edge reported `Degraded` there, exactly as it
+would for a hole in the data. For a host that loads elevation by region the two mean opposite
+things: a void will never be filled, data not given can be loaded and the question asked
+again. Three decisions.
+
+**`Sample` beside `GetElevation`, not instead of it.** Changing `GetElevation`'s return type
+would have touched every sampler anyone has written and every caller. `Sample` is a new
+virtual that says Present, Void or NotGiven; every sampler in the library answers it, and its
+default, for a sampler that only answers `GetElevation`, calls every gap a void -- which is
+what such a sampler always meant. The engine reads through `Sample`, a profile sample carries
+`dataNotGiven`, and the line of sight, the viewshed and minimum-visible-height cells and a
+prepared observer's targets each have a state for it.
+
+**Which reason wins when a path meets both.** I first let data not given win, reasoning that
+until the missing data is loaded, nobody knows whether it holds voids. The tests disagreed:
+from an observer standing on a void, naive answered each cell for whatever its own line
+crossed -- data not given for the lines that ran off the grid's data -- while fast, which casts
+no ray from an unknown observer, answered every cell `Degraded`. Thinking it through again,
+the known fact should win: a path with a void in it has no answer whatever is loaded, and
+calling it data not given would send a host to load data that can't help. So a void wins, and
+`DataNotGiven` now means exactly "give me this and I may answer". When nothing is known about
+the observer, every cell is answered for that one reason, in naive as in fast.
+
+**A box to the bit, and a window that reads like the whole.** A query reports the box of
+latitude and longitude around every point it will read, worked out from its own arithmetic
+without reading anything. The only subtle part is the poleward bulge of a great circle, found
+where the latitude along it turns (docs/ENGINE.md has the derivation) -- over 60 km east-west at
+60 degrees north a box around the ends alone misses 120 m of it. Proving the box right needed a
+sampler that loads only a region and still reads it exactly as the whole tile does: the tile
+reader's `Window` keeps the tile's own post arithmetic and holds only the posts asked for, so
+"the same answer to the bit" tests the box and not some rounding at a window's edge. The first
+version of the fast box also listed the grid's corner cells; they are already the ends of its
+corner rays, and the line went.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

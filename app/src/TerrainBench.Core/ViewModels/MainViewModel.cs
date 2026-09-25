@@ -189,11 +189,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ProfileShowSightLine = saved.ProfileShowSightLine;
         ProfileShowFresnel = saved.ProfileShowFresnel;
         Viewshed.OverlayOpacity = double.IsFinite(saved.ViewshedOpacity) ? Math.Clamp(saved.ViewshedOpacity, 0, 100) : 100;
-        // Saved before the height bands existed, the array stops after the highlights; the bands start shown.
-        if (saved.HiddenViewshedLayers is { Length: >= MapPixels.FirstHeightLayer } hidden)
+        // Saved by an older version, the array has no layer for cells past the tile's edge, so from
+        // the highlights on it is one place short -- and, older still, it stops after the highlights.
+        // Layers it doesn't have start shown.
+        if (saved.HiddenViewshedLayers is { Length: >= (int)CellState.DataNotGiven + 1 } hidden)
         {
             var layers = new bool[MapPixels.LayerCount];
-            Array.Copy(hidden, layers, Math.Min(hidden.Length, layers.Length));
+            bool current = hidden.Length == MapPixels.LayerCount;
+            for (int i = 0; i < hidden.Length; i++)
+            {
+                int layer = current || i < (int)CellState.DataNotGiven ? i : i + 1;
+                if (layer < layers.Length) layers[layer] = hidden[i];
+            }
             Viewshed.HiddenLayers = layers;
         }
         ProfileHeight = double.IsFinite(saved.ProfileHeight) && saved.ProfileHeight >= 120 ? saved.ProfileHeight : DefaultProfileHeight;

@@ -20,7 +20,8 @@ public class ViewshedViewModelTests
         Assert.Collection(vm.Legend,
             row => Assert.Equal(("Visible", "1"), (row.Name, row.Count)),
             row => Assert.Equal(("Not Visible", "1"), (row.Name, row.Count)),
-            row => Assert.Equal("No Confident Answer (Missing Data on the Way)", row.Name),
+            row => Assert.Equal("No Confident Answer (Hole in the Data)", row.Name),
+            row => Assert.Equal("No Confident Answer (Past the Tile's Edge)", row.Name),
             row => Assert.Equal("Not Reached", row.Name));
         Assert.StartsWith("Fast viewshed of 2 × 2 cells", vm.Summary);
     }
@@ -216,9 +217,9 @@ public class ViewshedViewModelTests
         Assert.Null(vm.Highlights);
         Assert.Equal(
             ["Ground Seen (0 m)", "Up to 2 m", "2 to 10 m", "10 to 30 m", "30 to 100 m", "100 to 300 m", "Over 300 m", "Not Seen at Any Height",
-             "No Confident Answer (Missing Data on the Way)", "Not Reached"],
+             "No Confident Answer (Hole in the Data)", "No Confident Answer (Past the Tile's Edge)", "Not Reached"],
             vm.Legend.Select(row => row.Name));
-        Assert.Equal(["1", "0", "0", "1", "0", "0", "0", "0", "2", "0"], vm.Legend.Select(row => row.Count));
+        Assert.Equal(["1", "0", "0", "1", "0", "0", "0", "0", "2", "0", "0"], vm.Legend.Select(row => row.Count));
         Assert.StartsWith("Fast Minimum Visible Height of 2 × 2 cells", vm.Summary);
     }
 

@@ -1,6 +1,6 @@
 # The engine's test suite
 
-75 test functions, hand-checkable apart from the real-data comparisons, which hold the
+78 test functions, hand-checkable apart from the real-data comparisons, which hold the
 fast viewshed against naive, the fast minimum visible height against its reference and the
 prepared observer against the line of sight, at several observers:
 
@@ -160,6 +160,29 @@ terrain, decides every answer.
   - *the exact grids*: the naive viewshed and the exact minimum visible height over 1 km, the
     same grid to the bit on 1, 2, 3 threads and one per hardware thread, progress reported on
     the calling thread only, and a stop at the first report stopping every thread.
+- **Data not given, and the data a query reads**:
+  - *told apart*: every sampler says a void from ground it wasn't given -- the raster block and
+    a view over one (a cell with no value; outside it) and a window of it, the `.hgt` reader (a `-32768` post; off
+    the tile, a window of it -- holding its own posts, not a copy of the tile's -- a tile that
+    didn't load), the multi-tile sampler (no tile) and the
+    fake grid -- while one answering only `GetElevation` calls every gap a void; the line of
+    sight answers across a void `VoidInProfile`, off the data `DataNotGiven`, onto a void
+    `EndpointMissing`, and across a void and off the data both, `VoidInProfile` (a void, once
+    met, wins); both viewsheds and both minimum visible heights answer the ring past their
+    data for the reason each line gives -- naive line by line, fast with both reasons present --
+    and every cell from an observer off the data `DataNotGiven`, from one on a void `Degraded`;
+    a prepared observer's targets likewise, and a target height with no datum `Degraded`
+    whatever is known of the observer, as in a viewshed;
+  - *the box a query reads*: run through a sampler that records every point asked for, a
+    query reads exactly the box it reported beforehand, to the bit -- profiles north-south,
+    diagonal, reversed, a few metres, and 60 km east-west at 60 degrees north, bulging over
+    50 m past a box around its ends; and the naive and fast viewsheds and both minimum visible
+    heights -- while a request the query would refuse reads nothing, and its box says why;
+  - *only that box* (skipped without the 1-arcsecond tile): five lines of sight, the naive
+    viewshed and exact minimum visible height over 1 km, and the fast viewshed (nearest and
+    bilinear) and fast minimum visible height over 3 km answer on a window holding only the
+    posts their box needs exactly as on the whole tile, to the bit; a post short on any side,
+    every answer that changes becomes `DataNotGiven`, never a void.
 - **1-arcsecond data** (skipped when `DATA/SRTM1/N36W112.hgt` isn't present): 200
   consecutive posts read through `GetTerrainProfile` at the tile's own spacing must
   each return exactly the value stored in the file at that row and column; and the 1-
@@ -217,7 +240,16 @@ a pair's observer taken by the wrong index, progress reported from another threa
 that doesn't reach the other threads and a thread count quietly ignored each turn a test red,
 and a profile buffer shared by every thread crashes the suite. The thread count ignored first
 survived -- the test compared the threads used with the same function that picked them -- so
-it now works the number out itself and watches which threads read the terrain. A suite that
-stays green with the defect restored verifies nothing.
+it now works the number out itself and watches which threads read the terrain. And so was
+the split between a void and data not given: a profile that forgets which gaps weren't given;
+data not given winning over a void, on a path or in the fast viewshed; the tile reader, the
+raster block or a view over one calling ground off it a void; a profile's box from its ends
+alone; the fast box without its rays; a nearest window covered by flooring; a window that
+ignores its own bounds; a window holding a copy of the whole tile; naive answering each line
+from an unknown observer; and a prepared observer forgetting data not given on its rays or
+under a target, or answering for an unknown observer before a target height with no datum --
+each turns a test red. The
+view over a raster first survived, the test checking only the block that owns its cells; it
+checks the view too now. A suite that stays green with the defect restored verifies nothing.
 
 All of the above pass identically in Debug and Release.

@@ -13,7 +13,9 @@ in-memory implementations of it (`FakeElevationSampler`, a tiny index-addressed 
 `ComputeLineOfSight`, `ComputeViewshedNaive`/`ComputeViewshedFast`), the minimum visible
 height built on them (`MinimumVisibleHeight.h`, see "Minimum visible height" below), the
 prepared observer that answers many targets a second from one place (`PreparedObserver.h`,
-see "Many answers per second from a fixed observer" below), and
+see "Many answers per second from a fixed observer" below), many pairs on every core
+(`LineOfSightPairs.h`, `Threads.h`), the boxes of data queries will read (`QueryExtent.h`, see
+"Data not given, and the data a query will read" below), and
 `CompareViewsheds` (`ViewshedAgreement.h`), which measures an approximate viewshed
 against its exact reference -- see "Fast vs. naive viewshed" below. It has no
 include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
@@ -106,11 +108,17 @@ only a demo/tooling one.
   other direction. Sampling at the data's own spacing therefore visits every cell;
   sampling more coarsely than the data still can't promise to catch a feature narrower
   than the spacing (`TestNarrowSpikeCanFallBetweenSamples`).
-- **Voids**: a void (source `-32768`, or a query outside the tile) is never treated as
-  zero or sea level. It surfaces as `std::optional` at every layer: `GetElevation`
-  returns `nullopt`, `LineOfSightResult::status` becomes `ComputationStatus::VoidInProfile`,
-  and a viewshed cell whose line crosses one becomes `CellVisibility::Degraded` —
-  never a silent "visible".
+- **Voids, and data not given**: missing ground is never treated as zero or sea level,
+  and it comes in two kinds, told apart at every layer. A **void** is a hole in data the
+  engine was given (a `-32768` post, a raster cell flagged invalid); **data not given** is
+  ground it never had (off the tile, outside a raster block or window, no tile registered).
+  `IElevationSampler::Sample` says which (`ElevationData`); `GetElevation` still answers
+  `nullopt` for both. A profile sample marks the second with `dataNotGiven`; a line of sight
+  reports `EndpointMissing` or `VoidInProfile` for a void and `DataNotGiven` for ground not
+  given; a viewshed or minimum-visible-height cell is `Degraded` for a void and
+  `DataNotGiven` for ground not given; a prepared observer's target likewise. Where a path
+  meets both, the void wins: nothing loaded will fill it, whereas `DataNotGiven` means that
+  given the data, the path may yet be answered. Never a silent "visible".
 
 ## Validity envelope
 
@@ -595,12 +603,62 @@ about half as much again. The same benchmark's naive viewshed over 5 km goes fro
 on one thread to ~0.18 s on 16; over 30 km on the 3-arcsecond tile, in a benchmark-only
 program, from 240.3 s to 24.2 s.
 
+## Data not given, and the data a query will read
+
+**The question.** A real-time host loads elevation for a region rather than reading a file
+on demand. It needs two things from the engine: to hear, when a query runs past the data it
+was given, that this is what happened -- not a void in the data, which no loading will fill --
+and to be able to ask, before running a line of sight, a viewshed or a minimum visible height,
+which ground the query will read, so that exactly that can be loaded first.
+
+**Telling the two apart.** Each sampler says, point by point, whether it holds a value, a void
+or nothing at all (`IElevationSampler::Sample`, see "Voids, and data not given" above), and
+the answer travels with the profile to every result. A void, once met, wins over data not
+given, since loading more can't fill it; `DataNotGiven` therefore means that, given the data,
+the answer may come.
+
+**The data a query will read** (`QueryExtent.h`). `LineOfSightExtent`, `NaiveViewshedExtent`
+(the naive viewshed and the exact minimum visible height read the same) and
+`FastViewshedExtent` (the fast viewshed and the fast minimum visible height) return the box of
+latitude and longitude around every point the query will read an elevation at -- not an
+estimate: its edges are points it reads, to the bit. They are worked out without reading any
+data, from the same arithmetic the query uses. Along a great circle, longitude moves one way,
+so a profile's longitudes span its ends; latitude can turn once -- between two points on one
+parallel the circle bulges toward the pole, by some 120 m over 60 km at 60 degrees north --
+and with `z = sin(latitude)`, the profile's `z(t) = z_a sin((1-t)w)/sin w + z_b sin(tw)/sin w`
+turns where `tan(tw) = (z_b - z_a cos w) / (z_a sin w)`, so the samples either side of that
+point are checked too. A profile's box is six points at most; the naive viewshed's, one
+profile's per cell; the fast viewshed's, one per boundary ray -- its cells' centres lie within
+the boundary cells', which are where its rays end. `ProfileExtent` is O(1),
+`NaiveViewshedExtent` O(cells), `FastViewshedExtent` O(rows + columns). A request the query
+would refuse gets an empty box carrying the query's own reason (`GeoExtent::inputProblem`).
+
+**Loading exactly that** (`RealElevationSampler::PostsCovering`, `Window`). For the tile
+reader, `PostsCovering` turns a box into the posts it needs -- the nearest post to each point,
+or with bilinear interpolation the four around it -- with `Sample`'s own arithmetic, and
+`Window` gives a sampler holding only those posts, which finds a point's post exactly as the
+whole tile does and calls any other point on the tile data not given. A raster block can be a
+window into a larger raster the same way (`RasterBlockGeometry::rowOffset`, `colOffset`).
+
+**Measured.** `TestQueryExtentsAreTheBoxesTheQueriesRead` runs each query through a sampler
+that records every point it is asked for, and the recorded box must equal the reported one to
+the bit -- for profiles north-south, diagonal, reversed, a few metres long and 60 km east-west
+at 60 degrees north (where a box around the ends alone would miss the bulge), and for all four
+grids. `TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile` is the acceptance: on the
+1-arcsecond tile, each query -- five lines of sight, the naive viewshed and exact minimum
+visible height over 1 km, the fast viewshed and fast minimum visible height over 3 km, and the
+fast viewshed read bilinearly -- run on a window of only its reported posts gives, to the bit,
+the answer it gives on the whole tile; and with the window a post short on each side in turn,
+every answer that changes becomes `DataNotGiven`, and none becomes a void.
+
 ## Void handling and degraded results
 
 Asserted by tests (`TestVoidPointIsDegraded`, `TestViewshedDetectsVoid`,
-`TestViewshedsAgreeWhenObserverIsUnknown`). When nothing is known about the observer —
-it stands on a void, or its height can't be put on the terrain's datum — both viewsheds
-return every cell `Degraded`, the observer's own cell included. A missing or
+`TestViewshedsAgreeWhenObserverIsUnknown`, `TestDataNotGivenIsToldApartFromAVoid`). When
+nothing is known about the observer, both viewsheds and both minimum visible heights answer
+every cell for that one reason, the observer's own cell included: `Degraded` when it stands
+on a void or its height can't be put on the terrain's datum, `DataNotGiven` when the ground
+under it wasn't given. A missing or
 unreadable elevation file is also distinguished from a genuine void:
 `RealElevationSampler::IsLoaded()` reports load failure explicitly — a missing file, or
 one whose size isn't a whole square of posts, as a download cut short would be — and the CLI refuses
@@ -612,7 +670,7 @@ Every public result type (`ProfileSample`, `LineOfSightResult`, `ViewshedResult`
 plain struct of value types. `ProfileSample::elevationM` and `LineOfSightResult`'s
 optional fields use `std::optional` for absence, not a sentinel value.
 `ViewshedResult::visible` instead uses an explicit `CellVisibility` enum
-(`NotCovered` / `Degraded` / `Visible` / `NotVisible`) — a single `optional<bool>`
+(`NotCovered` / `Degraded` / `Visible` / `NotVisible` / `DataNotGiven`) — a single `optional<bool>`
 cannot distinguish "no ray ever reached this cell" from "a ray reached it but crossed
 a void partway", and a caller needs to tell those two apart. Similarly, a height
 crossing the API boundary (`observerHeight`/`targetHeight`) is never a bare `double` —
@@ -639,7 +697,8 @@ own boundary, other than the standard library's `std::bad_alloc` if memory runs 
 `profile_output.pgm` and `viewshed_output.pgm` (produced by the built-in benchmark) and
 `cli_viewshed_output.pgm` (produced by the `viewshed` CLI command) — plain P5 binary
 PGM, written by a single self-contained writer (`ImageWriter.h`), no graphics
-dependency.
+dependency. In a viewshed, white is visible, black hidden, light grey (192) past the data
+the engine was given, and mid grey (128) a void on the way or a cell not reached.
 
 **Orientation note:** in the viewshed PGM/PNG, west is left and east is right (as
 expected), but **north is at the bottom of the image, not the top** — row 0 (written

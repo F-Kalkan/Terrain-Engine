@@ -173,7 +173,8 @@ public sealed class NativeTerrainEngine : ITerrainEngine
                         has ? s.ElevationM : null,
                         has ? s.CurvatureCorrectedElevationM : null,
                         eyesKnown ? s.SightLineHeightM : null,
-                        fresnel ? s.FirstFresnelRadiusM : 0.0);
+                        fresnel ? s.FirstFresnelRadiusM : 0.0,
+                        s.DataNotGiven != 0);
                 }
 
                 var status = (ComputationStatus)result.LosStatus;
