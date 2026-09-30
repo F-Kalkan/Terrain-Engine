@@ -120,6 +120,113 @@ bool ForEachRowOnThreads(int gridRows, int threadCount, const ViewshedProgress& 
     return !stopped;
 }
 
+// === THE NAIVE VIEWSHED, READING LESS ===
+// One cell of the naive viewshed -- exactly what GetTerrainProfile and ComputeLineOfSight give
+// for it -- reading only the terrain that can decide it, where the sampler can put a ceiling on
+// a box of the ground (IElevationSampler::CeilingIn). The line's samples are taken in stretches:
+// a stretch whose ceiling, raised by the Earth's curvature where that is worst along it, stays
+// clearly below the sight line cannot block it and isn't read; any other is halved, down to eight
+// samples, which are read and judged one by one with ComputeLineOfSight's own arithmetic
+// (DeficitM). The first sample that blocks ends the walk, once the ceiling on the rest of the
+// line shows no void or missing data that would turn the answer into none.
+//
+// Every judgement that decides the answer is made on a sample read exactly as the exact path
+// reads it; a ceiling only ever rules a stretch out, with a margin far above rounding. Anything
+// else -- a gap that may be there, an end in the ground, a height with no datum, a sampler with
+// no ceilings -- returns nullopt, and the caller takes the exact path. So the answer is the
+// exact path's, to the bit, and the tests hold it to that.
+//
+// Complexity: at worst the exact path's O(samples), plus the ceilings; far less where the
+// terrain sits below the line or blocks it early. Allocates nothing.
+// Thread-safety: as safe as the sampler's Sample and CeilingIn.
+inline std::optional<CellVisibility> NaiveCellByCeilings(GeoPoint observer, GeoPoint target, double spacingDeg, IElevationSampler& sampler,
+    const DatumHeight& observerHeight, const DatumHeight& targetHeight, double k)
+{
+    if (CheckProfileRequest(observer, target, spacingDeg) != InputProblem::None) return std::nullopt;
+    if (CheckLineOfSightInputs(observerHeight, targetHeight, k) != InputProblem::None) return std::nullopt;
+
+    // The samples GetTerrainProfile would take: the same count, points and distances.
+    const double totalDistanceM = GreatCircleDistanceM(observer, target);
+    const double centralAngleRad = totalDistanceM / EarthRadiusM;
+    const int sampleCount = (int)ProfileIntervals(observer, target, spacingDeg);
+    if (sampleCount < 2) return std::nullopt;
+    const GreatCircleArc arc(observer, target, centralAngleRad);
+    auto pointAt = [&](int i) { return arc.At((double)i / sampleCount); };
+    auto distanceAt = [&](int i) { return (double)i / sampleCount * totalDistanceM; };
+
+    GeoPoint first = pointAt(0), last = pointAt(sampleCount);
+    ElevationSample firstGround = sampler.Sample(first.latitudeDeg, first.longitudeDeg);
+    ElevationSample lastGround = sampler.Sample(last.latitudeDeg, last.longitudeDeg);
+    if (firstGround.data != ElevationData::Present || lastGround.data != ElevationData::Present) return std::nullopt;
+    const VerticalDatum datum = sampler.GetDatum();
+    std::optional<double> observerEyeM = EyeHeightInTerrainDatum(observerHeight, firstGround.elevationM, datum);
+    std::optional<double> targetEyeM = EyeHeightInTerrainDatum(targetHeight, lastGround.elevationM, datum);
+    if (!observerEyeM || !targetEyeM) return std::nullopt;
+    auto deficitAt = [&](int i, double elevationM) { return DeficitM(elevationM, *observerEyeM, *targetEyeM, distanceAt(i), totalDistanceM, k); };
+    if (deficitAt(0, firstGround.elevationM) > 0 || deficitAt(sampleCount, lastGround.elevationM) > 0) return std::nullopt; // an end in the ground
+
+    // The ceiling on every point sampled between two points of the arc: the box around them,
+    // widened in latitude by the most the arc can bow out past its ends -- (arc angle)^2 / 8
+    // times tan(latitude), doubled -- as longitude only ever moves one way along it.
+    auto ceilingBetween = [&](GeoPoint a, GeoPoint b, int samplesApart) {
+        double angle = centralAngleRad * samplesApart / sampleCount;
+        double highestLatitude = (std::min)(89.9, (std::max)(std::abs(a.latitudeDeg), std::abs(b.latitudeDeg)) + angle / DegToRad);
+        double bowDeg = angle * angle / 4 * std::tan(highestLatitude * DegToRad) / DegToRad + 1e-9;
+        return sampler.CeilingIn((std::min)(a.latitudeDeg, b.latitudeDeg) - bowDeg, (std::max)(a.latitudeDeg, b.latitudeDeg) + bowDeg,
+            (std::min)(a.longitudeDeg, b.longitudeDeg), (std::max)(a.longitudeDeg, b.longitudeDeg));
+    };
+    // The most the curvature, less the sight line, can add over distances da..db: a downward
+    // parabola in the distance, so at its vertex, or at the nearer end.
+    const double slope = (*targetEyeM - *observerEyeM) / totalDistanceM;
+    auto worstRiseM = [&](double da, double db) {
+        double d = (std::min)(db, (std::max)(da, totalDistanceM / 2 - slope * k * EarthRadiusM));
+        return CurvatureDropM(d, totalDistanceM - d, k) - SightLineHeightM(*observerEyeM, *targetEyeM, d, totalDistanceM);
+    };
+    const double margin = 1e-6; // metres: far above rounding, far below anything that matters
+
+    struct Stretch { int first, last; GeoPoint from, to; };
+    Stretch pending[16];
+    const int widest = 256, narrowest = 8;
+    int blockedAt = -1;
+    for (int start = 1; start < sampleCount && blockedAt < 0; start += widest)
+    {
+        int end = (std::min)(start + widest - 1, sampleCount - 1);
+        int count = 0;
+        pending[count++] = Stretch{ start, end, pointAt(start), pointAt(end) };
+        while (count > 0 && blockedAt < 0)
+        {
+            Stretch s = pending[--count];
+            std::optional<HeightCeiling> ceiling = ceilingBetween(s.from, s.to, s.last - s.first);
+            if (!ceiling || ceiling->mayHaveGap) return std::nullopt;
+            if (ceiling->highestM + worstRiseM(distanceAt(s.first), distanceAt(s.last)) < -margin) continue;
+            if (s.last - s.first + 1 > narrowest)
+            {
+                int middle = (s.first + s.last) / 2;
+                pending[count++] = Stretch{ middle + 1, s.last, pointAt(middle + 1), s.to };
+                pending[count++] = Stretch{ s.first, middle, s.from, pointAt(middle) };
+                continue;
+            }
+            for (int i = s.first; i <= s.last; i++)
+            {
+                GeoPoint point = i == s.first ? s.from : i == s.last ? s.to : pointAt(i);
+                ElevationSample ground = sampler.Sample(point.latitudeDeg, point.longitudeDeg);
+                if (ground.data != ElevationData::Present) return std::nullopt;
+                if (deficitAt(i, ground.elevationM) > 0)
+                {
+                    blockedAt = i;
+                    break;
+                }
+            }
+        }
+    }
+    if (blockedAt < 0) return CellVisibility::Visible;
+
+    // Blocked -- unless a void or data not given lies further on, which makes it no answer.
+    std::optional<HeightCeiling> rest = ceilingBetween(pointAt(blockedAt), last, sampleCount - blockedAt);
+    if (!rest || rest->mayHaveGap) return std::nullopt;
+    return CellVisibility::NotVisible;
+}
+
 // === BATCH VIEWSHED PATH ===
 // Both viewsheds below are the batch path, not the frame-safe one: they own
 // the BATCH PATH overload of GetTerrainProfile (TerrainProfile.h), allocating a
@@ -131,8 +238,10 @@ bool ForEachRowOnThreads(int gridRows, int threadCount, const ViewshedProgress& 
 // GetTerrainProfile's in-place overload instead; see the frame-safe path
 // documented there.
 //
-// Complexity: O(gridRows * gridCols * samples per profile) -- one full
-// GetTerrainProfile + ComputeLineOfSight per cell. This is the exact-per-cell
+// Complexity: O(gridRows * gridCols * samples per profile) at worst -- a
+// GetTerrainProfile + ComputeLineOfSight per cell -- and far less where the sampler puts
+// ceilings on the ground (CeilingIn): each cell then reads only the part of its line that
+// can decide it (NaiveCellByCeilings), with the same answer. This is the exact-per-cell
 // oracle the fast viewshed is checked against, not a per-frame algorithm.
 // Threads (optional): threadCount rows at a time, 1 by default, 0 for one per hardware
 // thread (ForEachRowOnThreads). Each cell is written exactly once, by its own
@@ -185,7 +294,12 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
         return result;
     }
 
-    bool finished = ForEachRowOnThreads(gridRows, threadCount, progress, [&](int row, int) {
+    // Where the sampler can put ceilings on the ground, each cell reads only the terrain that can
+    // decide it (NaiveCellByCeilings), and takes the exact path below whenever that can't be sure.
+    const bool readLess = sampler.CeilingIn(observer.latitudeDeg, observer.latitudeDeg, observer.longitudeDeg, observer.longitudeDeg).has_value();
+    std::vector<std::vector<ProfileSample>> profiles(ThreadsFor(threadCount));
+
+    bool finished = ForEachRowOnThreads(gridRows, threadCount, progress, [&](int row, int thread) {
         for (int col = 0; col < gridCols; col++)
         {
             if (row == centerRow && col == centerCol)
@@ -196,7 +310,17 @@ inline ViewshedResult ComputeViewshedNaive(GeoPoint observer, DatumHeight observ
 
             GeoPoint target{ observer.latitudeDeg + (row - centerRow) * spacingDeg, observer.longitudeDeg + (col - centerCol) * lonSpacingDeg };
 
-            std::vector<ProfileSample> profile = GetTerrainProfile(observer, target, spacingDeg, sampler);
+            if (readLess)
+            {
+                if (std::optional<CellVisibility> cell = NaiveCellByCeilings(observer, target, spacingDeg, sampler, observerHeight, targetHeight, k))
+                {
+                    result.visible[row][col] = *cell;
+                    continue;
+                }
+            }
+
+            std::vector<ProfileSample>& profile = profiles[thread];
+            GetTerrainProfile(observer, target, spacingDeg, sampler, profile);
             LineOfSightResult los = ComputeLineOfSight(profile, observerHeight, targetHeight, k);
 
             if (!IsOk(los.status))

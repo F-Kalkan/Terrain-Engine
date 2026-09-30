@@ -29,6 +29,16 @@ struct ElevationSample
     double elevationM = 0.0; // meaningful only when data is Present
 };
 
+// What a sampler can promise about every point in a box of latitude and longitude, without
+// reading them: no Sample there returns an elevation above highestM, and unless mayHaveGap is
+// set, every one of them is Present. It may overstate -- a higher ceiling, a gap that isn't
+// there -- but never understate.
+struct HeightCeiling
+{
+    double highestM = 0.0;
+    bool mayHaveGap = true;
+};
+
 class IElevationSampler {
 public:
     virtual ~IElevationSampler() = default;
@@ -52,6 +62,17 @@ public:
     // Which vertical datum GetElevation's returned values are expressed in.
     // Never assumed by a caller -- declared once per sampler instance.
     virtual VerticalDatum GetDatum() const = 0;
+
+    // A ceiling on every point in the box -- southLatDeg to northLatDeg, westLonDeg to
+    // eastLonDeg, the edges included -- or nullopt when the sampler can't give one without
+    // reading them. A caller that can rule a stretch of a path out with it may skip reading
+    // that stretch; with nullopt it reads every point, as it always did, so the default is safe.
+    // Complexity and thread-safety: per implementation; O(1) or close to it where given.
+    virtual std::optional<HeightCeiling> CeilingIn(double southLatDeg, double northLatDeg, double westLonDeg, double eastLonDeg) const
+    {
+        (void)southLatDeg; (void)northLatDeg; (void)westLonDeg; (void)eastLonDeg;
+        return std::nullopt;
+    }
 };
 
 // An elevation as GetElevation returns it: the value, or nothing for a void or data not given.

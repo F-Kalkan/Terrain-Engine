@@ -25,7 +25,9 @@ include path to `TerrainReader` and cannot see `RealElevationSampler.h`.
 inferred from the file size, and a file whose size isn't a whole square of posts
 refused — with big-endian 16-bit signed elevations and void = `-32768`. It reports a
 loaded tile's posts per side, void count and south-west corner, and takes its path as a
-`std::filesystem::path`, so a folder or file name with non-ASCII characters opens too.
+`std::filesystem::path`, so a folder or file name with non-ASCII characters opens too. It
+keeps a height pyramid over its posts, to put a ceiling on any box of ground without reading
+it (`CeilingIn`; see "The naive viewshed, reading less" below).
 
 The Windows dependency (`psapi.h`) lives only in `TerrainEngine` (the CLI/benchmark
 driver), never in `TerrainCore` or `TerrainReader` — it is not a library dependency,
@@ -193,10 +195,13 @@ AMD Ryzen 7 3800X (8 cores / 16 threads), 16 GB RAM, Windows 11 Pro x64, Release
 
 | Operation                                        | Tile         | Wall time     | Peak memory |
 |--------------------------------------------------|--------------|---------------|-------------|
-| 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.13–0.16 ms | ~10.8 MB    |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.18–1.19 s  | ~61.1 MB    |
-| 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.29–0.37 ms | ~54.7 MB    |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.19–1.20 s  | ~83.1 MB    |
+| 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.13–0.18 ms | ~11.5 MB    |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.18–1.19 s  | ~62.5 MB    |
+| 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.29–0.37 ms | ~66.3 MB    |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.19–1.26 s  | ~95.5 MB    |
+
+The peak memory rose, ~0.7 MB and ~12 MB, with the tile's height pyramid (see "The naive
+viewshed, reading less" below): from ~10.8, ~61.1, ~54.7 and ~83.1 MB.
 
 The viewshed rows are on one thread; on every core the same viewshed takes ~0.18 s (see
 "Fast grids and a prepared observer on every core" below). Every row moved again, down, when
@@ -324,32 +329,33 @@ real tiles; CLI timings, so the caveat above applies to both columns alike):
 
 | Radius / grid / tile | Naive | Fast | Speed-up |
 |---|---|---|---|
-| 2 km / 133×133 / 3-arcsecond | ~69–76 ms | ~5.4–6.4 ms | ~11.9–12.9x |
-| 2 km / 133×133 / 1-arcsecond | ~74–86 ms | ~5.9–7.0 ms | ~12.4x |
-| 30 km / 2000×2000 / 3-arcsecond, one thread | ~208.7 s (one run) | ~1.35 s (same program) | ~154x |
-| 30 km / 2000×2000 / 3-arcsecond, 16 threads | ~22.5 s (one run) | ~0.19 s (same program) | ~117x |
+| 2 km / 133×133 / 3-arcsecond | ~28–34 ms | ~5.4 ms | ~5.1–6.2x |
+| 30 km / 2000×2000 / 3-arcsecond, one thread | ~9.9 s (one run) | ~1.18 s (same program) | ~8x |
+| 30 km / 2000×2000 / 3-arcsecond, 16 threads | ~1.0 s (one run) | ~0.19 s (same program) | ~5x |
 
-Both on one thread. The 2 km rows moved from ~121–138 ms and ~8.9–9.5 ms (3-arcsecond) and
-~129–131 ms and ~8.3–9.6 ms (1-arcsecond), and the speed-up from ~14–16x, with the arc worked
-out once -- in the CLI, whose layout exaggerates it (see Performance above); naive, which
-builds a profile for every cell, gained more than fast.
+The 2 km rows are on one thread. Naive now reads only the terrain that can decide each cell
+("The naive viewshed, reading less" below), with the same answers, to the bit -- and it gained
+far more than fast did, so the speed-up fell. Before that it took ~69–76 ms and ~74–86 ms
+at 2 km (3- and 1-arcsecond; ~12–13x fast's time), and before the arc was worked out once
+~121–138 ms and ~129–131 ms (~14–16x) -- in the CLI, whose layout exaggerates such changes
+(see Performance above).
 
-The 30 km naive viewshed takes three and a half minutes on one thread and was measured on the
-3-arcsecond tile only, in a benchmark-only program with the fast one beside it. Its row moved
-from 240.3 s and 1.32 s (183x), and 24.2 s on 16 threads: the same program built against the
-library before the arc was worked out once, run the same day, took 219.8 s and 1.27 s on one
-thread and 27.3 s on 16, so the arc is worth ~5% on one thread and ~18% on 16, and the rest
-is the machine from one day to the next. The speed-up fell because the fast viewshed gained
-less from the arc than naive did, not because either got slower. The
+The 30 km naive viewshed was measured on the 3-arcsecond tile only, in a benchmark-only
+program with the fast one beside it. Its row moved twice the same day. Reading less took it
+from 208.7 s to 9.9 s on one thread and from 22.5 s to 1.0 s on 16, some twenty times. Before
+that, the arc worked out once had taken it from 240.3 s and 1.32 s (183x), and 24.2 s on 16:
+the same program built against the library before the arc, run the same day, took 219.8 s and
+1.27 s on one thread and 27.3 s on 16, so the arc was worth ~5% on one thread and ~18% on 16,
+and the rest is the machine from one day to the next. The
 previous fast viewshed was about 1.45 times quicker than this one (1.22 s against 1.75 s
 from the CLI at 30 km, measured the same day), and the speed-ups at 2 km were ~22x before
 this version.
 
-Naive's cost grows faster than fast's as the radius grows: it runs one full profile and
-line of sight per cell, so its work scales with roughly (cell count) × (average profile
-length), while fast casts rays only to the boundary and then answers each cell with a
-lookup, so its work scales closer to the boundary's perimeter × profile length plus the
-cell count. That is why the speed-up is larger at 30 km than at 2 km.
+Naive's cost grows faster than fast's as the radius grows: it walks one line per cell, so its
+work scales with roughly (cell count) × (the part of each line it must read), while fast casts
+rays only to the boundary and then answers each cell with a lookup, so its work scales closer
+to the boundary's perimeter × profile length plus the cell count. That is why the speed-up is
+larger at 30 km than at 2 km.
 
 ## Minimum visible height
 
@@ -473,10 +479,10 @@ and `benchmark viewshed`, three runs each, one process per run):
 
 | 30 km radius @ 30 m spacing (2000×2000) | Tile | Wall time, one thread | 16 threads | Peak memory |
 |---|---|---|---|---|
-| Fast viewshed | 3-arcsecond | ~1.18–1.19 s | ~0.18–0.19 s | ~61.1 MB |
-| Fast minimum visible height | 3-arcsecond | ~1.43 s | ~0.22–0.24 s | ~124.8 MB |
-| Fast viewshed | 1-arcsecond | ~1.19–1.20 s | ~0.18 s | ~83.1 MB |
-| Fast minimum visible height | 1-arcsecond | ~1.42 s | ~0.23–0.24 s | ~146.7 MB |
+| Fast viewshed | 3-arcsecond | ~1.18–1.19 s | ~0.18–0.19 s | ~62.5 MB |
+| Fast minimum visible height | 3-arcsecond | ~1.41–1.43 s | ~0.22–0.24 s | ~126.1 MB |
+| Fast viewshed | 1-arcsecond | ~1.19–1.26 s | ~0.18 s | ~95.5 MB |
+| Fast minimum visible height | 1-arcsecond | ~1.42–1.43 s | ~0.23–0.24 s | ~159.1 MB |
 
 The one-thread times moved from ~1.68–1.76 s, ~1.95–1.97 s, ~1.64–1.71 s and ~1.87–1.88 s
 with the arc worked out once -- mostly the CLI's layout, as under Performance above. The time
@@ -566,8 +572,8 @@ comparison, 1,000 direct lines of sight 50 km long.
 
 | Tile | Preparation, one thread | 16 threads | Peak memory after it | Queries a second, one core | Direct line of sight at 50 km |
 |---|---|---|---|---|---|
-| 1-arcsecond | ~1.20-1.23 s | ~0.21-0.26 s | ~96.6-97.1 MB | ~5.37-5.45 million | ~148-151 µs (~6,700 a second) |
-| 3-arcsecond | ~1.18-1.19 s | ~0.23-0.28 s | ~73.7 MB | ~5.47-5.51 million | ~118-122 µs (~8,300 a second) |
+| 1-arcsecond | ~1.20-1.23 s | ~0.21-0.26 s | ~108.3 MB | ~5.37-5.45 million | ~148-151 µs (~6,700 a second) |
+| 3-arcsecond | ~1.18-1.20 s | ~0.23-0.28 s | ~75.1 MB | ~5.47-5.51 million | ~118-122 µs (~8,300 a second) |
 
 The prepared observer holds 66.6 MB of horizons (10,472 rays of 1,667 floats); the rest of the
 peak is the tile. A query costs ~180-190 ns, whatever the target's distance, against
@@ -628,12 +634,13 @@ one-thread run):
 | 16 | ~0.085-0.088 s | ~109,000-113,600 | 10.3x |
 
 Up to eight threads each core does its share; past eight, the second thread on each core adds
-about half as much again. The same benchmark's naive viewshed over 5 km goes from ~1.06-1.08 s
-on one thread to ~0.11 s on 16; over 30 km on the 3-arcsecond tile, in a benchmark-only
-program, from 208.7 s to 22.5 s. Every figure here moved with the arc worked out once: from
-~7,190-7,330 pairs a second on one thread and ~79,100 on 16, and the naive viewshed from
-~1.73-1.75 s and ~0.18 s, and 240.3 s and 24.2 s -- see Performance above for how much of it
-is the library's.
+about half as much again. The same benchmark's naive viewshed over 5 km goes from ~0.26 s on
+one thread to ~0.028 s on 16; over 30 km on the 3-arcsecond tile, in a benchmark-only program,
+from 9.9 s to 1.0 s. Every figure here moved with the arc worked out once: from ~7,190-7,330
+pairs a second on one thread and ~79,100 on 16 -- see Performance above for how much of it is
+the library's. The naive viewshed moved twice: from ~1.73-1.75 s and ~0.18 s, and 240.3 s and
+24.2 s, to ~1.06-1.08 s and ~0.11 s, and 208.7 s and 22.5 s, with the arc; then to the
+figures above when it began reading only the terrain that can decide each cell.
 
 ### Fast grids and a prepared observer on every core
 
@@ -695,6 +702,72 @@ gathering them, laying out the grid, the preparation's first ray. Where the rest
 measured. Against the build before the change, alternately in one program the same day, the
 30 km fast viewshed went from 1.22-1.26 s to 0.19-0.20 s on every core, and a 50 km
 preparation from 1.15 s to 0.25-0.26 s.
+
+## The naive viewshed, reading less
+
+**The question.** The naive viewshed is the exact answer, and the slow one: 30 km took 22.5 s
+on 16 threads, 208.7 s on one. Every cell reads its whole line. Can it read less and give the
+same answers, to the bit?
+
+**The approach.** Most of a line can't decide it. Where the ground stands well below the sight
+line, no sample there blocks; once one sample blocks, the rest can't unblock it. So each line
+is walked in stretches, reading only what can decide it (`NaiveCellByCeilings`, `Viewshed.h`):
+
+- A sampler may put a **ceiling** on a box of ground without reading it
+  (`IElevationSampler::CeilingIn`, optional; the default gives none). The tile reader keeps a
+  **height pyramid** -- the highest post in every 2 × 2, 4 × 4, ... block, and whether the block
+  holds a void (`PostPyramid`) -- and answers any box from at most four blocks, finding the
+  posts it covers with `Sample`'s own arithmetic (the four around each point, read bilinearly).
+  It is built as the tile loads: ~0.04 s and ~12 MB for the 1-arcsecond tile, ~1 MB for the
+  3-arcsecond one. A box reaching a post the reader doesn't hold may have a gap.
+- A stretch of up to 256 samples is skipped unread when its ceiling, plus the most the Earth's
+  curvature less the sight line can add along it (a downward parabola in the distance, so at
+  its vertex or an end), stays below the line by more than a micrometre. Its box is the two end
+  points', widened in latitude by twice the most the arc can bow out between them
+  ((angle)^2 / 8 · tan(latitude)). A stretch that can't be skipped is halved, down to eight
+  samples, which are read and judged one by one -- with `DeficitM`, the arithmetic
+  `ComputeLineOfSight` itself now uses, so the two can't drift apart.
+- The first sample that blocks ends the walk, once the ceiling on the rest of the line shows no
+  void and no missing data there -- either would make the exact answer no answer at all.
+- Anything else -- a gap that may be there, an end in the ground, a height with no datum, a
+  sampler with no ceilings -- takes the exact path for that cell, as before.
+
+**Why the answer can't change.** Every sample that decides the answer is read and judged as the
+exact path reads and judges it. A ceiling only ever rules a stretch out, and only by a margin far
+above rounding: it may overstate, never understate, and the tests hold it to that.
+
+**Tested.** `TestTheNaiveViewshedReadsLessAndAnswersTheSame` compares every cell with the exact
+path's, at three observers on the 1-arcsecond tile, read nearest and bilinear, for the ground and
+for a target 2,000 m above sea level; past the tile's edge and on a window; on a tile with voids
+and a ridge, including a line of 5 m samples blocked by the ridge that crosses voids far beyond
+it; for an eye below its ground and a target in a plateau; along a parallel at 60 degrees north
+that bows into a band of high ground its ends stay south of; on one thread and on all -- and
+checks that it reads less than half as much. `TestACeilingIsNeverBelowWhatTheSamplerReads`
+samples 1,600 random boxes, nearest and bilinear, on a tile and a window: no point read in a box
+is above its ceiling, and any void or missing point is flagged. Put back one at a time, each
+defect turns a test red: a ceiling a metre low, rows rounded the wrong way, bilinear without the
+post beyond, voids left out of the pyramid, a window's edge unchecked, stretches skipped within
+a metre of the line, the curvature taken at the wrong point, no look further on after a block,
+no allowance for the arc's bow, ceilings never used, and an end in the ground unchecked. Three
+of those first survived -- the voids too near the ridge for the look further on to matter, the
+bow too small at 3 km and 36 degrees, no target in a plateau -- and the tests were built out
+until each was caught.
+
+**Measured** (the machine above, the 3-arcsecond tile, one run each, the same program as the
+30 km figures above):
+
+| Naive viewshed | Before | Reading less | Faster |
+|---|---|---|---|
+| 30 km, one thread | 208.7 s | 9.9 s | ~21x |
+| 30 km, 16 threads | 22.5 s | 1.0 s | ~22x |
+| 5 km, one thread (`benchmark pairs`) | ~1.06-1.08 s | ~0.26 s | ~4x |
+| 5 km, 16 threads | ~0.11 s | ~0.028 s | ~4x |
+
+The longer the lines, the more of them lies between the near ground and the far ground, where
+nothing can block -- and the sooner a hidden cell's line is blocked, compared with its length.
+The fast viewshed still reads every ray in full: it builds each ray's horizon, which needs every
+sample. The exact minimum visible height, line of sight and many pairs read every sample too;
+they report where a line is blocked and by how much, which a ceiling can't give.
 
 ## Data not given, and the data a query will read
 

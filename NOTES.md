@@ -562,6 +562,40 @@ viewshed, already on every core, gained only the arc's ~12%: 30 km is still over
 seconds on sixteen threads. Making it much faster without changing its answers needs it to
 read less terrain -- skipping stretches that can't block a line -- which is a change of its own.
 
+## Update: the naive viewshed, reading less
+
+The naive viewshed is the exact answer and was the slow one: 30 km took 22.5 s on sixteen
+threads. It now reads only the ground that can decide each line -- about a second -- and its
+answers are the same, to the bit. Four decisions.
+
+**The sampler interface grows, on purpose.** Earlier notes say the interface was kept to one
+point at a time, and a batch read was turned down for the same reason: every sampler anyone has
+written would have to change. `CeilingIn` is different in kind. It is optional -- a sampler that
+doesn't answer it gives nullopt, and the naive viewshed then reads every sample, as it always did
+-- and it asks for a promise, not data: the highest any point in a box can be, and whether any
+may be a gap, never understated. The tile reader answers it from a height pyramid built as the
+tile loads; the raster-block samplers don't, and lose nothing.
+
+**Exact, not close.** The fast viewshed already answers approximately. A second approximation
+would add nothing, so every sample that decides a cell is read and judged as the exact path
+judges it, with the arithmetic `ComputeLineOfSight` itself now calls (`DeficitM`), and a
+ceiling only ever rules a stretch out, with a micrometre's margin. Anything in doubt -- a gap
+that may be there, an end in the ground, a height with no datum -- takes the exact path for that
+cell. The tests compare every cell with the exact path's, and the ceilings with every point read.
+
+**Three things had to be got right that tests at first didn't show.** A stretch's box must allow
+for the great circle bowing out between its ends; a line blocked early must still look for voids
+further on, which would make its answer none; an end in the ground blocks at that end alone.
+Each was put back, survived, and got a test that catches it: a band of high ground the bow
+reaches into at 60 degrees north, voids far behind a ridge on a line of 5 m samples, a target
+inside a plateau.
+
+**Only the naive viewshed, for now.** The line of sight, many pairs and the exact minimum visible
+height report where a line is blocked and by how much, or the lowest height seen, which needs
+every sample -- or a different walk. The fast viewshed builds every ray's horizon, which needs
+every sample too. The naive viewshed asks only whether, and that is what a ceiling can answer.
+The measured gain grows with the radius: ~4x at 5 km, ~20x at 30 km.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

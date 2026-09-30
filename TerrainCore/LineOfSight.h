@@ -198,6 +198,20 @@ inline double SightLineHeightM(double observerEyeHeightM, double targetEyeHeight
     return observerEyeHeightM + t * (targetEyeHeightM - observerEyeHeightM);
 }
 
+// How far the terrain at one sample, raised by the Earth's curvature, stands above the sight
+// line between the two eyes: positive where it blocks. d1M is the sample's distance from the
+// observer along a path totalDistanceM long. ComputeLineOfSight decides with this, and so does
+// every walk that must give its answer to the bit.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline double DeficitM(double elevationM, double observerEyeHeightM, double targetEyeHeightM, double d1M, double totalDistanceM, double k)
+{
+    double d2M = totalDistanceM - d1M;
+    double lineHeightM = SightLineHeightM(observerEyeHeightM, targetEyeHeightM, d1M, totalDistanceM);
+    double curvatureDropM = CurvatureDropM(d1M, d2M, k);
+    double correctedElevationM = elevationM + curvatureDropM;
+    return correctedElevationM - lineHeightM;
+}
+
 // Free-space wavelength of a radio frequency.
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline double WavelengthM(double frequencyHz)
@@ -303,13 +317,7 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
         // The sight line is interpolated by distance, the same quantity the
         // curvature term uses -- not by sample index, which only agrees with
         // distance when the profile happens to be evenly spaced.
-        double d1M = profile[i].distanceFromStartM;
-        double d2M = totalDistanceM - d1M;
-        double lineHeightM = SightLineHeightM(observerEyeHeightM, targetEyeHeightM, d1M, totalDistanceM);
-        double curvatureDropM = CurvatureDropM(d1M, d2M, k);
-
-        double correctedElevationM = *profile[i].elevationM + curvatureDropM;
-        double deficitM = correctedElevationM - lineHeightM;
+        double deficitM = DeficitM(*profile[i].elevationM, observerEyeHeightM, targetEyeHeightM, profile[i].distanceFromStartM, totalDistanceM, k);
 
         if (deficitM > worstDeficitM)
         {

@@ -98,6 +98,31 @@ public class ViewshedViewModelTests
     }
 
     [Fact]
+    public async Task A_plain_naive_run_redoes_itself_too_but_the_exact_height_map_waits_for_run()
+    {
+        // The naive viewshed reads only the ground that can decide each line: about a second for
+        // 30 km, quick enough to redo when the observer is placed. The exact minimum visible
+        // height still reads every line, and waits.
+        var vm = new ViewshedViewModel(() => _tile) { Algorithm = ViewshedAlgorithm.Naive };
+        await vm.RunAsync();
+        int runs = _tile.ViewshedQueries.Count;
+
+        vm.PlaceObserver(36.7, -111.7);
+        await WaitUntil(() => _tile.ViewshedQueries.Count == runs + 1 && !vm.IsRunning);
+        Assert.Equal(ViewshedAlgorithm.Naive, _tile.ViewshedQueries[^1].Algorithm);
+        Assert.Equal(36.7, _tile.ViewshedQueries[^1].ObserverLatitudeDeg);
+        Assert.False(vm.IsObserverMoved);
+
+        vm.ShowsHeights = true;
+        await vm.RunAsync();
+        int heightRuns = _tile.HeightQueries.Count;
+        vm.PlaceObserver(36.6, -111.6);
+        await Task.Delay(50);
+        Assert.Equal(heightRuns, _tile.HeightQueries.Count);
+        Assert.True(vm.IsObserverMoved);
+    }
+
+    [Fact]
     public async Task Changing_another_setting_fades_the_map_and_a_slow_or_compared_run_waits_for_run()
     {
         var vm = new ViewshedViewModel(() => _tile);
@@ -113,7 +138,7 @@ public class ViewshedViewModelTests
         vm.OverlayOpacity = 50;
         Assert.Equal(0.175, vm.MapOpacity, 1e-9);
 
-        vm.Algorithm = ViewshedAlgorithm.Naive;
+        vm.Comparison = ViewshedComparison.FastAndNaive;
         int runs = _tile.ViewshedQueries.Count;
         vm.PlaceObserver(36.7, -111.7);
         await Task.Delay(50);

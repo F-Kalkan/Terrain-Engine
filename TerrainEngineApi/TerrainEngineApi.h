@@ -144,7 +144,8 @@ typedef struct te_tile_info
 // latitude [-90, 89] and longitude [-180, 179]. A missing, empty, unreadable or
 // incomplete file -- a download cut short -- is TE_ERROR_LOAD_FAILED, never a tile of voids.
 // Complexity: O(posts) -- reads the file once and keeps it in memory, twice (one copy
-// per interpolation mode): about 5.5 MB for a 3-arcsecond tile, 52 MB for 1-arcsecond.
+// per interpolation mode) and a height pyramid over it, shared by both: about 7 MB for a
+// 3-arcsecond tile, 64 MB for 1-arcsecond.
 // Thread-safety: safe to call concurrently.
 TE_API int32_t te_tile_open(const wchar_t* path, double south_west_latitude_deg, double south_west_longitude_deg, te_tile* out_tile);
 
@@ -321,7 +322,8 @@ typedef int32_t (*te_progress_callback)(double fraction_done, void* user_data);
 // Ownership: *out_cells belongs to the caller; release it with te_free.
 // Complexity: fast O(rows + cols) rays of O(radius / spacing) samples each; naive
 // O(rows * cols) paths of the same length. Both spread over one thread per hardware thread --
-// the same cells, to the bit, as on one; tens of seconds for a naive 30 km at 30 m on 16 threads.
+// the same cells, to the bit, as on one; the naive one reads only the terrain that can decide
+// each cell, about a second for 30 km at 30 m on 16 threads.
 // Thread-safety: safe to call concurrently; the callback runs on the calling thread only,
 // even while the other threads work.
 TE_API int32_t te_viewshed(te_tile tile, const te_viewshed_query* query, te_progress_callback progress, void* user_data, te_viewshed_grid* out_grid, uint8_t** out_cells);

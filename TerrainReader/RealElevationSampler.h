@@ -7,6 +7,7 @@
 #include <string>
 #include "IElevationSampler.h"
 #include <filesystem>
+#include <memory>
 
 // A rectangle of a tile's posts, by row (0 the northern edge) and column (0 the western),
 // both ends included.
@@ -18,6 +19,91 @@ struct PostWindow
     int lastCol = -1;
 
     bool Empty() const { return lastRow < firstRow || lastCol < firstCol; }
+};
+
+// The highest post in every square block of a grid of posts, at every power-of-two size: 2 x 2,
+// 4 x 4, and so on up to the whole grid, with whether each block holds a void. The highest post in
+// any rectangle is then read from at most four blocks of the smallest size that spans it --
+// blocks that may reach past the rectangle, so the answer can be higher than its true highest
+// post, never lower. Built once when a tile loads; about a third more memory than the posts.
+class PostPyramid
+{
+public:
+    // posts: rows x cols, row-major; only read here, and again by Highest at the finest level.
+    PostPyramid(const std::vector<int16_t>& posts, int rows, int cols)
+        : cols(cols)
+    {
+        levels.push_back(Level{ rows, cols, {}, {} });
+        for (int level = 1; (1 << (level - 1)) < (std::max)(rows, cols); level++)
+        {
+            const Level& below = levels.back();
+            Level next{ (below.rows + 1) / 2, (below.cols + 1) / 2, {}, {} };
+            next.highest.assign((size_t)next.rows * next.cols, INT16_MIN);
+            next.hasVoid.assign((size_t)next.rows * next.cols, 0);
+            for (int r = 0; r < below.rows; r++)
+            {
+                for (int c = 0; c < below.cols; c++)
+                {
+                    size_t up = (size_t)(r / 2) * next.cols + (size_t)(c / 2);
+                    int16_t value;
+                    bool isVoid;
+                    if (level == 1)
+                    {
+                        value = posts[(size_t)r * cols + c];
+                        isVoid = value == -32768;
+                        if (isVoid) value = INT16_MIN;
+                    }
+                    else
+                    {
+                        value = below.highest[(size_t)r * below.cols + c];
+                        isVoid = below.hasVoid[(size_t)r * below.cols + c] != 0;
+                    }
+                    if (value > next.highest[up]) next.highest[up] = value;
+                    if (isVoid) next.hasVoid[up] = 1;
+                }
+            }
+            levels.push_back(std::move(next));
+        }
+    }
+
+    // The highest post in rows firstRow..lastRow and columns firstCol..lastCol (inside the grid),
+    // or higher, and whether any post there may be a void. posts: the grid the pyramid was built from.
+    // Complexity: O(1) -- at most four blocks, or one post at the finest.
+    // Thread-safety: never mutates state; safe to call concurrently.
+    void Highest(const std::vector<int16_t>& posts, int firstRow, int lastRow, int firstCol, int lastCol, int& highestPost, bool& mayHoldVoid) const
+    {
+        int extent = (std::max)(lastRow - firstRow, lastCol - firstCol) + 1;
+        int level = 0;
+        while ((1 << level) < extent) level++;
+        highestPost = INT16_MIN;
+        mayHoldVoid = false;
+        if (level == 0)
+        {
+            int16_t value = posts[(size_t)firstRow * cols + firstCol];
+            mayHoldVoid = value == -32768;
+            if (!mayHoldVoid) highestPost = value;
+            return;
+        }
+        const Level& blocks = levels[level];
+        for (int r = firstRow >> level; r <= (lastRow >> level); r++)
+        {
+            for (int c = firstCol >> level; c <= (lastCol >> level); c++)
+            {
+                highestPost = (std::max)(highestPost, (int)blocks.highest[(size_t)r * blocks.cols + c]);
+                mayHoldVoid = mayHoldVoid || blocks.hasVoid[(size_t)r * blocks.cols + c] != 0;
+            }
+        }
+    }
+
+private:
+    struct Level
+    {
+        int rows, cols;
+        std::vector<int16_t> highest;
+        std::vector<uint8_t> hasVoid;
+    };
+    int cols;                  // of the posts, level 0
+    std::vector<Level> levels; // levels[0] is the posts themselves, kept by the sampler
 };
 
 class RealElevationSampler : public IElevationSampler
@@ -56,6 +142,39 @@ public:
             if (value == -32768) voidCount++;
         }
         window = PostWindow{ 0, size - 1, 0, size - 1 };
+        pyramid = std::make_shared<const PostPyramid>(data, size, size);
+    }
+
+    // A ceiling on every point Sample reads in the box, from the posts it reads there -- the
+    // nearest post to each point, or with bilinear interpolation the four around it, found with
+    // Sample's own arithmetic, as PostsCovering finds them: the highest of those posts, from the
+    // pyramid, and whether any is a void. Bilinear interpolation never leaves the range of its
+    // four posts, so their highest is a ceiling for it too. A box that reaches a post this
+    // sampler doesn't hold -- off the tile, or outside a window -- may have a gap there.
+    // Complexity: O(1). Thread-safety: never mutates state; safe to call concurrently.
+    std::optional<HeightCeiling> CeilingIn(double southLatDeg, double northLatDeg, double westLonDeg, double eastLonDeg) const override
+    {
+        if (!loadedSuccessfully || !pyramid) return std::nullopt;
+        const HeightCeiling unknown{ INFINITY, true };
+        auto rowF = [&](double latitudeDeg) { return (swLat + 1.0 - latitudeDeg) * (size - 1); };
+        auto colF = [&](double longitudeDeg) { return (longitudeDeg - swLon) * (size - 1); };
+        double north = rowF(northLatDeg), south = rowF(southLatDeg), west = colF(westLonDeg), east = colF(eastLonDeg);
+
+        // Off the tile by more than a post, turned inside out, or not a number: nothing to promise.
+        if (!(north > -2.0 && south < size + 1.0 && west > -2.0 && east < size + 1.0 && north <= south && west <= east)) return unknown;
+
+        bool bilinear = mode == InterpolationMode::Bilinear;
+        double firstRow = bilinear ? std::floor(north) : std::round(north);
+        double lastRow = bilinear ? std::floor(south) + 1 : std::round(south);
+        double firstCol = bilinear ? std::floor(west) : std::round(west);
+        double lastCol = bilinear ? std::floor(east) + 1 : std::round(east);
+        if (firstRow < window.firstRow || lastRow > window.lastRow || firstCol < window.firstCol || lastCol > window.lastCol) return unknown;
+
+        int highestPost;
+        bool mayHoldVoid;
+        pyramid->Highest(data, (int)firstRow - window.firstRow, (int)lastRow - window.firstRow,
+            (int)firstCol - window.firstCol, (int)lastCol - window.firstCol, highestPost, mayHoldVoid);
+        return HeightCeiling{ (double)highestPost, mayHoldVoid };
     }
 
     // The posts Sample reads for points inside a box of latitude and longitude, clipped to
@@ -111,6 +230,7 @@ public:
                 if (value == -32768) part.voidCount++;
             }
         }
+        if (!posts.Empty()) part.pyramid = std::make_shared<const PostPyramid>(part.data, posts.lastRow - posts.firstRow + 1, posts.lastCol - posts.firstCol + 1);
         return part;
     }
 
@@ -267,4 +387,5 @@ private:
     InterpolationMode mode = InterpolationMode::Nearest;
     bool loadedSuccessfully = false;
     int voidCount = 0;
+    std::shared_ptr<const PostPyramid> pyramid; // over data, shared by every copy that holds the same posts
 };

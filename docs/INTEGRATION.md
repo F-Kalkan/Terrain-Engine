@@ -39,7 +39,12 @@ constraints directly.
   "Orientation note" in [ENGINE.md](ENGINE.md) describes for the file-backed viewshed PGM output.
   `GetTerrainProfile`/`ComputeLineOfSight` need no changes to use it, proving
   `IElevationSampler` itself was the right abstraction all along; only its
-  implementations were file-shaped.
+  implementations were file-shaped. A host sampler may also answer
+  `IElevationSampler::CeilingIn` -- the highest elevation any point in a box can return,
+  and whether any may be a gap, never understated -- and the naive viewshed then reads only
+  the ground that can decide each line; the tile reader does it with a height pyramid. The
+  raster-block samplers don't answer it, so the naive viewshed reads every sample on them, as
+  it always did, with the same answers either way.
 - **A structured `ComputationStatus`, replacing two separate bools** — `isDegraded`
   and `datumRejected` collapsed several unrelated reasons for "no confident answer"
   into one flag that could not say which one applied. `LineOfSightResult` and

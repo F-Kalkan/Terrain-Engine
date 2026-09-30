@@ -826,6 +826,8 @@ int main(int argc, char* argv[])
     TestACommandLineHeightSaysItsDatum();
     TestFastGridsAndPreparationAreTheSameAtEveryThreadCount();
     TestAGreatCircleArcGivesEveryPointToTheBit();
+    TestTheNaiveViewshedReadsLessAndAnswersTheSame();
+    TestACeilingIsNeverBelowWhatTheSamplerReads();
 
     std::cout << "-------------------------" << std::endl;
 

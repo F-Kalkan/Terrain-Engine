@@ -58,8 +58,9 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
 - **Fast, and measured against exact.** On the machine every figure here comes from (an
   8-core Ryzen 7 3800X; see [docs/ENGINE.md](docs/ENGINE.md)), a 50 km profile takes under half a millisecond;
   a 30 km-radius viewshed (2000 × 2000 cells) about 1.2 seconds on one core and under a fifth
-  of a second on all sixteen threads — some 150 times faster than checking every cell on its
-  own. Over the cells either one finds visible,
+  of a second on all sixteen threads. The exact one, checking every cell's own line, takes
+  about a second on all sixteen: it reads only the ground that can decide each line, with the
+  same answers, to the bit, as reading all of it. Over the cells either one finds visible,
   the two differ on at most 26% at three test observers, almost all of it the boundary
   of the visible region drawn one cell off; under 2% is off that boundary.
 - **Many targets from one place.** Prepared once per observer (1.2 s on one core, a quarter
@@ -72,7 +73,7 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
   minimum visible height, and a prepared observer's preparation run on every core -- about
   ten times as fast for many pairs on 8 cores and 16 threads, six or seven for the fast
   viewshed -- with the same answer, to the bit, as on one.
-- **Tested.** 82 engine tests and 152 app tests, all run by `build.ps1` and by CI on
+- **Tested.** 84 engine tests and 153 app tests, all run by `build.ps1` and by CI on
   every push. Each fix was also checked the other way: the defect put back, and a test
   going red.
 
@@ -113,7 +114,7 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 82-case test suite + demo
+TerrainEngine.exe # run the 84-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed|minheight|observer|pairs> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]

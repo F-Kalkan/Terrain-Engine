@@ -282,8 +282,8 @@ public sealed partial class ViewshedViewModel : ObservableObject
     public void Cancel() => _cancellation?.Cancel();
 
     /// <summary>
-    /// The observer placed on the map. The old result is taken off the map, and a plain fast run
-    /// (no comparison) is redone straight away; anything slower waits for Run.
+    /// The observer placed on the map. The old result is taken off the map, and a plain run -- fast
+    /// or naive, no comparison -- is redone straight away (see CanRunByItself); anything slower waits for Run.
     /// </summary>
     public void PlaceObserver(double latitudeDeg, double longitudeDeg)
     {
@@ -592,8 +592,13 @@ public sealed partial class ViewshedViewModel : ObservableObject
         ? "The observer moved. Run the viewshed again for the new position."
         : "Settings changed. The map shows the last run, faded; run the viewshed again to update it.";
 
-    /// <summary>A plain fast run is quick enough to redo by itself when the observer is placed on the map.</summary>
-    public bool CanRunByItself => Algorithm == ViewshedAlgorithm.Fast && (ShowsHeights || Comparison == ViewshedComparison.None) && CanRun;
+    /// <summary>
+    /// A plain viewshed -- fast, or naive, which reads only the ground that can decide each line and
+    /// takes about a second for 30 km on every core -- is quick enough to redo by itself when the
+    /// observer is placed on the map, and so is the fast minimum visible height. The exact one reads
+    /// every line in full and waits for Run, as does a run compared with another.
+    /// </summary>
+    public bool CanRunByItself => (ShowsHeights ? Algorithm == ViewshedAlgorithm.Fast : Comparison == ViewshedComparison.None) && CanRun;
 
     private void OnSettingChanged(bool observer)
     {

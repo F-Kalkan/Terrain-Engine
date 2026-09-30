@@ -1,6 +1,6 @@
 # The engine's test suite
 
-82 test functions, hand-checkable apart from the real-data comparisons, which hold the
+84 test functions, hand-checkable apart from the real-data comparisons, which hold the
 fast viewshed against naive, the fast minimum visible height against its reference and the
 prepared observer against the line of sight, at several observers:
 
@@ -170,6 +170,18 @@ terrain, decides every answer.
   - *the arc worked out once*: `GreatCircleArc`, which works out an arc's ends once, gives
     every point of 40 arcs -- short and long, every direction, one of no length -- to the bit
     what the old arithmetic, each end's sines and cosines at every point, gave.
+- **The naive viewshed, reading less** (the first skipped without the 1-arcsecond tile):
+  - *the same answers*: with the tile reader's ceilings and without them, every cell the same --
+    at three observers, read nearest and bilinear, for the ground and a target 2,000 m above
+    sea level; past the tile's edge and on a window; on a written tile with a ridge, voids
+    near and far, and a plateau, including a line of 5 m samples that the ridge blocks before
+    it crosses voids 4.4 km out, an eye below its ground and a target inside the plateau;
+    along 60 degrees north, where a line bows into a band of high ground its ends stay south
+    of; on one thread and on all -- with every cell state seen, and less than half the reads;
+  - *a ceiling never too low*: 1,600 random boxes, from metres to tens of kilometres, some past
+    the tile or a window, nearest and bilinear: no point read inside is above the ceiling, and
+    any void or missing point is flagged; one post's box has exactly that post's height, and
+    a box around a void, read from the pyramid's blocks, says a gap may be there.
 - **Data not given, and the data a query reads**:
   - *told apart*: every sampler says a void from ground it wasn't given -- the raster block and
     a view over one (a cell with no value; outside it) and a window of it, the `.hgt` reader (a `-32768` post; off
@@ -281,7 +293,14 @@ preparation on every core: a profile buffer shared by every thread crashes the s
 thread count ignored by the rays, by the cells or by the preparation, progress reported from
 another thread, a first report that isn't of no work done, a stop the rays go on past or the
 first stop ignored, and an arc multiplying
-in another order, each turn a test red. A suite that stays green with the defect restored
-verifies nothing.
+in another order, each turn a test red. And so was the naive viewshed reading less: a ceiling a
+metre low, rows rounded the wrong way, bilinear without the post beyond, voids left out of the
+pyramid, a window's edge unchecked, stretches skipped within a metre of the line, the curvature
+taken at the wrong point, no look further on after a block, no allowance for the arc's bow,
+ceilings never used and an end in the ground unchecked each turn a test red. Three first
+survived -- the voids sat too near the ridge for the look further on to matter, the bow was
+too small at 3 km and 36 degrees, and no target stood inside a plateau -- and the tests were
+built out until each was caught. A suite that stays green with the defect restored verifies
+nothing.
 
 All of the above pass identically in Debug and Release.

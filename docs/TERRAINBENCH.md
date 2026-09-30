@@ -88,8 +88,9 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   past the tile's edge, where there is no data, the summary says so. The legend hides or shows
   each kind of cell, and a slider sets the layer's opacity.
   It runs off the window's thread with progress
-  and a Cancel button. Moving the observer takes the old result off the map (a plain fast
-  run redoes itself when the observer is placed on the map); changing another setting fades
+  and a Cancel button. Moving the observer takes the old result off the map (a plain run redoes
+  itself when the observer is placed on the map -- fast, or naive, which takes 1.1-1.7 s for 30 km
+  on 16 threads; the exact minimum visible height and a compared run wait for Run); changing another setting fades
   it until the next run. **Compare With** marks cells in yellow: either where fast and naive
   disagree on the same run (with the count, ratio and both timings), or every cell that
   changed since the previous run, with the setting that changed (`k: 4/3 → 1e12 changed

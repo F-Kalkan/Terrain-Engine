@@ -10,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <mutex>
+#include <random>
 #include <set>
 #include <thread>
 #include "IElevationSampler.h"
@@ -3857,4 +3858,216 @@ void TestAGreatCircleArcGivesEveryPointToTheBit()
     }
 
     Expect(same && points == 40 * 251, "TestAGreatCircleArcGivesEveryPointToTheBit");
+}
+
+// Reads through another sampler, counting every Sample -- and, unless told to hide them, passing
+// its ceilings on. Hiding them makes the naive viewshed take its exact path for every cell.
+class CeilingPassingSampler : public IElevationSampler
+{
+public:
+    CeilingPassingSampler(IElevationSampler& inner, bool passCeilings) : inner(inner), passCeilings(passCeilings) {}
+
+    std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
+    {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
+        reads++;
+        return inner.Sample(latitudeDeg, longitudeDeg);
+    }
+    VerticalDatum GetDatum() const override { return inner.GetDatum(); }
+    std::optional<HeightCeiling> CeilingIn(double southLatDeg, double northLatDeg, double westLonDeg, double eastLonDeg) const override
+    {
+        if (!passCeilings) return std::nullopt;
+        return inner.CeilingIn(southLatDeg, northLatDeg, westLonDeg, eastLonDeg);
+    }
+
+    std::atomic<long long> reads{ 0 };
+
+private:
+    IElevationSampler& inner;
+    bool passCeilings;
+};
+
+// A 3-arcsecond tile at (36, -112), written to a file and read back: rolling ground around
+// 1000 m; a 1,100 m ridge ~0.9 km east of (36.5, -111.5), and a patch of voids 4.4-5.2 km east
+// behind it, so lines east are blocked and then, well past the ridge, cross a hole; a second
+// patch of voids 1.5-2.2 km south-east; and a 1,100 m plateau 1.8-2.8 km north.
+inline std::string WriteRollingTileWithVoids()
+{
+    const std::string path = "rolling_with_voids.hgt";
+    std::ofstream file(path, std::ios::binary);
+    for (int row = 0; row < 1201; row++)
+    {
+        for (int col = 0; col < 1201; col++)
+        {
+            bool isVoid = (row >= 590 && row <= 610 && col >= 660 && col <= 670) || (row >= 620 && row <= 630 && col >= 620 && col <= 630);
+            bool ridge = row >= 580 && row <= 620 && col >= 612 && col <= 613;
+            bool plateau = row >= 570 && row <= 580 && col >= 560 && col <= 640;
+            int16_t value = isVoid ? (int16_t)-32768 : ridge || plateau ? (int16_t)1100
+                : (int16_t)(1000 + (int)(40 * std::sin(row * 0.05) * std::cos(col * 0.04)) + (col % 97 == 0 ? 25 : 0));
+            unsigned char bytes[2] = { (unsigned char)((value >> 8) & 0xFF), (unsigned char)(value & 0xFF) };
+            file.write((const char*)bytes, 2);
+        }
+    }
+    return path;
+}
+
+// Ground at 100 m, except north of a latitude, where a band stands at 1,000 m. A line along that
+// parallel bows north into the band between its ends, which stay south of it. Its ceilings are
+// exact: 1,000 m for a box reaching into the band, 100 m for one that doesn't.
+class BandSampler : public IElevationSampler
+{
+public:
+    explicit BandSampler(double bandFromLatDeg) : bandFrom(bandFromLatDeg) {}
+
+    std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
+    {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+    ElevationSample Sample(double latitudeDeg, double) override
+    {
+        return ElevationSample{ ElevationData::Present, latitudeDeg > bandFrom ? 1000.0 : 100.0 };
+    }
+    VerticalDatum GetDatum() const override { return VerticalDatum::OrthometricMsl; }
+    std::optional<HeightCeiling> CeilingIn(double, double northLatDeg, double, double) const override
+    {
+        return HeightCeiling{ northLatDeg > bandFrom ? 1000.0 : 100.0, false };
+    }
+
+private:
+    double bandFrom;
+};
+
+//TEST 83
+void TestTheNaiveViewshedReadsLessAndAnswersTheSame()
+{
+    // Where the tile reader puts ceilings on the ground, the naive viewshed reads only the terrain
+    // that can decide each cell. Every cell must still be what it is without them -- the exact
+    // path's answer, to the bit: at three observers on the 1-arcsecond tile, read nearest and
+    // bilinear, for the ground and for a target 2,000 m above sea level (in the ground where
+    // the ground is higher); from an observer whose grid runs past the tile's edge and one on a
+    // window of it; on a tile with a patch of voids beyond ridges that block; from an eye below
+    // its ground; on one thread and on all. And it must really read less.
+    RealElevationSampler fine("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    if (!fine.IsLoaded())
+    {
+        Skip("TestTheNaiveViewshedReadsLessAndAnswersTheSame", "DATA/SRTM1/N36W112.hgt not found from this working directory");
+        return;
+    }
+    const std::string rollingPath = WriteRollingTileWithVoids();
+    RealElevationSampler rolling(rollingPath, 36.0, -112.0);
+    std::remove(rollingPath.c_str());
+    RealElevationSampler bilinear = fine.WithInterpolationMode(InterpolationMode::Bilinear);
+    RealElevationSampler window = fine.Window(fine.PostsCovering(36.53, 36.58, -111.84, -111.79));
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const int size = (int)(2 * MetersToLatitudeDeg(3000.0) / spacingDeg);
+    const DatumHeight ground = Agl(0.0), aircraft{ 2000.0, VerticalDatum::OrthometricMsl }, buried{ 950.0, VerticalDatum::OrthometricMsl };
+
+    struct Case { GeoPoint observer; IElevationSampler* sampler; DatumHeight eye, target; bool countReads; };
+    const Case cases[] = {
+        { { 36.5, -111.5 }, &fine, Agl(2.0), ground, true },
+        { { 36.86361, -111.30861 }, &fine, Agl(2.0), ground, true },
+        { { 36.55861, -111.81361 }, &fine, Agl(2.0), ground, true },
+        { { 36.55861, -111.81361 }, &bilinear, Agl(2.0), ground, false },
+        { { 36.86361, -111.30861 }, &fine, Agl(2.0), aircraft, false },
+        { { 36.02, -111.03 }, &fine, Agl(2.0), ground, false },
+        { { 36.55861, -111.81361 }, &window, Agl(2.0), ground, false },
+        { { 36.5, -111.5 }, &rolling, Agl(2.0), ground, false },
+        { { 36.5, -111.5 }, &rolling, buried, Agl(2.0), false },
+        { { 36.5, -111.5 }, &rolling, Agl(2.0), DatumHeight{ 1050.0, VerticalDatum::OrthometricMsl }, false },
+    };
+
+    bool same = true, readsLess = true;
+    std::set<CellVisibility> states;
+    for (const Case& c : cases)
+    {
+        CeilingPassingSampler exact(*c.sampler, false), reading(*c.sampler, true);
+        auto one = ComputeViewshedNaive(c.observer, c.eye, size, size, spacingDeg, exact, 4.0 / 3.0, nullptr, c.target, 1).visible;
+        auto withCeilings = ComputeViewshedNaive(c.observer, c.eye, size, size, spacingDeg, reading, 4.0 / 3.0, nullptr, c.target, 1).visible;
+        auto allThreads = ComputeViewshedNaive(c.observer, c.eye, size, size, spacingDeg, *c.sampler, 4.0 / 3.0, nullptr, c.target, 0).visible;
+        same = same && withCeilings == one && allThreads == one;
+        for (const auto& row : one) states.insert(row.begin(), row.end());
+        if (c.countReads) readsLess = readsLess && reading.reads * 2 < exact.reads;
+    }
+    bool everyState = states.count(CellVisibility::Visible) && states.count(CellVisibility::NotVisible)
+        && states.count(CellVisibility::Degraded) && states.count(CellVisibility::DataNotGiven);
+
+    // Blocked by the ridge, then across the far voids: a line of 5 m samples out to 6 km, so the
+    // voids lie well past the first 256 samples the walk takes at once, and only the look further
+    // on, once the ridge has blocked, can find them.
+    CeilingPassingSampler rollingExact(rolling, false), rollingReading(rolling, true);
+    const double fineStepDeg = MetersToLatitudeDeg(5.0);
+    auto lineOne = ComputeViewshedNaive(GeoPoint{ 36.5, -111.5 }, Agl(2.0), 1, 2401, fineStepDeg, rollingExact, 4.0 / 3.0, nullptr, ground, 1).visible;
+    bool crossesVoids = std::count(lineOne[0].begin(), lineOne[0].end(), CellVisibility::Degraded) > 0
+        && ComputeViewshedNaive(GeoPoint{ 36.5, -111.5 }, Agl(2.0), 1, 2401, fineStepDeg, rollingReading, 4.0 / 3.0, nullptr, ground, 1).visible == lineOne;
+
+    // At 60 degrees north, over ~22 km along the parallel, a line bows ~16 m north: into a band that
+    // starts 5.5 m north of its ends. The stretch's box must allow for the bow, or it misses the band.
+    // The eye is 100 m up, so the Earth's curvature alone doesn't hide the far cells.
+    BandSampler band(60.0 + 5e-5);
+    CeilingPassingSampler bandExact(band, false), bandReading(band, true);
+    const GeoPoint north60{ 60.0, 10.0 };
+    auto bandOne = ComputeViewshedNaive(north60, Agl(100.0), 41, 41, 0.01, bandExact, 4.0 / 3.0, nullptr, ground, 1).visible;
+    bool bowed = bandOne[20][40] == CellVisibility::NotVisible && bandOne[0][20] == CellVisibility::Visible
+        && ComputeViewshedNaive(north60, Agl(100.0), 41, 41, 0.01, bandReading, 4.0 / 3.0, nullptr, ground, 1).visible == bandOne;
+
+    Expect(same && readsLess && everyState && crossesVoids && bowed, "TestTheNaiveViewshedReadsLessAndAnswersTheSame");
+}
+
+//TEST 84
+void TestACeilingIsNeverBelowWhatTheSamplerReads()
+{
+    // A ceiling may overstate, never understate: in boxes of every size, some reaching past the
+    // tile or a window, no point the tile reader reads inside the box -- nearest or bilinear -- is
+    // above the ceiling, and if any is a void or not given, the ceiling says a gap may be there.
+    // A box around a single post's centre, read nearest, has that post's height as its ceiling.
+    const std::string rollingPath = WriteRollingTileWithVoids();
+    RealElevationSampler rolling(rollingPath, 36.0, -112.0);
+    std::remove(rollingPath.c_str());
+    RealElevationSampler rollingBilinear = rolling.WithInterpolationMode(InterpolationMode::Bilinear);
+    RealElevationSampler window = rolling.Window(PostWindow{ 500, 700, 550, 750 });
+    RealElevationSampler windowBilinear = window.WithInterpolationMode(InterpolationMode::Bilinear);
+    RealElevationSampler* samplers[] = { &rolling, &rollingBilinear, &window, &windowBilinear };
+
+    std::mt19937 random(20260930);
+    std::uniform_real_distribution<double> anywhere(-0.02, 1.02), fraction(0.0, 1.0);
+    bool sound = true;
+    int boxes = 0, gapsSeen = 0;
+    for (RealElevationSampler* sampler : samplers)
+    {
+        for (int b = 0; b < 400; b++, boxes++)
+        {
+            double sizeDeg = std::pow(10.0, -4.5 + 3.0 * fraction(random)); // a few metres to tens of kilometres
+            double south = 36.0 + anywhere(random), west = -112.0 + anywhere(random);
+            double north = south + sizeDeg * fraction(random), east = west + sizeDeg * fraction(random);
+            std::optional<HeightCeiling> ceiling = sampler->CeilingIn(south, north, west, east);
+            if (!ceiling) { sound = false; continue; }
+            bool gap = false;
+            for (int i = 0; i <= 16; i++)
+            {
+                for (int j = 0; j <= 16; j++)
+                {
+                    double lat = i == 16 ? north : south + (north - south) * (i + (i > 0 ? fraction(random) - 0.5 : 0.0)) / 16;
+                    double lon = j == 16 ? east : west + (east - west) * (j + (j > 0 ? fraction(random) - 0.5 : 0.0)) / 16;
+                    ElevationSample read = sampler->Sample(lat, lon);
+                    if (read.data != ElevationData::Present) gap = true;
+                    else sound = sound && read.elevationM <= ceiling->highestM;
+                }
+            }
+            gapsSeen += gap ? 1 : 0;
+            sound = sound && (!gap || ceiling->mayHaveGap);
+        }
+    }
+
+    // One post's centre, nearest: exactly that post. And a box over a few posts around a void -- read from
+    // the pyramid's blocks, not the posts -- says a gap may be there.
+    double latitude = 37.0 - 600.0 / 1200, longitude = -112.0 + 610.0 / 1200, onVoidLongitude = -112.0 + 666.0 / 1200;
+    std::optional<HeightCeiling> single = rolling.CeilingIn(latitude, latitude, longitude, longitude);
+    std::optional<HeightCeiling> onVoid = rolling.CeilingIn(latitude, latitude, onVoidLongitude - 2.0 / 1200, onVoidLongitude + 2.0 / 1200);
+    bool tight = single && !single->mayHaveGap && single->highestM == *rolling.GetElevation(latitude, longitude)
+        && onVoid && onVoid->mayHaveGap && rolling.Sample(latitude, onVoidLongitude).data == ElevationData::Void;
+
+    Expect(sound && tight && gapsSeen > 50 && boxes == 1600, "TestACeilingIsNeverBelowWhatTheSamplerReads");
 }
