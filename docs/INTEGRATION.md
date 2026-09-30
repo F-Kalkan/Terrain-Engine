@@ -75,7 +75,7 @@ constraints directly.
   Every public entry point in `TerrainCore`/`TerrainReader` that runs per frame or
   handles a collection now documents its Big-O and its thread-safety guarantee in a
   comment directly above it — e.g. `ComputeViewshedNaive` states
-  O(gridRows × gridCols × samples per profile) and single-thread-only, and
+  O(gridRows × gridCols × samples per profile) and the thread count it takes, and
   `GetTerrainProfile`'s scratch-buffer overload states its O(sample count) and the
   condition under which concurrent callers are safe.
 - **A stated threading position for the viewshed** — both viewsheds are
@@ -89,9 +89,12 @@ constraints directly.
   answers every cell on its own from the finished rays. (It once applied rays to the grid in a fixed order with the last ray to visit
   a cell winning, a reduction that was deterministic only because the order never
   varied; answering each cell from its own centre removed it -- see `NOTES.md`,
-  "A fast viewshed that asks naive's question".) The fast viewshed stays on one thread:
-  it takes under two seconds for 30 km, and a viewshed is a planning-time cost. The comment
-  above each function in `Viewshed.h` states its position.
+  "A fast viewshed that asks naive's question".) Both phases are independent work, so the fast
+  viewshed, the fast minimum visible height and a prepared observer's preparation take a thread
+  count too, the same to the bit at any count
+  (`TestFastGridsAndPreparationAreTheSameAtEveryThreadCount`): 30 km in ~1.2 s on one thread,
+  ~0.18 s on sixteen. The library defaults to one thread, so a host with threads of its own
+  decides. The comment above each function in `Viewshed.h` states its position.
 - **A frame-safe line-of-sight path vs. a batch viewshed path, labelled in the
   headers** — the split already existed structurally (the scratch-buffer overload
   above is the frame-safe half; the viewsheds and `ComputeBatchLineOfSight` were

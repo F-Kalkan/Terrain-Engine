@@ -1,6 +1,6 @@
 # The engine's test suite
 
-80 test functions, hand-checkable apart from the real-data comparisons, which hold the
+82 test functions, hand-checkable apart from the real-data comparisons, which hold the
 fast viewshed against naive, the fast minimum visible height against its reference and the
 prepared observer against the line of sight, at several observers:
 
@@ -159,7 +159,17 @@ terrain, decides every answer.
     targets is an empty answer;
   - *the exact grids*: the naive viewshed and the exact minimum visible height over 1 km, the
     same grid to the bit on 1, 2, 3 threads and one per hardware thread, progress reported on
-    the calling thread only, and a stop at the first report stopping every thread.
+    the calling thread only, and a stop at the first report stopping every thread;
+  - *the fast grids and a prepared observer*: over 3 km, the fast viewshed -- for the ground,
+    for a target 2,000 m above sea level, and from an observer whose grid runs past the tile's
+    edge -- the fast minimum visible height and a prepared observer's tables, the same to the
+    bit on 1, 2, 3, 7 threads and one per hardware thread; three threads asked for, three cast
+    the rays, three answer the cells and three prepare the observer, each phase counted on its
+    own; progress on the calling thread only, the first report of each run of no work done even
+    when other threads take the first rays or rows, and a stop at the first report stopping them;
+  - *the arc worked out once*: `GreatCircleArc`, which works out an arc's ends once, gives
+    every point of 40 arcs -- short and long, every direction, one of no length -- to the bit
+    what the old arithmetic, each end's sines and cosines at every point, gave.
 - **Data not given, and the data a query reads**:
   - *told apart*: every sampler says a void from ground it wasn't given -- the raster block and
     a view over one (a cell with no value; outside it) and a window of it, the `.hgt` reader (a `-32768` post; off
@@ -266,7 +276,12 @@ checks the view too now. And so were heights in every datum: the fast viewshed s
 target in the ground or out of an eye in it, the fast minimum visible height and the prepared
 observer seeing out of it, and the command line reading `msl` as above the ground or letting
 `hae` go without its undulation, each turn one of these tests red; through the DLL and the
-app, `DatumTests` catches each surface's own. A suite that stays green with the defect
-restored verifies nothing.
+app, `DatumTests` catches each surface's own. And so were the fast grids and the
+preparation on every core: a profile buffer shared by every thread crashes the suite, and a
+thread count ignored by the rays, by the cells or by the preparation, progress reported from
+another thread, a first report that isn't of no work done, a stop the rays go on past or the
+first stop ignored, and an arc multiplying
+in another order, each turn a test red. A suite that stays green with the defect restored
+verifies nothing.
 
 All of the above pass identically in Debug and Release.

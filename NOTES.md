@@ -523,6 +523,45 @@ into or out of the ground -- 11 and 13 cells against naive on the new test's gri
 was reachable from the surfaces before; making it reachable is what showed it. Each fast
 algorithm now asks it outright, and agrees with naive.
 
+## Update: the fast grids on every core, and an arc worked out once
+
+The question was whether the viewshed could be faster. The ways to make it faster range from
+threads to GPUs, and from the same answer to a different one. Five decisions.
+
+**Only speed-ups that keep every bit.** A GPU, SIMD, a local flat-Earth approximation,
+reading the terrain in batches, XDraw, reference planes and a radial sweep can each be
+faster, and each would move answers -- in the last digits, or on whole cells -- and take with
+them the determinism the library promises and the tests that hold fast against naive. What
+was done instead changes nothing the engine answers: the fast grids and a prepared observer's
+preparation run on every core, and a profile works out its arc's ends once. A scratch program
+fingerprinting every byte of profiles, grids and a prepared observer gave the same fingerprint
+before and after, at every thread count.
+
+**The rays gathered in one thread's order.** Each ray goes into its own place and they are
+gathered in the order one thread would have cast them, then sorted. With every ray's direction
+different the sort alone would give the same order anyway, but gathering first means nothing
+has to be argued about ties. A preparation's first ray is cast on the calling thread, because
+its sample count sets every ray's; the rest follow in blocks.
+
+**One thread by default.** The library leaves the thread count to its caller, as the naive
+viewshed already did: a real-time host has threads of its own and may not want the engine
+taking every core. The DLL and the command line ask for every core, and the benchmarks run at
+1, 2, 4, 8 and 16 threads, checking each against one thread.
+
+**The arc was worth less than expected.** Working out the arc's ends once was estimated at
+about 20%. Measured in a program built for nothing else, before and after, alternately on
+the same day, it is ~4% on a profile and the fast viewshed and ~12% on the naive viewshed. The
+CLI's figures fell by more, 20-35%, and most of that is how the compiler lays out the CLI's
+one big translation unit -- the effect "Performance" in docs/ENGINE.md already describes.
+Both are recorded, and which is which.
+
+**Six or seven times, and the naive viewshed still slow.** Sixteen threads make the fast
+viewshed six or seven times as fast, not sixteen: the runs are a fifth of a second, and
+sorting the rays, gathering them and laying out the grid stay on one thread. The naive
+viewshed, already on every core, gained only the arc's ~12%: 30 km is still over twenty
+seconds on sixteen threads. Making it much faster without changing its answers needs it to
+read less terrain -- skipping stretches that can't block a line -- which is a change of its own.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

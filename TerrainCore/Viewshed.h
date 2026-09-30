@@ -88,8 +88,9 @@ using ViewshedProgress = std::function<bool(double fractionDone)>;
 
 // Runs rowWork(row, thread) once for every row in [0, gridRows), spread over
 // ThreadsFor(threadCount) threads, each taking the next row not yet taken. Progress is
-// reported on the calling thread only -- before each row it takes, with the fraction of rows
-// taken so far -- so a callback never runs on a thread its caller didn't start. A progress
+// reported on the calling thread only -- 0 before any thread starts, then before each later row
+// it takes, with the fraction of rows taken so far -- so a callback never runs on a thread its
+// caller didn't start, and the first report is always of no work done. A progress
 // report that returns false stops every thread before its next row, and false is returned.
 // At one thread this is a plain loop over the rows, reporting before each.
 //
@@ -97,6 +98,10 @@ using ViewshedProgress = std::function<bool(double fractionDone)>;
 template <class RowWork>
 bool ForEachRowOnThreads(int gridRows, int threadCount, const ViewshedProgress& progress, RowWork&& rowWork)
 {
+    // 0 is reported before any thread starts: the other threads may take the first rows before
+    // the calling thread takes one, and a report of the work done must still begin at none.
+    if (gridRows > 0 && progress && !progress(0.0)) return false;
+
     std::atomic<int> nextRow{ 0 };
     std::atomic<bool> stopped{ false };
     RunOnThreads(ThreadsFor(threadCount), [&](int thread, const std::atomic<bool>& failed) {
@@ -104,7 +109,7 @@ bool ForEachRowOnThreads(int gridRows, int threadCount, const ViewshedProgress& 
         {
             int row = nextRow.fetch_add(1, std::memory_order_relaxed);
             if (row >= gridRows) return;
-            if (thread == 0 && progress && !progress((double)row / gridRows))
+            if (thread == 0 && row > 0 && progress && !progress((double)row / gridRows))
             {
                 stopped = true;
                 return;
@@ -251,20 +256,23 @@ inline double CurvatureAdjustedSlope(double heightM, double eyeM, double dM, dou
 // how high a target must stand to be seen.
 //
 // Returns false, leaving the cells partly answered, when progress asked it to stop.
-// Progress: reported before every 16th ray and before every grid row of the answering
-// pass. `cells` must already be gridRows x gridCols.
+// Progress: 0 first, then before every block of 16 rays and every grid row of the answering pass
+// the calling thread takes. `cells` must already be gridRows x gridCols.
 //
 // Complexity: O(gridRows + gridCols) rays, each O(samples per profile) to cast;
 // then O(log rays + 1) per cell. Memory: one float per ray sample, about
 // 4 * gridSize * gridSize * 0.7 of them -- ~45 MB for a 30 km radius at 30 m.
 //
-// Threading position: single-thread-only as written, but order-independent: every
-// ray is cast on its own, and every cell is then answered on its own from the
-// finished rays, so no cell's answer depends on the order anything was visited in.
-// Either loop could be split across threads without changing a single cell.
-// Thread-safety: single-thread-only. Calls the non-thread-affine sampler sequentially.
+// Threads: threadCount at a time, 1 by default, 0 for one per hardware thread. Rays are
+// taken sixteen at a time, each cast on its own into its own place, and gathered in the same
+// order as on one thread before they are sorted; cells are then taken a row at a time
+// (ForEachRowOnThreads), each answered on its own from the finished rays. Nothing depends on
+// which thread did what, or in what order, so every cell is the same, bit for bit, at any
+// thread count. answerCell runs on several threads at once and must write only its own cell;
+// the sampler is read from every thread at once and must allow it, as every sampler in this
+// library does. Progress is reported on the calling thread only.
 template <class AnswerCell>
-bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k, const ViewshedProgress& progress, std::vector<std::vector<CellVisibility>>& cells, AnswerCell&& answerCell)
+bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k, const ViewshedProgress& progress, std::vector<std::vector<CellVisibility>>& cells, AnswerCell&& answerCell, int threadCount = 1)
 {
     int centerRow = gridRows / 2;
     int centerCol = gridCols / 2;
@@ -299,39 +307,69 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
     }
 
     const double workUnits = (double)ends.size() + gridRows;
+    const int threads = ThreadsFor(threadCount);
+
+    // Every ray into its own place, sixteen at a time from a shared counter, each thread with
+    // its own profile buffer. The calling thread reports progress before each block it takes.
+    std::vector<Ray> cast(ends.size());
+    std::vector<char> wasCast(ends.size(), 0);
+    std::vector<std::vector<ProfileSample>> profiles(threads);
+    std::atomic<size_t> nextRay{ 0 };
+    std::atomic<bool> stopped{ false };
+    const size_t block = 16;
+    // 0 before any thread starts, as ForEachRowOnThreads reports it.
+    if (progress && !progress(0.0)) return false;
+    RunOnThreads(threads, [&](int thread, const std::atomic<bool>& failed) {
+        std::vector<ProfileSample>& profile = profiles[thread];
+        while (!stopped.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed))
+        {
+            size_t first = nextRay.fetch_add(block, std::memory_order_relaxed);
+            if (first >= ends.size()) return;
+            if (thread == 0 && first > 0 && progress && !progress(first / workUnits))
+            {
+                stopped = true;
+                return;
+            }
+            for (size_t i = first; i < (std::min)(first + block, ends.size()); i++)
+            {
+                auto [row, col] = ends[i];
+                if (row == centerRow && col == centerCol) continue;
+
+                GetTerrainProfile(observer, cellCentre(row, col), spacingDeg, sampler, profile);
+                Ray& ray = cast[i];
+                ray.direction = directionOf(row, col);
+                ray.stepM = profile.back().distanceFromStartM / (profile.size() - 1);
+                ray.horizon.reserve(profile.size() - 1);
+                double horizon = -INFINITY;
+                for (size_t s = 1; s < profile.size(); s++)
+                {
+                    double dM = profile[s].distanceFromStartM;
+                    if (profile[s].dataNotGiven)
+                    {
+                        ray.firstNotGivenM = (std::min)(ray.firstNotGivenM, dM);
+                    }
+                    else if (!profile[s].elevationM.has_value())
+                    {
+                        ray.firstVoidM = (std::min)(ray.firstVoidM, dM);
+                    }
+                    else
+                    {
+                        horizon = (std::max)(horizon, CurvatureAdjustedSlope(*profile[s].elevationM, observerEyeHeightM, dM, k));
+                    }
+                    ray.horizon.push_back((float)horizon);
+                }
+                wasCast[i] = 1;
+            }
+        }
+    });
+    if (stopped) return false;
+
+    // Gathered in the order one thread would have cast them.
     std::vector<Ray> rays;
     rays.reserve(ends.size());
     for (size_t i = 0; i < ends.size(); i++)
     {
-        if (progress && i % 16 == 0 && !progress(i / workUnits)) return false;
-
-        auto [row, col] = ends[i];
-        if (row == centerRow && col == centerCol) continue;
-
-        std::vector<ProfileSample> profile = GetTerrainProfile(observer, cellCentre(row, col), spacingDeg, sampler);
-        Ray ray;
-        ray.direction = directionOf(row, col);
-        ray.stepM = profile.back().distanceFromStartM / (profile.size() - 1);
-        ray.horizon.reserve(profile.size() - 1);
-        double horizon = -INFINITY;
-        for (size_t s = 1; s < profile.size(); s++)
-        {
-            double dM = profile[s].distanceFromStartM;
-            if (profile[s].dataNotGiven)
-            {
-                ray.firstNotGivenM = (std::min)(ray.firstNotGivenM, dM);
-            }
-            else if (!profile[s].elevationM.has_value())
-            {
-                ray.firstVoidM = (std::min)(ray.firstVoidM, dM);
-            }
-            else
-            {
-                horizon = (std::max)(horizon, CurvatureAdjustedSlope(*profile[s].elevationM, observerEyeHeightM, dM, k));
-            }
-            ray.horizon.push_back((float)horizon);
-        }
-        rays.push_back(std::move(ray));
+        if (wasCast[i]) rays.push_back(std::move(cast[i]));
     }
     // By direction, so the two rays either side of any cell are neighbours in the list.
     std::sort(rays.begin(), rays.end(), [](const Ray& a, const Ray& b) { return a.direction < b.direction; });
@@ -345,10 +383,9 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
 
     const double pi = 3.14159265358979323846;
     const double halfCellM = EarthRadiusM * DegToRad * spacingDeg / 2;
-    for (int row = 0; row < gridRows; row++)
-    {
-        if (progress && !progress((ends.size() + row) / workUnits)) return false;
-
+    ViewshedProgress rowProgress;
+    if (progress) rowProgress = [&](double rowsTaken) { return progress((ends.size() + rowsTaken * gridRows) / workUnits); };
+    return ForEachRowOnThreads(gridRows, threadCount, rowProgress, [&](int row, int) {
         for (int col = 0; col < gridCols; col++)
         {
             if (row == centerRow && col == centerCol) continue;
@@ -390,8 +427,7 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
 
             answerCell(row, col, ground.elevationM, dM, horizon);
         }
-    }
-    return true;
+    });
 }
 
 // The fast viewshed: every cell answered from its own centre -- its own ground, its
@@ -406,10 +442,10 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
 // docs/ENGINE.md and NOTES.md, "A fast viewshed that asks naive's question".
 //
 // Complexity, memory and threading: those of AnswerEachCellFromFastHorizons.
-// Thread-safety: single-thread-only. Calls the non-thread-affine sampler sequentially.
+// Threads (optional): as for AnswerEachCellFromFastHorizons -- the same cells at any thread count.
 // Progress (optional): as AnswerEachCellFromFastHorizons reports it, then once at the end.
 // Target height (optional): as for ComputeViewshedNaive.
-inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround })
+inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, DatumHeight targetHeight = DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, int threadCount = 1)
 {
     ViewshedResult result;
 
@@ -457,7 +493,7 @@ inline ViewshedResult ComputeViewshedFast(GeoPoint observer, DatumHeight observe
             double targetM = *EyeHeightInTerrainDatum(targetHeight, groundM, terrainDatum);
             bool isVisible = eyeAboveGround && targetM >= groundM && CurvatureAdjustedSlope(targetM, observerEyeHeightM, dM, k) >= horizon;
             result.visible[row][col] = isVisible ? CellVisibility::Visible : CellVisibility::NotVisible;
-        });
+        }, threadCount);
     if (!finished)
     {
         result.cancelled = true;

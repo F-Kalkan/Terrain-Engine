@@ -3695,3 +3695,166 @@ void TestACommandLineHeightSaysItsDatum()
 
     Expect(accepted && refused && worded, "TestACommandLineHeightSaysItsDatum");
 }
+
+// As ThreadRecordingSampler, but only until `answering` is set: the threads that read the terrain
+// while a fast viewshed casts its rays, before it answers any cell.
+class RaysOnlyRecordingSampler : public IElevationSampler
+{
+public:
+    RaysOnlyRecordingSampler(IElevationSampler& inner, const std::atomic<bool>& answering) : inner(inner), answering(answering) {}
+
+    std::optional<double> GetElevation(double latitudeDeg, double longitudeDeg) override
+    {
+        return ElevationOf(Sample(latitudeDeg, longitudeDeg));
+    }
+    ElevationSample Sample(double latitudeDeg, double longitudeDeg) override
+    {
+        if (!answering)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            threads.insert(std::this_thread::get_id());
+        }
+        return inner.Sample(latitudeDeg, longitudeDeg);
+    }
+    VerticalDatum GetDatum() const override { return inner.GetDatum(); }
+
+    size_t ThreadsSeen() const { return threads.size(); }
+
+private:
+    IElevationSampler& inner;
+    const std::atomic<bool>& answering;
+    std::mutex mutex;
+    std::set<std::thread::id> threads;
+};
+
+//TEST 81
+void TestFastGridsAndPreparationAreTheSameAtEveryThreadCount()
+{
+    // The fast viewshed -- for the ground, for a target 2,000 m above sea level, and from an
+    // observer whose grid runs past the tile's edge -- the fast minimum visible height and a
+    // prepared observer's tables, over 3 km on the 1-arcsecond tile, on 1, 2, 3, 7 threads and
+    // one per hardware thread: the same to the bit every time. Three threads asked for, three
+    // read the terrain. Progress is reported only on the calling thread, and a stop asked for
+    // at the first report stops every thread.
+    RealElevationSampler sampler("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
+    if (!sampler.IsLoaded())
+    {
+        Skip("TestFastGridsAndPreparationAreTheSameAtEveryThreadCount", "DATA/SRTM1/N36W112.hgt not found from this working directory");
+        return;
+    }
+    const double spacingDeg = MetersToLatitudeDeg(30.0);
+    const GeoPoint observer{ 36.55861, -111.81361 }, nearTheEdge{ 36.02, -111.03 };
+    const int size = (int)(2 * MetersToLatitudeDeg(3000.0) / spacingDeg);
+    const DatumHeight ground = Agl(0.0), aircraft{ 2000.0, VerticalDatum::OrthometricMsl };
+
+    auto fast = [&](GeoPoint at, DatumHeight target, int threads, const ViewshedProgress& progress, IElevationSampler& s) {
+        return ComputeViewshedFast(at, Agl(2.0), size, size, spacingDeg, s, 4.0 / 3.0, progress, target, threads).visible;
+    };
+    auto heights = [&](int threads, const ViewshedProgress& progress) {
+        return ComputeMinimumVisibleHeightFast(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, progress, threads);
+    };
+    auto prepare = [&](int threads, const ViewshedProgress& progress, IElevationSampler& s) {
+        return PrepareObserver(observer, Agl(2.0), 3000.0, spacingDeg, s, 4.0 / 3.0, 0, progress, threads);
+    };
+    auto sameTables = [](const PreparedObserver& a, const PreparedObserver& b) {
+        return a.samplesPerRay == b.samplesPerRay && a.stepM == b.stepM && a.horizon == b.horizon
+            && a.firstVoidM == b.firstVoidM && a.firstNotGivenM == b.firstNotGivenM;
+    };
+
+    auto groundOne = fast(observer, ground, 1, nullptr, sampler);
+    auto aircraftOne = fast(observer, aircraft, 1, nullptr, sampler);
+    auto edgeOne = fast(nearTheEdge, ground, 1, nullptr, sampler);
+    MinimumVisibleHeightResult heightsOne = heights(1, nullptr);
+    PreparedObserver preparedOne = prepare(1, nullptr, sampler);
+    int edgeCells = 0;
+    for (const auto& row : edgeOne) edgeCells += (int)std::count(row.begin(), row.end(), CellVisibility::DataNotGiven);
+
+    // Each run's reports come from the calling thread, and the first is of no work done -- even
+    // when the other threads take the first rays or rows before the calling thread takes any.
+    bool same = edgeCells > 0 && groundOne != aircraftOne, reportedHere = true, startsAtZero = true;
+    const auto caller = std::this_thread::get_id();
+    auto newProgress = [&]() {
+        auto reported = std::make_shared<bool>(false);
+        return ViewshedProgress([&, reported](double fraction) {
+            reportedHere = reportedHere && std::this_thread::get_id() == caller;
+            startsAtZero = startsAtZero && (*reported || fraction == 0.0);
+            *reported = true;
+            return true;
+        });
+    };
+    for (int threads : { 2, 3, 7, 0 })
+    {
+        same = same && fast(observer, ground, threads, newProgress(), sampler) == groundOne
+            && fast(observer, aircraft, threads, newProgress(), sampler) == aircraftOne
+            && fast(nearTheEdge, ground, threads, newProgress(), sampler) == edgeOne
+            && SameMinimumVisibleHeights(heights(threads, newProgress()), heightsOne)
+            && sameTables(prepare(threads, newProgress(), sampler), preparedOne);
+    }
+
+    // Three threads asked for: three cast the fast viewshed's rays -- the threads that read the
+    // terrain before any cell is answered -- three answer its cells, and three cast a prepared
+    // observer's rays. Each phase starts threads of its own, so each is counted on its own.
+    std::atomic<bool> answering{ false };
+    RaysOnlyRecordingSampler rayReaders(sampler, answering);
+    std::mutex answerLock;
+    std::set<std::thread::id> answerers;
+    std::vector<std::vector<CellVisibility>> cells(size, std::vector<CellVisibility>(size, CellVisibility::NotCovered));
+    AnswerEachCellFromFastHorizons(observer, 1000.0, size, size, spacingDeg, rayReaders, 4.0 / 3.0, nullptr, cells,
+        [&](int, int, double, double, double) {
+            answering = true;
+            std::lock_guard<std::mutex> lock(answerLock);
+            answerers.insert(std::this_thread::get_id());
+        }, 3);
+    ThreadRecordingSampler preparers(sampler);
+    prepare(3, nullptr, preparers);
+    bool threaded = rayReaders.ThreadsSeen() == 3 && answerers.size() == 3 && preparers.ThreadsSeen() == 3;
+
+    int gridReports = 0, rayReports = 0;
+    ViewshedResult stoppedGrid = ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0,
+        [&](double) { gridReports++; return false; }, ground, 0);
+    PreparedObserver stoppedRays = prepare(0, [&](double) { rayReports++; return false; }, sampler);
+    bool stops = stoppedGrid.cancelled && gridReports == 1 && stoppedRays.cancelled && rayReports == 1;
+
+    Expect(same && reportedHere && startsAtZero && threaded && stops, "TestFastGridsAndPreparationAreTheSameAtEveryThreadCount");
+}
+
+//TEST 82
+void TestAGreatCircleArcGivesEveryPointToTheBit()
+{
+    // GreatCircleArc works out the sines and cosines of an arc's ends once, where every point
+    // used to take ten of them; every profile, ray and viewshed rests on it. Written out here as
+    // it was -- each end's trigonometry at every point -- the old arithmetic must give every
+    // point, to the bit, over arcs short and long, in every direction, and a degenerate one.
+    auto workedOut = [](GeoPoint a, GeoPoint b, double t, double centralAngleRad) {
+        if (centralAngleRad < 1e-12) return a;
+        double lat1Rad = a.latitudeDeg * DegToRad, lon1Rad = a.longitudeDeg * DegToRad;
+        double lat2Rad = b.latitudeDeg * DegToRad, lon2Rad = b.longitudeDeg * DegToRad;
+        double sinAngle = sin(centralAngleRad);
+        double coeffA = sin((1.0 - t) * centralAngleRad) / sinAngle;
+        double coeffB = sin(t * centralAngleRad) / sinAngle;
+        double x = coeffA * cos(lat1Rad) * cos(lon1Rad) + coeffB * cos(lat2Rad) * cos(lon2Rad);
+        double y = coeffA * cos(lat1Rad) * sin(lon1Rad) + coeffB * cos(lat2Rad) * sin(lon2Rad);
+        double z = coeffA * sin(lat1Rad) + coeffB * sin(lat2Rad);
+        return GeoPoint{ atan2(z, sqrt(x * x + y * y)) / DegToRad, atan2(y, x) / DegToRad };
+    };
+    auto sameBits = [](double a, double b) { return std::memcmp(&a, &b, sizeof a) == 0; };
+
+    bool same = true;
+    int points = 0;
+    for (int arcIndex = 0; arcIndex < 40; arcIndex++)
+    {
+        GeoPoint a{ 36.5 + 0.2 * std::sin(arcIndex * 1.3), -111.5 + 0.3 * std::cos(arcIndex * 0.7) };
+        GeoPoint b = arcIndex == 0 ? a : GreatCircleDestination(a, arcIndex * 0.61, 10.0 + arcIndex * arcIndex * 60.0);
+        double angle = GreatCircleDistanceM(a, b) / EarthRadiusM;
+        const GreatCircleArc arc(a, b, angle);
+        for (int i = 0; i <= 250; i++, points++)
+        {
+            double t = (double)i / 250;
+            GeoPoint fast = arc.At(t), slow = workedOut(a, b, t, angle);
+            same = same && sameBits(fast.latitudeDeg, slow.latitudeDeg) && sameBits(fast.longitudeDeg, slow.longitudeDeg)
+                && sameBits(GreatCircleInterpolate(a, b, t, angle).latitudeDeg, slow.latitudeDeg);
+        }
+    }
+
+    Expect(same && points == 40 * 251, "TestAGreatCircleArcGivesEveryPointToTheBit");
+}

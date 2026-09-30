@@ -347,9 +347,9 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightReference(GeoPoint 
 //
 // Complexity: ComputeViewshedFast's, plus a few O(1) tests per cell whose ground isn't
 // seen. Memory: ComputeViewshedFast's rays, and two doubles and a state per cell.
-// Thread-safety: single-thread-only; order-independent, as ComputeViewshedFast.
+// Threads (optional): as ComputeViewshedFast -- the same cells and heights at any thread count.
 // Progress (optional): as ComputeViewshedFast reports it.
-inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr)
+inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint observer, DatumHeight observerHeight, int gridRows, int gridCols, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, const ViewshedProgress& progress = nullptr, int threadCount = 1)
 {
     MinimumVisibleHeightResult result;
 
@@ -390,7 +390,7 @@ inline MinimumVisibleHeightResult ComputeMinimumVisibleHeightFast(GeoPoint obser
             result.state[row][col] = heightM == 0.0 ? CellVisibility::Visible : CellVisibility::NotVisible;
             result.heightAboveGroundM[row][col] = heightM;
             result.groundM[row][col] = groundM;
-        });
+        }, threadCount);
     if (!finished)
     {
         result.cancelled = true;

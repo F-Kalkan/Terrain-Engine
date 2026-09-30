@@ -13,6 +13,7 @@
 #include "CliArguments.h"
 #include <fstream>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 
 // Every allocation this executable makes through operator new goes through here and is
@@ -74,6 +75,12 @@ void RunWallTimeBenchmark(const std::string& hgtPath, const std::string& tileLab
     auto end2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> fastTime = end2 - start2;
     std::cout << radiusKm << "km fast viewshed (" << gridSize << "x" << gridSize << "), Time: " << fastTime.count() << " ms" << std::endl;
+
+    auto startAll = std::chrono::high_resolution_clock::now();
+    ViewshedResult fastAll = ComputeViewshedFast(viewshedObserver, agl2m, gridSize, gridSize, spacingInDegrees, sampler, 4.0 / 3.0, nullptr, DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, 0);
+    std::chrono::duration<double, std::milli> fastAllTime = std::chrono::high_resolution_clock::now() - startAll;
+    std::cout << radiusKm << "km fast viewshed on " << ThreadsFor(0) << " threads, Time: " << fastAllTime.count() << " ms"
+        << (fastAll.visible == fastResult.visible ? ", the same cells" : ", DIFFERENT CELLS") << std::endl;
 
     auto startHeights = std::chrono::high_resolution_clock::now();
     MinimumVisibleHeightResult heights = ComputeMinimumVisibleHeightFast(viewshedObserver, agl2m, gridSize, gridSize, spacingInDegrees, sampler);
@@ -167,6 +174,34 @@ bool ReadHeightArg(char* argv[], int index, const char* name, DatumHeight& out)
 
 // The library refuses a path it can't sample -- a latitude past a pole, a spacing so fine
 // the sample count overflows. Say why and stop, rather than print an answer about nothing.
+// Runs compute(threads) again on 2, 4, 8 and every hardware thread, after the one-thread run
+// the caller timed, printing each run's time and whether it matches that run to the bit
+// (same(result)). The one-thread run stays the one whose time and memory are recorded.
+template <class Compute, class Same>
+void BenchmarkThreadCounts(double oneThreadMs, Compute&& compute, Same&& same)
+{
+    std::cout << "1 thread(s): " << oneThreadMs << " ms" << std::endl;
+    for (int threads : { 2, 4, 8, 0 })
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        auto result = compute(threads);
+        std::chrono::duration<double, std::milli> elapsed = std::chrono::high_resolution_clock::now() - start;
+        std::cout << ThreadsFor(threads) << " thread(s): " << elapsed.count() << " ms, speed-up " << oneThreadMs / elapsed.count()
+            << "x, " << (same(result) ? "the same as on one thread" : "DIFFERENT FROM ONE THREAD") << std::endl;
+    }
+}
+
+// Two grids of doubles the same to the bit, NaNs included.
+bool SameBits(const std::vector<std::vector<double>>& a, const std::vector<std::vector<double>>& b)
+{
+    if (a.size() != b.size()) return false;
+    for (size_t row = 0; row < a.size(); row++)
+    {
+        if (a[row].size() != b[row].size() || std::memcmp(a[row].data(), b[row].data(), a[row].size() * sizeof(double)) != 0) return false;
+    }
+    return true;
+}
+
 bool PathCanBeSampled(GeoPoint a, GeoPoint b, double spacing)
 {
     InputProblem problem = CheckProfileRequest(a, b, spacing);
@@ -317,7 +352,8 @@ int main(int argc, char* argv[])
             }
             
             GeoPoint observer{ obsLat, obsLon };
-            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k, nullptr, targetHeight);
+            // On every core: the same cells as on one, sooner.
+            ViewshedResult result = ComputeViewshedFast(observer, heightDatum, gridSize, gridSize, spacing, sampler, k, nullptr, targetHeight, 0);
             if (result.inputProblem != InputProblem::None)
             {
                 std::cout << "Error: " << InputProblemToString(result.inputProblem) << std::endl;
@@ -552,6 +588,9 @@ int main(int argc, char* argv[])
                 std::cout << "Viewshed benchmark: 30km radius @ 30m data (" << gridSize << "x" << gridSize << ")" << std::endl;
                 std::cout << "Wall time: " << elapsed.count() << " ms" << std::endl;
                 std::cout << "Peak memory: " << peakMB << " MB" << std::endl;
+                BenchmarkThreadCounts(elapsed.count(),
+                    [&](int threads) { return ComputeViewshedFast(observer, agl2m, gridSize, gridSize, spacingInDegrees, sampler, 4.0 / 3.0, nullptr, DatumHeight{ 0.0, VerticalDatum::HeightAboveGround }, threads); },
+                    [&](const ViewshedResult& other) { return other.visible == result.visible; });
                 return 0;
             }
 
@@ -575,6 +614,11 @@ int main(int argc, char* argv[])
                 std::cout << "Minimum visible height benchmark (fast): 30km radius @ 30m data (" << gridSize << "x" << gridSize << ")" << std::endl;
                 std::cout << "Wall time: " << elapsed.count() << " ms" << std::endl;
                 std::cout << "Peak memory: " << peakMB << " MB" << std::endl;
+                BenchmarkThreadCounts(elapsed.count(),
+                    [&](int threads) { return ComputeMinimumVisibleHeightFast(observer, agl2m, gridSize, gridSize, spacingInDegrees, sampler, 4.0 / 3.0, nullptr, threads); },
+                    [&](const MinimumVisibleHeightResult& other) {
+                        return other.state == result.state && SameBits(other.heightAboveGroundM, result.heightAboveGroundM) && SameBits(other.groundM, result.groundM);
+                    });
                 return 0;
             }
 
@@ -626,6 +670,12 @@ int main(int argc, char* argv[])
                 std::cout << "Queries per second (one core, 1,000,000 queries): " << queriesPerSecond << std::endl;
                 std::cout << "Direct line of sight at 50 km: " << directMicroseconds << " us each (" << 1e6 / directMicroseconds << " a second)" << std::endl;
                 std::cout << "(" << seen << " seen)" << std::endl;
+                std::cout << "Preparation at each thread count:" << std::endl;
+                BenchmarkThreadCounts(prepareTime.count(),
+                    [&](int threads) { return PrepareObserver(observer, agl2m, 50000.0, spacingInDegrees, sampler, 4.0 / 3.0, 0, nullptr, threads); },
+                    [&](const PreparedObserver& other) {
+                        return other.horizon == prepared.horizon && other.firstVoidM == prepared.firstVoidM && other.firstNotGivenM == prepared.firstNotGivenM;
+                    });
                 return 0;
             }
 
@@ -774,6 +824,8 @@ int main(int argc, char* argv[])
     TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile();
     TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm();
     TestACommandLineHeightSaysItsDatum();
+    TestFastGridsAndPreparationAreTheSameAtEveryThreadCount();
+    TestAGreatCircleArcGivesEveryPointToTheBit();
 
     std::cout << "-------------------------" << std::endl;
 

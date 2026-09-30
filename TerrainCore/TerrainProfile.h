@@ -108,31 +108,59 @@ inline double GreatCircleDistanceM(GeoPoint a, GeoPoint b)
 // GetTerrainProfile below) pays for the haversine calculation once, not once
 // per sample.
 //
+// The ends of one great-circle arc, their sines and cosines worked out once, so that a
+// caller walking many points along it -- GetTerrainProfile, every ray of a viewshed --
+// doesn't take ten sines and cosines of the same two ends at every point. At(t) is
+// GreatCircleInterpolate's arithmetic, step for step and in the same order, so a point
+// comes out the same to the bit either way.
+//
+// Complexity: O(1) to build and per point. Thread-safety: At is const; safe to call concurrently.
+struct GreatCircleArc
+{
+    GreatCircleArc(GeoPoint a, GeoPoint b, double centralAngleRad)
+        : start(a), angleRad(centralAngleRad)
+    {
+        if (centralAngleRad < 1e-12) return;
+        double lat1Rad = a.latitudeDeg * DegToRad;
+        double lon1Rad = a.longitudeDeg * DegToRad;
+        double lat2Rad = b.latitudeDeg * DegToRad;
+        double lon2Rad = b.longitudeDeg * DegToRad;
+        sinAngle = sin(centralAngleRad);
+        cosLat1 = cos(lat1Rad); sinLat1 = sin(lat1Rad); cosLon1 = cos(lon1Rad); sinLon1 = sin(lon1Rad);
+        cosLat2 = cos(lat2Rad); sinLat2 = sin(lat2Rad); cosLon2 = cos(lon2Rad); sinLon2 = sin(lon2Rad);
+    }
+
+    // The point at fractional distance t (0 = a, 1 = b) along the arc.
+    GeoPoint At(double t) const
+    {
+        if (angleRad < 1e-12)
+        {
+            return start; // a and b are (numerically) the same point -- nothing to interpolate
+        }
+
+        double coeffA = sin((1.0 - t) * angleRad) / sinAngle;
+        double coeffB = sin(t * angleRad) / sinAngle;
+
+        double x = coeffA * cosLat1 * cosLon1 + coeffB * cosLat2 * cosLon2;
+        double y = coeffA * cosLat1 * sinLon1 + coeffB * cosLat2 * sinLon2;
+        double z = coeffA * sinLat1 + coeffB * sinLat2;
+
+        GeoPoint result;
+        result.latitudeDeg = atan2(z, sqrt(x * x + y * y)) / DegToRad;
+        result.longitudeDeg = atan2(y, x) / DegToRad;
+        return result;
+    }
+
+private:
+    GeoPoint start;
+    double angleRad;
+    double sinAngle = 0, cosLat1 = 0, sinLat1 = 0, cosLon1 = 0, sinLon1 = 0, cosLat2 = 0, sinLat2 = 0, cosLon2 = 0, sinLon2 = 0;
+};
+
 // Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
 inline GeoPoint GreatCircleInterpolate(GeoPoint a, GeoPoint b, double t, double centralAngleRad)
 {
-    if (centralAngleRad < 1e-12)
-    {
-        return a; // a and b are (numerically) the same point -- nothing to interpolate
-    }
-
-    double lat1Rad = a.latitudeDeg * DegToRad;
-    double lon1Rad = a.longitudeDeg * DegToRad;
-    double lat2Rad = b.latitudeDeg * DegToRad;
-    double lon2Rad = b.longitudeDeg * DegToRad;
-
-    double sinAngle = sin(centralAngleRad);
-    double coeffA = sin((1.0 - t) * centralAngleRad) / sinAngle;
-    double coeffB = sin(t * centralAngleRad) / sinAngle;
-
-    double x = coeffA * cos(lat1Rad) * cos(lon1Rad) + coeffB * cos(lat2Rad) * cos(lon2Rad);
-    double y = coeffA * cos(lat1Rad) * sin(lon1Rad) + coeffB * cos(lat2Rad) * sin(lon2Rad);
-    double z = coeffA * sin(lat1Rad) + coeffB * sin(lat2Rad);
-
-    GeoPoint result;
-    result.latitudeDeg = atan2(z, sqrt(x * x + y * y)) / DegToRad;
-    result.longitudeDeg = atan2(y, x) / DegToRad;
-    return result;
+    return GreatCircleArc(a, b, centralAngleRad).At(t);
 }
 
 // The number of intervals a path is sampled in: the distance over the spacing,
@@ -210,10 +238,14 @@ inline InputProblem GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, do
     double centralAngleRad = totalDistanceM / EarthRadiusM;
     int sampleCount = (int)ProfileIntervals(startPoint, endPoint, spacingDeg);
 
+    // The arc's ends and the sampler's datum are the same at every sample: taken once.
+    const GreatCircleArc arc(startPoint, endPoint, centralAngleRad);
+    const VerticalDatum datum = sampler.GetDatum();
+    outProfile.reserve((size_t)sampleCount + 1);
     for (int i = 0; i <= sampleCount; i++)
     {
         double t = (double)i / sampleCount;
-        GeoPoint current = GreatCircleInterpolate(startPoint, endPoint, t, centralAngleRad);
+        GeoPoint current = arc.At(t);
 
         ProfileSample sample;
         sample.point = current;
@@ -221,7 +253,7 @@ inline InputProblem GetTerrainProfile(GeoPoint startPoint, GeoPoint endPoint, do
         sample.elevationM = ElevationOf(read);
         sample.dataNotGiven = read.data == ElevationData::NotGiven;
         sample.distanceFromStartM = t * totalDistanceM;
-        sample.elevationDatum = sampler.GetDatum();
+        sample.elevationDatum = datum;
 
         outProfile.push_back(sample);
     }

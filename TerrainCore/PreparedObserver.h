@@ -102,9 +102,11 @@ inline int RaysForRadius(double radiusM, double spacingM)
 //
 // Complexity: O(rayCount * radius / spacing) samples. Memory: one float per sample --
 // ~70 MB for 50 km at 30 m, with 10,472 rays.
-// Thread-safety: single-thread-only; calls the sampler sequentially.
+// Threads (optional): threadCount at a time, 1 by default, 0 for one per hardware thread. Every ray
+// is cast on its own into its own slice of the tables, so the tables are the same, bit for bit,
+// at any thread count; the sampler is read from every thread at once and must allow it.
 // Progress (optional): reported before every 64th ray, then once at the end.
-inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerHeight, double radiusM, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, int rayCount = 0, const ViewshedProgress& progress = nullptr)
+inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerHeight, double radiusM, double spacingDeg, IElevationSampler& sampler, double k = 4.0 / 3.0, int rayCount = 0, const ViewshedProgress& progress = nullptr, int threadCount = 1)
 {
     PreparedObserver prepared;
     prepared.observer = observer;
@@ -136,15 +138,7 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
     prepared.eyeAboveGround = prepared.observerEyeM >= observerGround.elevationM;
 
     const double twoPi = 2 * 3.14159265358979323846;
-    std::vector<ProfileSample> profile;
-    for (int r = 0; r < prepared.rayCount; r++)
-    {
-        if (progress && r % 64 == 0 && !progress((double)r / prepared.rayCount))
-        {
-            prepared.cancelled = true;
-            return prepared;
-        }
-
+    auto castRay = [&](int r, std::vector<ProfileSample>& profile) {
         GeoPoint end = GreatCircleDestination(observer, twoPi * r / prepared.rayCount, radiusM);
         GetTerrainProfile(observer, end, spacingDeg, sampler, profile);
         if (r == 0)
@@ -179,6 +173,41 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
             }
             horizon[s - 1] = (float)running;
         }
+    };
+
+    // The first ray on the calling thread: it sets every ray's sample count and lays the tables
+    // out. Then the rest, 64 at a time from a shared counter, each into its own slice of the
+    // tables, each thread with its own profile buffer; the calling thread reports progress
+    // before each block it takes.
+    if (progress && !progress(0.0))
+    {
+        prepared.cancelled = true;
+        return prepared;
+    }
+    const int threads = ThreadsFor(threadCount);
+    std::vector<std::vector<ProfileSample>> profiles(threads);
+    castRay(0, profiles[0]);
+
+    const int block = 64;
+    std::atomic<int> nextBlock{ 0 };
+    std::atomic<bool> stopped{ false };
+    RunOnThreads(threads, [&](int thread, const std::atomic<bool>& failed) {
+        while (!stopped.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed))
+        {
+            int first = nextBlock.fetch_add(1, std::memory_order_relaxed) * block;
+            if (first >= prepared.rayCount) return;
+            if (thread == 0 && first > 0 && progress && !progress((double)first / prepared.rayCount))
+            {
+                stopped = true;
+                return;
+            }
+            for (int r = (std::max)(first, 1); r < (std::min)(first + block, prepared.rayCount); r++) castRay(r, profiles[thread]);
+        }
+    });
+    if (stopped)
+    {
+        prepared.cancelled = true;
+        return prepared;
     }
 
     if (progress) progress(1.0);

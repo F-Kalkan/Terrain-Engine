@@ -133,9 +133,11 @@ only a demo/tooling one.
   standard for line-of-sight and radio-propagation calculations) is not validated
   beyond the ranges tested here, and neither model handles a path that crosses the
   antimeridian (±180° longitude).
-- Threaded where the work is many independent lines of sight -- line of sight for many pairs,
-  the naive viewshed and the exact minimum visible height -- and bit-identical at every thread
-  count (see "Many pairs on every core" below); everything else runs on the calling thread.
+- Threaded where the work splits into independent pieces -- line of sight for many pairs, both
+  viewsheds, both minimum visible heights and a prepared observer's preparation -- and
+  bit-identical at every thread count (see "Many pairs on every core" below); a single profile,
+  line of sight or prepared-observer query runs on the calling thread. The library defaults to
+  one thread; the DLL and the command line use every core.
 - **Inputs outside the domain are refused, by the library itself** -- not only by the DLL
   and the CLI in front of it, since code that links the library goes through neither.
   Each entry point answers such an input with a value naming the problem
@@ -191,12 +193,21 @@ AMD Ryzen 7 3800X (8 cores / 16 threads), 16 GB RAM, Windows 11 Pro x64, Release
 
 | Operation                                        | Tile         | Wall time     | Peak memory |
 |--------------------------------------------------|--------------|---------------|-------------|
-| 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.25–0.43 ms | ~10.7 MB    |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.70–1.81 s  | ~61.7 MB    |
-| 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.42 ms      | ~55 MB      |
-| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.69–1.70 s  | ~83.7 MB    |
+| 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.13–0.16 ms | ~10.8 MB    |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.18–1.19 s  | ~61.1 MB    |
+| 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.29–0.37 ms | ~54.7 MB    |
+| 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.19–1.20 s  | ~83.1 MB    |
 
-The two viewshed rows moved with the fast viewshed's current algorithm, which answers
+The viewshed rows are on one thread; on every core the same viewshed takes ~0.18 s (see
+"Fast grids and a prepared observer on every core" below). Every row moved again, down, when
+a profile began working out its arc's ends once rather than at every sample: the 30 km
+viewshed from ~1.70–1.81 s and ~1.69–1.70 s, the profile from ~0.25–0.43 ms and ~0.42 ms.
+Most of that drop is the CLI's, not the library's. A benchmark-only program, built against the
+library before and after the change and run alternately the same day, puts the arc's own
+gain at about 4% on the fast viewshed and on a profile, and 12% on the naive viewshed; the
+rest is how the compiler lays out the CLI, as below.
+
+The two viewshed rows had moved before with the fast viewshed's current algorithm, which answers
 every cell from its own centre between two rays and keeps every ray's horizon to do it
 (see "Fast vs. naive viewshed" below). Measured the same day, on the same machine, the
 previous algorithm took ~1.22 s and ~24 MB (3-arcsecond) and ~1.19 s and ~55 MB
@@ -313,13 +324,23 @@ real tiles; CLI timings, so the caveat above applies to both columns alike):
 
 | Radius / grid / tile | Naive | Fast | Speed-up |
 |---|---|---|---|
-| 2 km / 133×133 / 3-arcsecond | ~121–138 ms | ~8.9–9.5 ms | ~13.6–15.5x |
-| 2 km / 133×133 / 1-arcsecond | ~129–131 ms | ~8.3–9.6 ms | ~13.7–15.8x |
-| 30 km / 2000×2000 / 3-arcsecond | ~240.3 s (one run) | ~1.32 s (same program) | ~183x |
+| 2 km / 133×133 / 3-arcsecond | ~69–76 ms | ~5.4–6.4 ms | ~11.9–12.9x |
+| 2 km / 133×133 / 1-arcsecond | ~74–86 ms | ~5.9–7.0 ms | ~12.4x |
+| 30 km / 2000×2000 / 3-arcsecond, one thread | ~208.7 s (one run) | ~1.35 s (same program) | ~154x |
+| 30 km / 2000×2000 / 3-arcsecond, 16 threads | ~22.5 s (one run) | ~0.19 s (same program) | ~117x |
 
-The 30 km naive viewshed takes about four minutes and was measured on the 3-arcsecond
-tile only, in a benchmark-only program with the fast one beside it -- where fast takes
-1.32 s rather than the CLI's ~1.75 s, for the reason given under Performance above. The
+Both on one thread. The 2 km rows moved from ~121–138 ms and ~8.9–9.5 ms (3-arcsecond) and
+~129–131 ms and ~8.3–9.6 ms (1-arcsecond), and the speed-up from ~14–16x, with the arc worked
+out once -- in the CLI, whose layout exaggerates it (see Performance above); naive, which
+builds a profile for every cell, gained more than fast.
+
+The 30 km naive viewshed takes three and a half minutes on one thread and was measured on the
+3-arcsecond tile only, in a benchmark-only program with the fast one beside it. Its row moved
+from 240.3 s and 1.32 s (183x), and 24.2 s on 16 threads: the same program built against the
+library before the arc was worked out once, run the same day, took 219.8 s and 1.27 s on one
+thread and 27.3 s on 16, so the arc is worth ~5% on one thread and ~18% on 16, and the rest
+is the machine from one day to the next. The speed-up fell because the fast viewshed gained
+less from the arc than naive did, not because either got slower. The
 previous fast viewshed was about 1.45 times quicker than this one (1.22 s against 1.75 s
 from the CLI at 30 km, measured the same day), and the speed-ups at 2 km were ~22x before
 this version.
@@ -450,14 +471,16 @@ disagree on.
 **Performance** (the machine above, Release build; `TerrainEngine.exe benchmark minheight`
 and `benchmark viewshed`, three runs each, one process per run):
 
-| 30 km radius @ 30 m spacing (2000×2000) | Tile | Wall time | Peak memory |
-|---|---|---|---|
-| Fast viewshed | 3-arcsecond | ~1.68–1.76 s | ~61.7 MB |
-| Fast minimum visible height | 3-arcsecond | ~1.95–1.97 s | ~125.3–125.6 MB |
-| Fast viewshed | 1-arcsecond | ~1.64–1.71 s | ~83.8 MB |
-| Fast minimum visible height | 1-arcsecond | ~1.87–1.88 s | ~147.3–147.6 MB |
+| 30 km radius @ 30 m spacing (2000×2000) | Tile | Wall time, one thread | 16 threads | Peak memory |
+|---|---|---|---|---|
+| Fast viewshed | 3-arcsecond | ~1.18–1.19 s | ~0.18–0.19 s | ~61.1 MB |
+| Fast minimum visible height | 3-arcsecond | ~1.43 s | ~0.22–0.24 s | ~124.8 MB |
+| Fast viewshed | 1-arcsecond | ~1.19–1.20 s | ~0.18 s | ~83.1 MB |
+| Fast minimum visible height | 1-arcsecond | ~1.42 s | ~0.23–0.24 s | ~146.7 MB |
 
-The time added is small: the rays are the fast viewshed's, and a cell whose ground is
+The one-thread times moved from ~1.68–1.76 s, ~1.95–1.97 s, ~1.64–1.71 s and ~1.87–1.88 s
+with the arc worked out once -- mostly the CLI's layout, as under Performance above. The time
+added is small: the rays are the fast viewshed's, and a cell whose ground is
 hidden takes a few more comparisons. The memory added is the answer itself -- a height and
 a ground in doubles, and a state, for each of four million cells -- held beside the rays.
 The reference, run once in a benchmark-only program on the 3-arcsecond tile, took **340 s**
@@ -541,15 +564,19 @@ prepared out to 50 km at 30 m; a million queries over 10,000 targets spread even
 disc on the tile, alternately 2 m above the ground and 5,000 m above sea level; and, for
 comparison, 1,000 direct lines of sight 50 km long.
 
-| Tile | Preparation | Peak memory after it | Queries a second, one core | Direct line of sight at 50 km |
-|---|---|---|---|---|
-| 1-arcsecond | ~1.72 s | ~96.3 MB | ~5.93 million | ~190 µs (~5,270 a second) |
-| 3-arcsecond | ~1.70-1.72 s | ~74.2-74.3 MB | ~6.32-6.39 million | ~167-168 µs (~5,950 a second) |
+| Tile | Preparation, one thread | 16 threads | Peak memory after it | Queries a second, one core | Direct line of sight at 50 km |
+|---|---|---|---|---|---|
+| 1-arcsecond | ~1.20-1.23 s | ~0.21-0.26 s | ~96.6-97.1 MB | ~5.37-5.45 million | ~148-151 µs (~6,700 a second) |
+| 3-arcsecond | ~1.18-1.19 s | ~0.23-0.28 s | ~73.7 MB | ~5.47-5.51 million | ~118-122 µs (~8,300 a second) |
 
 The prepared observer holds 66.6 MB of horizons (10,472 rays of 1,667 floats); the rest of the
-peak is the tile. A query costs ~160-170 ns, whatever the target's distance, against
-~170-190 µs for a line of sight at 50 km: some 1,100 times as many answers a second, and about
-sixty times the 100,000 asked for. Both figures come from the same CLI process, which (see
+peak is the tile. A query costs ~180-190 ns, whatever the target's distance, against
+~120-150 µs for a line of sight at 50 km: some 650-800 times as many answers a second, and
+about fifty-five times the 100,000 asked for. The preparation and the line of sight moved
+from ~1.70-1.72 s and ~167-190 µs when the arc was worked out once; the query rate, from
+~5.93-6.39 million, though the query itself didn't change -- the build before the change, run
+alternately with this one the same day, answered 4.2-5.7 million a second, so that is the
+machine's day, not the code. Both figures come from the same CLI process, which (see
 Performance above) runs the library somewhat slower than a program built for nothing else,
 so the ratio is the figure to read. Nothing is allocated per query:
 `TestPreparedObserverQueriesAllocateNothing` counts the executable's own `operator new` over
@@ -572,8 +599,8 @@ visible height take a thread count too and spread their rows the same way -- eac
 already its own line of sight -- reporting progress only on the calling thread, so a callback
 never runs on a thread its caller didn't start, and stopping every thread when it asks to
 stop. The samplers are read from every thread at once, which each of them allows once
-constructed. The DLL runs its naive viewshed and exact minimum visible height on one thread
-per hardware thread; the fast versions, under two seconds for 30 km, stay on one.
+constructed. The DLL runs every viewshed and minimum visible height, fast and exact, on one
+thread per hardware thread.
 
 **Bit-identical.** `TestLineOfSightPairsAreTheSameAtEveryThreadCount` answers 8 observers
 against 241 targets on the 1-arcsecond tile -- on the ground and in the air, some past the
@@ -594,16 +621,80 @@ one-thread run):
 
 | Threads | Time | Pairs a second | Speed-up |
 |---|---|---|---|
-| 1 | ~1.31-1.34 s | ~7,190-7,330 | 1x |
-| 2 | ~0.64-0.66 s | ~14,600-14,900 | 2.0x |
-| 4 | ~0.31-0.33 s | ~29,300-30,900 | 4.1x |
-| 8 | ~0.18-0.19 s | ~51,300-52,400 | 7.1x |
-| 16 | ~0.12 s | ~79,100-79,200 | 10.9x |
+| 1 | ~0.89 s | ~10,730-10,840 | 1x |
+| 2 | ~0.44-0.47 s | ~20,500-21,800 | 2.0x |
+| 4 | ~0.22-0.23 s | ~42,100-43,300 | 4.0x |
+| 8 | ~0.13-0.14 s | ~68,400-76,800 | 6.8x |
+| 16 | ~0.085-0.088 s | ~109,000-113,600 | 10.3x |
 
 Up to eight threads each core does its share; past eight, the second thread on each core adds
-about half as much again. The same benchmark's naive viewshed over 5 km goes from ~1.73-1.75 s
-on one thread to ~0.18 s on 16; over 30 km on the 3-arcsecond tile, in a benchmark-only
-program, from 240.3 s to 24.2 s.
+about half as much again. The same benchmark's naive viewshed over 5 km goes from ~1.06-1.08 s
+on one thread to ~0.11 s on 16; over 30 km on the 3-arcsecond tile, in a benchmark-only
+program, from 208.7 s to 22.5 s. Every figure here moved with the arc worked out once: from
+~7,190-7,330 pairs a second on one thread and ~79,100 on 16, and the naive viewshed from
+~1.73-1.75 s and ~0.18 s, and 240.3 s and 24.2 s -- see Performance above for how much of it
+is the library's.
+
+### Fast grids and a prepared observer on every core
+
+**The question.** The fast viewshed, the fast minimum visible height and a prepared
+observer's preparation ran on one thread: 1.2-1.4 s for 30 km. Can they use every core, with
+the same answer?
+
+**The approach** (`AnswerEachCellFromFastHorizons` in `Viewshed.h`, `PrepareObserver`). The
+fast grids have two phases, and each is independent work. The rays are cast sixteen at a
+time from a shared counter, each thread with its own profile buffer, each ray into its own
+place; they are gathered in the order one thread would have cast them before they are sorted
+by direction. The cells are then answered a row at a time (`ForEachRowOnThreads`, as naive
+does), each from the finished rays alone. A preparation casts its first ray on the calling
+thread -- it sets every ray's sample count and lays the tables out -- then the rest, sixty-four
+at a time, each into its own slice of the tables. Progress is reported on the calling thread
+only, 0 before any thread starts -- the other threads can take the first rays or rows before
+the calling thread takes any, and the naive viewshed's reports had the same gap -- and a stop
+reaches every thread. The library's default is one
+thread, so a host with threads of its own decides; the DLL and the command line use every
+core.
+
+**And the arc, worked out once** (`GreatCircleArc` in `TerrainProfile.h`). Every point a
+profile samples used to take ten sines and cosines of the arc's two ends. They are worked out
+once per arc now, and each point does GreatCircleInterpolate's arithmetic step for step, in
+the same order, on the stored values -- so it comes out the same to the bit. The sampler's
+datum is read once per profile too. Only changes that keep every bit were made: a local flat
+approximation, reading the terrain in batches or SIMD would each move answers in the last
+digits and take the determinism the library promises with them.
+
+**Bit-identical.** `TestFastGridsAndPreparationAreTheSameAtEveryThreadCount` runs the fast
+viewshed -- for the ground, for a target above sea level, and from an observer whose grid runs
+past the tile's edge -- the fast minimum visible height and a preparation over 3 km on 1, 2,
+3, 7 threads and one per hardware thread, and compares everything with one thread to the
+bit; it counts the threads that cast the rays, answer the cells and prepare, each phase on its
+own. `TestAGreatCircleArcGivesEveryPointToTheBit` holds the arc to the old arithmetic, bit for
+bit, on 10,040 points. Beyond the tests, a scratch program fingerprinting every byte of 60
+profiles, four fast viewsheds, two fast and one exact minimum visible height, a naive viewshed
+and a prepared observer's tables and 20,000 answers gave the same fingerprint before the
+change and after it, at 1, 2, 3 and 16 threads. Each defect put back is caught: a profile
+buffer shared by every thread crashes the suite; a thread count ignored by the rays, the
+cells or the preparation, progress from another thread, a stop gone on past, the first stop
+ignored, and the arc multiplying in another order each turn a test red.
+
+**Measured** (the machine above; `TerrainEngine.exe benchmark viewshed`, `minheight` and
+`observer` on the 1-arcsecond tile, three runs each, one process per run, every run checked
+against the one-thread run to the bit):
+
+| Threads | Fast viewshed, 30 km | Fast minimum visible height, 30 km | Preparation, 50 km |
+|---|---|---|---|
+| 1 | ~1.20 s | ~1.42 s | ~1.20-1.23 s |
+| 2 | ~0.66-0.68 s | ~0.81-0.82 s | ~0.70-0.71 s |
+| 4 | ~0.37-0.47 s | ~0.44-0.49 s | ~0.38-0.54 s |
+| 8 | ~0.32-0.34 s | ~0.34-0.35 s | ~0.40-0.43 s |
+| 16 | ~0.18 s (6.7x) | ~0.23-0.24 s (6.1x) | ~0.21-0.26 s (5.2x) |
+
+Six or seven times, not sixteen. The runs are short and uneven from four threads on -- a
+fifth of a second for sixteen -- and parts of each stay on one thread: sorting the rays,
+gathering them, laying out the grid, the preparation's first ray. Where the rest goes wasn't
+measured. Against the build before the change, alternately in one program the same day, the
+30 km fast viewshed went from 1.22-1.26 s to 0.19-0.20 s on every core, and a 50 km
+preparation from 1.15 s to 0.25-0.26 s.
 
 ## Data not given, and the data a query will read
 
