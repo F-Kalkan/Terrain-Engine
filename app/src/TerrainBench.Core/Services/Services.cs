@@ -75,16 +75,23 @@ public sealed class JsonSettingsStore(string path) : ISettingsStore
         }
     }
 
+    /// <summary>
+    /// Writes the settings beside the file first and then moves them over it in one step, so a crash
+    /// or a full disk partway through leaves the previous settings whole, never half a file.
+    /// </summary>
     public void Save(AppSettings settings)
     {
+        string temporary = path + ".tmp";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(settings, Options));
+            File.WriteAllText(temporary, JsonSerializer.Serialize(settings, Options));
+            File.Move(temporary, path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Remembering settings is a convenience; failing to must never take the app down.
+            try { File.Delete(temporary); } catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { }
         }
     }
 }

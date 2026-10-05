@@ -59,33 +59,26 @@ inline LineOfSightPairs ComputeLineOfSightPairs(const std::vector<SightEnd>& obs
         return pairs;
     }
 
-    const size_t pairCount = pairs.results.size();
-    const size_t block = 16;
-    std::atomic<size_t> next{ 0 };
-    pairs.threadsUsed = RunOnThreads(ThreadsFor(threadCount), [&](int, const std::atomic<bool>& failed) {
-        std::vector<ProfileSample> profile;
-        while (!failed.load(std::memory_order_relaxed))
+    const int threads = ThreadsFor(threadCount);
+    std::vector<std::vector<ProfileSample>> profiles(threads);
+    pairs.threadsUsed = ForEachBlockOnThreads(pairs.results.size(), 16, threads, nullptr, [&](size_t first, size_t last, int thread) {
+        std::vector<ProfileSample>& profile = profiles[thread];
+        for (size_t p = first; p < last; p++)
         {
-            size_t first = next.fetch_add(block, std::memory_order_relaxed);
-            if (first >= pairCount) return;
-            size_t last = (std::min)(first + block, pairCount);
-            for (size_t p = first; p < last; p++)
+            const SightEnd& observer = observers[p / targets.size()];
+            const SightEnd& target = targets[p % targets.size()];
+            InputProblem pathProblem = CheckProfileRequest(observer.point, target.point, spacingDeg);
+            if (pathProblem != InputProblem::None)
             {
-                const SightEnd& observer = observers[p / targets.size()];
-                const SightEnd& target = targets[p % targets.size()];
-                InputProblem pathProblem = CheckProfileRequest(observer.point, target.point, spacingDeg);
-                if (pathProblem != InputProblem::None)
-                {
-                    LineOfSightResult refused;
-                    refused.status = ComputationStatus::InvalidInput;
-                    refused.inputProblem = pathProblem;
-                    pairs.results[p] = refused;
-                    continue;
-                }
-                GetTerrainProfile(observer.point, target.point, spacingDeg, sampler, profile);
-                pairs.results[p] = ComputeLineOfSight(profile, observer.height, target.height, k);
+                LineOfSightResult refused;
+                refused.status = ComputationStatus::InvalidInput;
+                refused.inputProblem = pathProblem;
+                pairs.results[p] = refused;
+                continue;
             }
+            GetTerrainProfile(observer.point, target.point, spacingDeg, sampler, profile);
+            pairs.results[p] = ComputeLineOfSight(profile, observer.height, target.height, k);
         }
-    });
+    }).threads;
     return pairs;
 }

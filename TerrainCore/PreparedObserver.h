@@ -176,35 +176,19 @@ inline PreparedObserver PrepareObserver(GeoPoint observer, DatumHeight observerH
     };
 
     // The first ray on the calling thread: it sets every ray's sample count and lays the tables
-    // out. Then the rest, 64 at a time from a shared counter, each into its own slice of the
-    // tables, each thread with its own profile buffer; the calling thread reports progress
-    // before each block it takes.
-    if (progress && !progress(0.0))
-    {
-        prepared.cancelled = true;
-        return prepared;
-    }
+    // out. Then the rest, 64 at a time from a shared counter (ForEachBlockOnThreads), each into
+    // its own slice of the tables, each thread with its own profile buffer; the calling thread
+    // reports progress before each block it takes.
     const int threads = ThreadsFor(threadCount);
     std::vector<std::vector<ProfileSample>> profiles(threads);
-    castRay(0, profiles[0]);
-
-    const int block = 64;
-    std::atomic<int> nextBlock{ 0 };
-    std::atomic<bool> stopped{ false };
-    RunOnThreads(threads, [&](int thread, const std::atomic<bool>& failed) {
-        while (!stopped.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed))
-        {
-            int first = nextBlock.fetch_add(1, std::memory_order_relaxed) * block;
-            if (first >= prepared.rayCount) return;
-            if (thread == 0 && first > 0 && progress && !progress((double)first / prepared.rayCount))
-            {
-                stopped = true;
-                return;
-            }
-            for (int r = (std::max)(first, 1); r < (std::min)(first + block, prepared.rayCount); r++) castRay(r, profiles[thread]);
-        }
-    });
-    if (stopped)
+    BlockProgress raysTaken;
+    if (progress) raysTaken = [&](size_t rays) { return progress((double)rays / prepared.rayCount); };
+    bool allCast = ForEachBlockOnThreads((size_t)prepared.rayCount, 64, threads, raysTaken,
+        [&] { castRay(0, profiles[0]); },
+        [&](size_t first, size_t last, int thread) {
+            for (size_t r = (std::max)(first, (size_t)1); r < last; r++) castRay((int)r, profiles[thread]);
+        }).finished;
+    if (!allCast)
     {
         prepared.cancelled = true;
         return prepared;

@@ -115,16 +115,25 @@ public:
         swLon = swLongitudeDeg;
         mode = interpolationMode;
 
-        std::ifstream file(filePath, std::ios::binary);
-        std::vector<char> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
         // A tile is a square of big-endian 16-bit posts, so its byte count must be
         // twice a perfect square, at least 2x2. Anything else -- most often a
         // download cut short -- is rejected rather than rounded to the nearest
         // square: rounding up would place the last posts past the end of the data.
-        size_t totalSamples = buffer.size() / 2;
+        // The size is checked before anything is read.
+        std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+        std::streamoff byteCount = file.is_open() ? (std::streamoff)file.tellg() : -1;
+        size_t totalSamples = byteCount > 0 ? (size_t)byteCount / 2 : 0;
         size_t side = (size_t)std::llround(std::sqrt((double)totalSamples));
-        loadedSuccessfully = file.is_open() && buffer.size() % 2 == 0 && side >= 2 && side * side == totalSamples;
+        loadedSuccessfully = byteCount > 0 && byteCount % 2 == 0 && side >= 2 && side * side == totalSamples;
+
+        // The whole file in one read, straight into the posts, then each post made from its
+        // two bytes, high byte first.
+        std::vector<int16_t> held;
+        if (loadedSuccessfully)
+        {
+            held.resize(totalSamples);
+            loadedSuccessfully = (bool)file.seekg(0) && (bool)file.read(reinterpret_cast<char*>(held.data()), byteCount);
+        }
         if (!loadedSuccessfully)
         {
             size = 0;
@@ -132,17 +141,16 @@ public:
         }
         size = (int)side;
 
-        data.resize(totalSamples);
-        for (size_t i = 0; i < totalSamples; i++)
+        for (int16_t& post : held)
         {
-            unsigned char highByte = (unsigned char)buffer[i * 2];
-            unsigned char lowByte = (unsigned char)buffer[i * 2 + 1];
-            int16_t value = (int16_t)((highByte << 8) | lowByte);
-            data[i] = value;
+            const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&post);
+            int16_t value = (int16_t)((bytes[0] << 8) | bytes[1]);
+            post = value;
             if (value == -32768) voidCount++;
         }
         window = PostWindow{ 0, size - 1, 0, size - 1 };
-        pyramid = std::make_shared<const PostPyramid>(data, size, size);
+        data = std::make_shared<const std::vector<int16_t>>(std::move(held));
+        pyramid = std::make_shared<const PostPyramid>(*data, size, size);
     }
 
     // A ceiling on every point Sample reads in the box, from the posts it reads there -- the
@@ -172,7 +180,7 @@ public:
 
         int highestPost;
         bool mayHoldVoid;
-        pyramid->Highest(data, (int)firstRow - window.firstRow, (int)lastRow - window.firstRow,
+        pyramid->Highest(*data, (int)firstRow - window.firstRow, (int)lastRow - window.firstRow,
             (int)firstCol - window.firstCol, (int)lastCol - window.firstCol, highestPost, mayHoldVoid);
         return HeightCeiling{ (double)highestPost, mayHoldVoid };
     }
@@ -220,17 +228,19 @@ public:
         posts.lastRow = (std::min)(posts.lastRow, window.lastRow);
         posts.lastCol = (std::min)(posts.lastCol, window.lastCol);
         RealElevationSampler part(*this, posts);
-        if (!posts.Empty()) part.data.reserve((size_t)(posts.lastRow - posts.firstRow + 1) * (size_t)(posts.lastCol - posts.firstCol + 1));
+        std::vector<int16_t> held;
+        if (!posts.Empty()) held.reserve((size_t)(posts.lastRow - posts.firstRow + 1) * (size_t)(posts.lastCol - posts.firstCol + 1));
         for (int row = posts.firstRow; row <= posts.lastRow; row++)
         {
             for (int col = posts.firstCol; col <= posts.lastCol; col++)
             {
-                int16_t value = data[PostIndex(row, col)];
-                part.data.push_back(value);
+                int16_t value = (*data)[PostIndex(row, col)];
+                held.push_back(value);
                 if (value == -32768) part.voidCount++;
             }
         }
-        if (!posts.Empty()) part.pyramid = std::make_shared<const PostPyramid>(part.data, posts.lastRow - posts.firstRow + 1, posts.lastCol - posts.firstCol + 1);
+        part.data = std::make_shared<const std::vector<int16_t>>(std::move(held));
+        if (!posts.Empty()) part.pyramid = std::make_shared<const PostPyramid>(*part.data, posts.lastRow - posts.firstRow + 1, posts.lastCol - posts.firstCol + 1);
         return part;
     }
 
@@ -264,8 +274,9 @@ public:
     InterpolationMode Interpolation() const { return mode; }
 
     // The same loaded tile answering in another interpolation mode, without reading the
-    // file again. The copy owns its own posts, so either sampler can outlive the other.
-    // Complexity: O(posts) -- one copy of the tile in memory.
+    // file again. The copy shares this sampler's posts and their pyramid, which neither
+    // ever changes and which stay held for as long as either lives, so either sampler can
+    // outlive the other. Complexity: O(1) -- the posts aren't copied.
     // Thread-safety: never mutates this sampler; safe to call concurrently.
     RealElevationSampler WithInterpolationMode(InterpolationMode interpolationMode) const
     {
@@ -279,7 +290,7 @@ public:
     // Window, only its posts, row-major within it (HeldPosts says which).
     // Complexity: O(1). Thread-safety: as PostsPerSide; the reference stays valid for
     // the sampler's lifetime.
-    const std::vector<int16_t>& Posts() const { return data; }
+    const std::vector<int16_t>& Posts() const { return *data; }
     
     // SRTM .hgt files are EGM96-referenced -- orthometric (mean sea level) heights.
     VerticalDatum GetDatum() const override
@@ -325,10 +336,10 @@ public:
                 return notGiven;
             }
 
-            int16_t v00 = data[PostIndex(row0, col0)];
-            int16_t v01 = data[PostIndex(row0, col1)];
-            int16_t v10 = data[PostIndex(row1, col0)];
-            int16_t v11 = data[PostIndex(row1, col1)];
+            int16_t v00 = (*data)[PostIndex(row0, col0)];
+            int16_t v01 = (*data)[PostIndex(row0, col1)];
+            int16_t v10 = (*data)[PostIndex(row1, col0)];
+            int16_t v11 = (*data)[PostIndex(row1, col1)];
 
             if (v00 == -32768 || v01 == -32768 || v10 == -32768 || v11 == -32768)
             {
@@ -351,7 +362,7 @@ public:
             return notGiven;
         }
 
-        int16_t value = data[PostIndex(row, col)];
+        int16_t value = (*data)[PostIndex(row, col)];
 
         if (value == -32768)
         {
@@ -362,8 +373,7 @@ public:
     }
 
 private:
-    // The same tile, holding none of its posts yet: Window fills in the window's. Copying
-    // the whole tile first would hold all of it until the copy was cut down.
+    // The same tile, holding none of its posts yet: Window fills in the window's.
     RealElevationSampler(const RealElevationSampler& tile, PostWindow posts)
         : swLat(tile.swLat), swLon(tile.swLon), size(tile.size), window(posts), mode(tile.mode), loadedSuccessfully(tile.loadedSuccessfully)
     {
@@ -382,7 +392,8 @@ private:
     double swLat;
     double swLon;
     int size = 0;
-    std::vector<int16_t> data;          // the held posts, row-major within the window
+    // The held posts, row-major within the window, shared by every copy that holds the same ones.
+    std::shared_ptr<const std::vector<int16_t>> data = std::make_shared<const std::vector<int16_t>>();
     PostWindow window;                  // which of the tile's posts data holds
     InterpolationMode mode = InterpolationMode::Nearest;
     bool loadedSuccessfully = false;

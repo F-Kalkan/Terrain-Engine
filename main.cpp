@@ -302,7 +302,7 @@ int main(int argc, char* argv[])
             // Every height printed says what it is measured from: the tile's own datum. The eyes
             // are printed to the last digit, so the same eye given in two datums can be compared.
             const char* datumWords = VerticalDatumWords(sampler.GetDatum());
-            std::cout << "Visible: " << (los.isVisible ? "YES" : "NO") << std::endl;
+            std::cout << "Visible: " << VisibleWord(los) << std::endl;
             if (profile.front().elevationM.has_value() && profile.back().elevationM.has_value())
             {
                 std::optional<double> eyeA = EyeHeightInTerrainDatum(hADatum, *profile.front().elevationM, sampler.GetDatum());
@@ -516,7 +516,7 @@ int main(int argc, char* argv[])
 
             for (size_t i = 0; i < results.size(); i++)
             {
-                std::cout << "Query " << i << ": Visible=" << (results[i].isVisible ? "YES" : "NO")
+                std::cout << "Query " << i << ": Visible=" << VisibleWord(results[i])
                     << ", ClearanceDeficit=" << results[i].clearanceDeficitM
                     << ", Status=" << ComputationStatusToString(results[i].status);
                 if (results[i].status == ComputationStatus::InvalidInput) std::cout << " (" << InputProblemToString(results[i].inputProblem) << ")";
@@ -744,90 +744,9 @@ int main(int argc, char* argv[])
 
     // Tests
     std::cout << "Tests\n" << std::endl;
-    TestFlatPlateauEverythingVisible();
-    TestWallBlocksView();
-    TestCurvatureBlocksFlatTerrain();
-    TestVoidPointIsDegraded();
-    TestViewshedDetectsVoid();
-    TestDeterminism();
-    TestFastViewshedMatchesNaive();
-    TestSymmetricHillReciprocity();
-    TestObserverBelowRim();
-    TestTargetOnFarSlopeVisible();
-    TestFresnelClearancePartialObstruction();
-    TestBatchLineOfSightMatchesIndividualCalls();
-    TestMultiTileSeamIsInvisible();
-    TestBlockingFeatureIsLocalPeak();
-    TestFastViewshedVoidDegradesDownstream();
-    TestRealElevationSamplerReadsVoidFromFile();    
-    TestInterpolationModesDifferOnRidgeline();
-    TestProfileMatchesFrozenOracle();
-    TestNarrowSpikeCanFallBetweenSamples();
-    TestMultiTileProfileCrossesSeamWithoutGap();
-    TestEmptyAndSingleSampleProfilesAreDegradedNotUB();
-    TestBlockingFeatureClassificationIsSpacingInvariant();
-    TestViewshedLongitudeSpacingCorrectsForLatitude();
-    TestConvertHeightBetweenDatums();
-    TestComputeLineOfSightRejectsWrongHeightDatum();
-    TestComputeLineOfSightRejectsUnknownTerrainDatum();
-    TestRealElevationSamplerDeclaresOrthometricDatum();
-    TestRasterBlockSamplerPositiveRowStep();
-    TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth();
-    TestRasterBlockSamplerVoidCellPassesThrough();
-    TestRasterBlockSamplerWorksWithLineOfSight();
-    TestScratchBufferProfileAllocatesNothingOnReuse();
-    TestGreatCircleDistanceMatchesKnownValues();
-    TestGreatCircleInterpolateBulgesTowardPole();
-    TestViewshedRespondsToCurvatureFactor();
-    TestFastViewshedSeesVoidOnEverySampleOfADiagonalRay();
-    TestTerrainProfileNeverSamplesCoarserThanRequested();
-    TestLineOfSightInterpolatesByDistanceNotIndex();
-    TestViewshedsAgreeWhenObserverIsUnknown();
-    TestLineOfSightAcceptsHeightsInAnyTerrainComparableDatum();
-    TestOneArcSecondTileReadsAtNativeResolution();
-    TestOneArcSecondTileAgreesWithThreeArcSecondTile();
-    TestRasterBlockViewReadsHostBufferInPlace();
-    TestRealElevationSamplerRejectsMalformedTile();
-    TestViewshedsReturnEmptyForGridWithoutCells();
-    TestCliNumberParsingRejectsWhatIsNotANumber();
-    TestRealElevationSamplerReportsTileFacts();
-    TestViewshedProgressIsReportedAndCanCancel();
-    TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad();
-    TestSharedPathGeometryMatchesHandCalculation();
-    TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight();
-    TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive();
-    TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown();
-    TestViewshedAgreementCountsEachDirectionOverTheVisibleCells();
-    TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere();
-    TestViewshedAgreementRefusesGridsOfDifferentSizes();
-    TestFastViewshedAgreesWithNaiveAtThreeObservers();
-    TestTheLibraryRefusesASpacingItCannotSampleAt();
-    TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth();
-    TestTheLibraryRefusesHeightsThatAreNotNumbers();
-    TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse();
-    TestAViewshedGridThatWouldReachAPoleIsRefused();
-    TestRealElevationSamplerBilinearMatchesAHandWorkedValue();
-    TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight();
-    TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm();
-    TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight();
-    TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals();
-    TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers();
-    TestPreparedObserverAnswersTheWallAndTheAirAsTheLineOfSightDoes();
-    TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets();
-    TestPreparedObserverQueriesAllocateNothing();
-    TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals();
-    TestLineOfSightPairsAreTheSameAtEveryThreadCount();
-    TestLineOfSightPairsRefuseEachPairItCannotSample();
-    TestReferenceGridsAreTheSameAtEveryThreadCount();
-    TestDataNotGivenIsToldApartFromAVoid();
-    TestQueryExtentsAreTheBoxesTheQueriesRead();
-    TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile();
-    TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm();
-    TestACommandLineHeightSaysItsDatum();
-    TestFastGridsAndPreparationAreTheSameAtEveryThreadCount();
-    TestAGreatCircleArcGivesEveryPointToTheBit();
-    TestTheNaiveViewshedReadsLessAndAnswersTheSame();
-    TestACeilingIsNeverBelowWhatTheSamplerReads();
+    for (const RegisteredTest& test : RegisteredTests()) test.run();
+    // A run with no tests in it would pass by saying nothing.
+    Expect(!RegisteredTests().empty(), "Tests registered: " + std::to_string(RegisteredTests().size()));
 
     std::cout << "-------------------------" << std::endl;
 

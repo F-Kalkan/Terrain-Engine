@@ -73,7 +73,7 @@ tested: [docs/TERRAINBENCH.md](docs/TERRAINBENCH.md).
   minimum visible height, and a prepared observer's preparation run on every core -- about
   ten times as fast for many pairs on 8 cores and 16 threads, six or seven for the fast
   viewshed -- with the same answer, to the bit, as on one.
-- **Tested.** 84 engine tests and 153 app tests, all run by `build.ps1` and by CI on
+- **Tested.** 87 engine tests and 156 app tests, all run by `build.ps1` and by CI on
   every push. Each fix was also checked the other way: the defect put back, and a test
   going red.
 
@@ -114,7 +114,7 @@ Build Tools); the app also needs the .NET 10 SDK.
 ## Command line
 
 ```
-TerrainEngine.exe # run the 84-case test suite + demo
+TerrainEngine.exe # run the 87-case test suite + demo
 TerrainEngine.exe benchmark <profile|viewshed|minheight|observer|pairs> <hgtFile> <swLat> <swLon>
 TerrainEngine.exe profile <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> [nearest|bilinear]
 TerrainEngine.exe los <hgtFile> <swLat> <swLon> <aLat> <aLon> <bLat> <bLon> <spacing> <hA> <hB> [k] [nearest|bilinear]
@@ -130,7 +130,8 @@ above the ground at (36.35, -111.45)?
 TerrainEngine.exe los DATA/N36W112.hgt 36.0 -112.0 36.3 -111.5 36.35 -111.45 0.0002697964817756191 2.0 2.0
 ```
 
-The answer, and if blocked, exactly where and by how much. The spacing is in degrees:
+The answer -- YES, NO, or UNKNOWN with the reason when the path crosses a void or runs off
+the data -- and if blocked, exactly where and by how much. The spacing is in degrees:
 0.0002697964817756191° is exactly the 30 m TerrainBench samples at, so the app and the
 CLI answer this query identically. Every numeric argument is checked before anything
 runs: text that isn't a whole, finite number, or a spacing, `k`, frequency or grid size

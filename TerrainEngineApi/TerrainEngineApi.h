@@ -143,9 +143,9 @@ typedef struct te_tile_info
 // corner is the one the file name states (N36W112 -> 36, -112) and must lie within
 // latitude [-90, 89] and longitude [-180, 179]. A missing, empty, unreadable or
 // incomplete file -- a download cut short -- is TE_ERROR_LOAD_FAILED, never a tile of voids.
-// Complexity: O(posts) -- reads the file once and keeps it in memory, twice (one copy
-// per interpolation mode) and a height pyramid over it, shared by both: about 7 MB for a
-// 3-arcsecond tile, 64 MB for 1-arcsecond.
+// Complexity: O(posts) -- reads the file in one go and keeps its posts in memory once, with a
+// height pyramid over them, both shared by the two interpolation modes: about 4 MB for a
+// 3-arcsecond tile, 37 MB for 1-arcsecond.
 // Thread-safety: safe to call concurrently.
 TE_API int32_t te_tile_open(const wchar_t* path, double south_west_latitude_deg, double south_west_longitude_deg, te_tile* out_tile);
 
@@ -230,8 +230,8 @@ typedef struct te_path_result
     int32_t sample_count;
 
     // Line of sight
-    int32_t los_status;               // TE_STATUS_*; is_visible and the blocking fields mean something only when TE_STATUS_OK
-    int32_t is_visible;
+    int32_t los_status;               // TE_STATUS_*; the blocking fields mean something only when TE_STATUS_OK
+    int32_t is_visible;               // 1 only when TE_STATUS_OK and nothing blocks: a path with no answer is never visible
     int32_t has_blocking_point;
     int32_t blocking_feature;         // TE_FEATURE_*
     int32_t blocking_sample_index;    // index into the samples, -1 without a blocking point

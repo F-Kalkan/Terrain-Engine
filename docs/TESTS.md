@@ -1,8 +1,10 @@
 # The engine's test suite
 
-84 test functions, hand-checkable apart from the real-data comparisons, which hold the
-fast viewshed against naive, the fast minimum visible height against its reference and the
-prepared observer against the line of sight, at several observers:
+87 test functions, each defined with `TEST(name)`, which adds it to the run, so a test can't
+be written and then left out of it -- and a run with no tests in it fails. Hand-checkable
+apart from the real-data comparisons, which hold the fast viewshed against naive, the fast
+minimum visible height against its reference and the prepared observer against the line of
+sight, at several observers:
 
 - **Line of sight and profile arithmetic** (30 m grids or hand-built profiles, no file
   on disk): flat plateau, wall, curvature, void, determinism,
@@ -12,8 +14,8 @@ prepared observer against the line of sight, at several observers:
   ridgeline, empty and single-sample profile guards, and a sight line interpolated by
   distance rather than by sample index on an unevenly spaced profile. Every assertion
   that a line is visible, or that two results agree, also asserts the computation
-  succeeded — a rejected query leaves `isVisible` at its default of `true`, and would
-  otherwise pass without computing anything. Terrain grids are laid on the ground in
+  succeeded, so none passes without computing anything (a path with no confident answer is
+  never visible, either: see the last tests below). Terrain grids are laid on the ground in
   30 m cells and run through `GetTerrainProfile` unmodified, so the distances these
   tests see are the real great-circle ones; hand-built profiles place each sample
   where its stated distance says it is.
@@ -166,7 +168,8 @@ terrain, decides every answer.
     bit on 1, 2, 3, 7 threads and one per hardware thread; three threads asked for, three cast
     the rays, three answer the cells and three prepare the observer, each phase counted on its
     own; progress on the calling thread only, the first report of each run of no work done even
-    when other threads take the first rays or rows, and a stop at the first report stopping them;
+    when other threads take the first rays or rows, a stop at the first report stopping them,
+    and a stop at the third stopping the fast viewshed, the naive one and a preparation there;
   - *the arc worked out once*: `GreatCircleArc`, which works out an arc's ends once, gives
     every point of 40 arcs -- short and long, every direction, one of no length -- to the bit
     what the old arithmetic, each end's sines and cosines at every point, gave.
@@ -182,6 +185,20 @@ terrain, decides every answer.
     the tile or a window, nearest and bilinear: no point read inside is above the ceiling, and
     any void or missing point is flagged; one post's box has exactly that post's height, and
     a box around a void, read from the pyramid's blocks, says a gap may be there.
+- **No answer never visible, every place named, a tile read once**:
+  - *no answer is never "visible"*: a void along a path or at its end, ground never given, a
+    height that isn't a number, a k it can't use, one sample, terrain with no datum, and a void
+    past a wall that already blocks -- each without a confident answer, none visible, and each
+    printed `UNKNOWN` by the command line; the same flat path seen, `YES`, and walled, `NO`;
+  - *the blocking sample by its place*: along 200 paths of up to ~6 km on the 3-arcsecond
+    tile, about half of them blocked, the blocking point and the worst Fresnel point each come
+    with their place in the profile, holding that very point; a path with none names no place;
+    and a blocking sample sharing its coordinates with the sample before it is named by its own
+    place, not the first match;
+  - *a tile read in one go and held once*: every post of a written tile, across the whole
+    16-bit range, as the file holds it, high byte first, with its void counted; a sampler in the
+    other interpolation mode holding the very same posts, not a copy, and still answering
+    once the sampler it came from is gone.
 - **Data not given, and the data a query reads**:
   - *told apart*: every sampler says a void from ground it wasn't given -- the raster block and
     a view over one (a cell with no value; outside it) and a window of it, the `.hgt` reader (a `-32768` post; off
@@ -300,7 +317,16 @@ taken at the wrong point, no look further on after a block, no allowance for the
 ceilings never used and an end in the ground unchecked each turn a test red. Three first
 survived -- the voids sat too near the ridge for the look further on to matter, the bow was
 too small at 3 km and 36 degrees, and no target stood inside a plateau -- and the tests were
-built out until each was caught. A suite that stays green with the defect restored verifies
-nothing.
+built out until each was caught. And so were the one way to use threads, the tile read once
+and a verdict that says when there is none: a path with no answer reported visible, the command
+line printing YES for one, the blocking place one sample early, the worst Fresnel place never
+set, the other interpolation mode copying the posts, a post read low byte first, a file that
+isn't a square of posts read, no report of no work before the threads, progress reported from
+every thread, a stop at the first report ignored and the threads used not counted each turn a
+test red. A stop at a later report not passed on first survived -- every stop the tests asked
+for came at the first report -- so the threads test now also stops the fast viewshed, the naive
+viewshed and a preparation at their third. In the app, writing the settings in place again
+turns two of the settings-file tests red. A suite that stays green with the defect restored
+verifies nothing.
 
 All of the above pass identically in Debug and Release.

@@ -87,37 +87,20 @@ inline InputProblem CheckViewshedRequest(GeoPoint observer, const DatumHeight& o
 using ViewshedProgress = std::function<bool(double fractionDone)>;
 
 // Runs rowWork(row, thread) once for every row in [0, gridRows), spread over
-// ThreadsFor(threadCount) threads, each taking the next row not yet taken. Progress is
-// reported on the calling thread only -- 0 before any thread starts, then before each later row
-// it takes, with the fraction of rows taken so far -- so a callback never runs on a thread its
-// caller didn't start, and the first report is always of no work done. A progress
-// report that returns false stops every thread before its next row, and false is returned.
-// At one thread this is a plain loop over the rows, reporting before each.
+// ThreadsFor(threadCount) threads, each taking the next row not yet taken
+// (ForEachBlockOnThreads, a row at a time). Progress is reported on the calling thread only --
+// 0 before any thread starts, then before each later row it takes, with the fraction of rows
+// taken so far. A progress report that returns false stops every thread before its next row,
+// and false is returned. At one thread this is a plain loop over the rows, reporting before each.
 //
 // Thread-safety: rowWork runs on several threads at once; it must write only its own row.
 template <class RowWork>
 bool ForEachRowOnThreads(int gridRows, int threadCount, const ViewshedProgress& progress, RowWork&& rowWork)
 {
-    // 0 is reported before any thread starts: the other threads may take the first rows before
-    // the calling thread takes one, and a report of the work done must still begin at none.
-    if (gridRows > 0 && progress && !progress(0.0)) return false;
-
-    std::atomic<int> nextRow{ 0 };
-    std::atomic<bool> stopped{ false };
-    RunOnThreads(ThreadsFor(threadCount), [&](int thread, const std::atomic<bool>& failed) {
-        while (!stopped.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed))
-        {
-            int row = nextRow.fetch_add(1, std::memory_order_relaxed);
-            if (row >= gridRows) return;
-            if (thread == 0 && row > 0 && progress && !progress((double)row / gridRows))
-            {
-                stopped = true;
-                return;
-            }
-            rowWork(row, thread);
-        }
-    });
-    return !stopped;
+    BlockProgress rowsTaken;
+    if (progress) rowsTaken = [&](size_t rows) { return progress((double)rows / gridRows); };
+    return ForEachBlockOnThreads((size_t)(std::max)(gridRows, 0), 1, ThreadsFor(threadCount), rowsTaken,
+        [&](size_t row, size_t, int thread) { rowWork((int)row, thread); }).finished;
 }
 
 // === THE NAIVE VIEWSHED, READING LESS ===
@@ -433,60 +416,48 @@ bool AnswerEachCellFromFastHorizons(GeoPoint observer, double observerEyeHeightM
     const double workUnits = (double)ends.size() + gridRows;
     const int threads = ThreadsFor(threadCount);
 
-    // Every ray into its own place, sixteen at a time from a shared counter, each thread with
-    // its own profile buffer. The calling thread reports progress before each block it takes.
+    // Every ray into its own place, sixteen at a time from a shared counter
+    // (ForEachBlockOnThreads), each thread with its own profile buffer. The calling thread
+    // reports progress before each block it takes.
     std::vector<Ray> cast(ends.size());
     std::vector<char> wasCast(ends.size(), 0);
     std::vector<std::vector<ProfileSample>> profiles(threads);
-    std::atomic<size_t> nextRay{ 0 };
-    std::atomic<bool> stopped{ false };
-    const size_t block = 16;
-    // 0 before any thread starts, as ForEachRowOnThreads reports it.
-    if (progress && !progress(0.0)) return false;
-    RunOnThreads(threads, [&](int thread, const std::atomic<bool>& failed) {
+    BlockProgress raysTaken;
+    if (progress) raysTaken = [&](size_t rays) { return progress(rays / workUnits); };
+    bool allCast = ForEachBlockOnThreads(ends.size(), 16, threads, raysTaken, [&](size_t first, size_t last, int thread) {
         std::vector<ProfileSample>& profile = profiles[thread];
-        while (!stopped.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed))
+        for (size_t i = first; i < last; i++)
         {
-            size_t first = nextRay.fetch_add(block, std::memory_order_relaxed);
-            if (first >= ends.size()) return;
-            if (thread == 0 && first > 0 && progress && !progress(first / workUnits))
-            {
-                stopped = true;
-                return;
-            }
-            for (size_t i = first; i < (std::min)(first + block, ends.size()); i++)
-            {
-                auto [row, col] = ends[i];
-                if (row == centerRow && col == centerCol) continue;
+            auto [row, col] = ends[i];
+            if (row == centerRow && col == centerCol) continue;
 
-                GetTerrainProfile(observer, cellCentre(row, col), spacingDeg, sampler, profile);
-                Ray& ray = cast[i];
-                ray.direction = directionOf(row, col);
-                ray.stepM = profile.back().distanceFromStartM / (profile.size() - 1);
-                ray.horizon.reserve(profile.size() - 1);
-                double horizon = -INFINITY;
-                for (size_t s = 1; s < profile.size(); s++)
+            GetTerrainProfile(observer, cellCentre(row, col), spacingDeg, sampler, profile);
+            Ray& ray = cast[i];
+            ray.direction = directionOf(row, col);
+            ray.stepM = profile.back().distanceFromStartM / (profile.size() - 1);
+            ray.horizon.reserve(profile.size() - 1);
+            double horizon = -INFINITY;
+            for (size_t s = 1; s < profile.size(); s++)
+            {
+                double dM = profile[s].distanceFromStartM;
+                if (profile[s].dataNotGiven)
                 {
-                    double dM = profile[s].distanceFromStartM;
-                    if (profile[s].dataNotGiven)
-                    {
-                        ray.firstNotGivenM = (std::min)(ray.firstNotGivenM, dM);
-                    }
-                    else if (!profile[s].elevationM.has_value())
-                    {
-                        ray.firstVoidM = (std::min)(ray.firstVoidM, dM);
-                    }
-                    else
-                    {
-                        horizon = (std::max)(horizon, CurvatureAdjustedSlope(*profile[s].elevationM, observerEyeHeightM, dM, k));
-                    }
-                    ray.horizon.push_back((float)horizon);
+                    ray.firstNotGivenM = (std::min)(ray.firstNotGivenM, dM);
                 }
-                wasCast[i] = 1;
+                else if (!profile[s].elevationM.has_value())
+                {
+                    ray.firstVoidM = (std::min)(ray.firstVoidM, dM);
+                }
+                else
+                {
+                    horizon = (std::max)(horizon, CurvatureAdjustedSlope(*profile[s].elevationM, observerEyeHeightM, dM, k));
+                }
+                ray.horizon.push_back((float)horizon);
             }
+            wasCast[i] = 1;
         }
-    });
-    if (stopped) return false;
+    }).finished;
+    if (!allCast) return false;
 
     // Gathered in the order one thread would have cast them.
     std::vector<Ray> rays;

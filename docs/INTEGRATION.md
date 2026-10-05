@@ -99,7 +99,9 @@ constraints directly.
   count too, the same to the bit at any count
   (`TestFastGridsAndPreparationAreTheSameAtEveryThreadCount`): 30 km in ~1.2 s on one thread,
   ~0.18 s on sixteen. The library defaults to one thread, so a host with threads of its own
-  decides. The comment above each function in `Viewshed.h` states its position.
+  decides. The comment above each function in `Viewshed.h` states its position. Every one
+  of them starts its threads in one place, `ForEachBlockOnThreads` (`Threads.h`), so a host
+  that must run the work on a pool of its own changes that function alone.
 - **A frame-safe line-of-sight path vs. a batch viewshed path, labelled in the
   headers** — the split already existed structurally (the scratch-buffer overload
   above is the frame-safe half; the viewsheds and `ComputeBatchLineOfSight` were

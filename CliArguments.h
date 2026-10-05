@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "LineOfSight.h"
 #include "VerticalDatum.h"
 
 // Number parsing for the command-line driver. std::stod and std::stoi throw on text
@@ -103,4 +104,12 @@ inline HeightArg ParseHeight(const char* text)
         result.problem = HeightArgProblem::UnknownDatum;
     }
     return result;
+}
+
+// What the command line prints for whether a line of sight sees its target: YES or NO, or
+// UNKNOWN when the computation gave no confident answer -- a path it couldn't read is never YES.
+// Complexity: O(1). Thread-safety: pure function, safe to call concurrently.
+inline const char* VisibleWord(const LineOfSightResult& los)
+{
+    return !IsOk(los.status) ? "UNKNOWN" : los.isVisible ? "YES" : "NO";
 }

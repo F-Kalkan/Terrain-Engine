@@ -7,12 +7,14 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <iostream>
 #include <sstream>
 #include <mutex>
 #include <random>
 #include <set>
 #include <thread>
+#include <vector>
 #include "IElevationSampler.h"
 #include "TerrainProfile.h"
 #include "LineOfSight.h"
@@ -44,6 +46,31 @@ inline void Expect(bool condition, const std::string& testName)
         g_testFailureCount++;
     }
 }
+
+// Every test, in the order it is written. TEST(name) { ... } defines a test and adds it here
+// before main starts, and main runs them all, so a test can't be written and then left out of
+// the run.
+struct RegisteredTest
+{
+    const char* name;
+    void (*run)();
+};
+
+inline std::vector<RegisteredTest>& RegisteredTests()
+{
+    static std::vector<RegisteredTest> tests;
+    return tests;
+}
+
+struct TestRegistration
+{
+    TestRegistration(const char* name, void (*run)()) { RegisteredTests().push_back({ name, run }); }
+};
+
+#define TEST(name) \
+    void name(); \
+    static TestRegistration name##Registration(#name, &name); \
+    void name()
 
 // Shorthand for "this many metres above the local terrain". Every sampler and
 // hand-built profile below also declares an explicit terrain datum, since the
@@ -157,7 +184,7 @@ inline std::vector<ProfileSample> MakeEvenlySpacedProfile(const std::vector<std:
 }
 
 // TEST 1 
-void TestFlatPlateauEverythingVisible()
+TEST(TestFlatPlateauEverythingVisible)
 {
     RasterBlockElevationSampler sampler = MakeTestGrid({
         {10, 10, 10},
@@ -172,7 +199,7 @@ void TestFlatPlateauEverythingVisible()
 }
 
 // TEST 2  
-void TestWallBlocksView()
+TEST(TestWallBlocksView)
 {
     // A single row of 30 m cells with a 50 m peak two cells in, and 2 m eyes on
     // 10 m ground at both ends. The sight line sits at 12 m, so the peak blocks it
@@ -190,7 +217,7 @@ void TestWallBlocksView()
 }
 
 // TEST 3 
-void TestCurvatureBlocksFlatTerrain()
+TEST(TestCurvatureBlocksFlatTerrain)
 {
     // 50 km flat terrain (elevation constanst = 0), observer and target = 2m
     // For flat terrain it should be visible on every scenario
@@ -212,7 +239,7 @@ void TestCurvatureBlocksFlatTerrain()
 }
 
 // TEST 4
-void TestVoidPointIsDegraded()
+TEST(TestVoidPointIsDegraded)
 {
     // P2 = Void. Function must skip that point and mark it as degraded.
 
@@ -224,7 +251,7 @@ void TestVoidPointIsDegraded()
 }
 
 // TEST 5
-void TestViewshedDetectsVoid()
+TEST(TestViewshedDetectsVoid)
 {
     // A 7x7 viewshed over a 5x5 raster of 30 m cells: the outer ring of viewshed
     // cells lies off the raster, where the sampler was given no data, and must come
@@ -252,7 +279,7 @@ void TestViewshedDetectsVoid()
 }
 
 // TEST 6
-void TestDeterminism()
+TEST(TestDeterminism)
 {
     RasterBlockElevationSampler sampler = MakeTestGrid({
         {10, 10, 10, 10, 10},
@@ -276,7 +303,7 @@ void TestDeterminism()
 }
 
 //Test 7
-void TestFastViewshedMatchesNaive()
+TEST(TestFastViewshedMatchesNaive)
 {
     // 21x21 cells of 30 m on flat ground, with a 50 m wall running north-south
     // three cells east of the observer. Everything west of the wall must be
@@ -332,7 +359,7 @@ void TestFastViewshedMatchesNaive()
 }
 
 //TEST 8    
-void TestSymmetricHillReciprocity()
+TEST(TestSymmetricHillReciprocity)
 {
     RasterBlockElevationSampler sampler = MakeTestGrid({
         {10, 10, 10, 10, 10},
@@ -356,7 +383,7 @@ void TestSymmetricHillReciprocity()
 }
 
 //TEST 9    
-void TestObserverBelowRim()
+TEST(TestObserverBelowRim)
 {
     RasterBlockElevationSampler sampler = MakeTestGrid({
         {5, 30, 5, 30, 5}
@@ -369,7 +396,7 @@ void TestObserverBelowRim()
 }
 
 //TEST 10
-void TestTargetOnFarSlopeVisible()
+TEST(TestTargetOnFarSlopeVisible)
 {
     std::vector<ProfileSample> slopeProfile = MakeEvenlySpacedProfile({ 0.0, 5.0, 10.0, 15.0, 20.0 }, 30.0);
 
@@ -379,7 +406,7 @@ void TestTargetOnFarSlopeVisible()
 }
 
 //TEST 11
-void TestFresnelClearancePartialObstruction()
+TEST(TestFresnelClearancePartialObstruction)
 {
     // Flat terrain (0m) except a 40m bump exactly at the midpoint.
     // 10km link, 50m masts both ends, 2.4 GHz.
@@ -398,7 +425,7 @@ void TestFresnelClearancePartialObstruction()
 }
 
 //TEST 12
-void TestBatchLineOfSightMatchesIndividualCalls()
+TEST(TestBatchLineOfSightMatchesIndividualCalls)
 {
     // One query straight across the pyramid's summit, one diagonal to a far corner.
     // Both sides of the comparison go through GetTerrainProfile unmodified at the
@@ -438,7 +465,7 @@ void TestBatchLineOfSightMatchesIndividualCalls()
 }
 
 //TEST 13
-void TestMultiTileSeamIsInvisible()
+TEST(TestMultiTileSeamIsInvisible)
 {
     // Tile A covers world lat [0,1), lon [0,1). Tile B covers world lat [1,2), lon [0,1).
     // Query (0.3, 0.3) falls in Tile A; query (1.3, 0.3) falls in Tile B.
@@ -465,7 +492,7 @@ void TestMultiTileSeamIsInvisible()
 }
 
 //TEST 14
-void TestBlockingFeatureIsLocalPeak()
+TEST(TestBlockingFeatureIsLocalPeak)
 {
     // Same pyramid shape as the wall test: elevations along the path are
     // 10,30,50,30,10 -- the blocking point (50) is higher than both its
@@ -482,7 +509,7 @@ void TestBlockingFeatureIsLocalPeak()
 }
 
 //TEST 15
-void TestFastViewshedVoidDegradesDownstream()
+TEST(TestFastViewshedVoidDegradesDownstream)
 {
     // 9x9 cells of 30 m, flat, with one void cell two cells east of the observer.
     // The ray due east crosses the void before reaching the two cells behind it.
@@ -508,7 +535,7 @@ void TestFastViewshedVoidDegradesDownstream()
 }
 
 //TEST 16
-void TestRealElevationSamplerReadsVoidFromFile()
+TEST(TestRealElevationSamplerReadsVoidFromFile)
 {
     // TestVoidPointIsDegraded only ever exercises the "elevation == nullopt"
     // branch by construction, on a hand-built profile -- it never touches
@@ -550,7 +577,7 @@ void TestRealElevationSamplerReadsVoidFromFile()
 }
 
 //TEST 17
-void TestInterpolationModesDifferOnRidgeline()
+TEST(TestInterpolationModesDifferOnRidgeline)
 {
     // Nearest and bilinear interpolation on the same ridgeline: query a point
     // straddling the pyramid's ridge (between the
@@ -580,7 +607,7 @@ void TestInterpolationModesDifferOnRidgeline()
 }
 
 //TEST 18
-void TestProfileMatchesFrozenOracle()
+TEST(TestProfileMatchesFrozenOracle)
 {
     // The naive profile's output, frozen as the oracle everything after it is
     // measured against. DATA/oracle_profile.csv freezes
@@ -671,7 +698,7 @@ void TestProfileMatchesFrozenOracle()
 }
 
 //TEST 19
-void TestNarrowSpikeCanFallBetweenSamples()
+TEST(TestNarrowSpikeCanFallBetweenSamples)
 {
     // A one-cell spike on an otherwise flat raster row of 30 m cells. Sampling at
     // the data's own spacing visits every cell, so the spike is found. Sampling
@@ -709,7 +736,7 @@ void TestNarrowSpikeCanFallBetweenSamples()
 }
 
 //TEST 20
-void TestMultiTileProfileCrossesSeamWithoutGap()
+TEST(TestMultiTileProfileCrossesSeamWithoutGap)
 {
     // TestMultiTileSeamIsInvisible only ever does point queries, never a
     // profile. This builds an actual GetTerrainProfile path that starts in
@@ -749,7 +776,7 @@ void TestMultiTileProfileCrossesSeamWithoutGap()
 }
 
 //TEST 21
-void TestEmptyAndSingleSampleProfilesAreDegradedNotUB()
+TEST(TestEmptyAndSingleSampleProfilesAreDegradedNotUB)
 {
     // profile.front()/back() on an empty profile is
     // undefined behaviour, and a single-sample profile has zero total distance,
@@ -777,7 +804,7 @@ void TestEmptyAndSingleSampleProfilesAreDegradedNotUB()
 }
 
 //TEST 22
-void TestBlockingFeatureClassificationIsSpacingInvariant()
+TEST(TestBlockingFeatureClassificationIsSpacingInvariant)
 {
     // A fixed 1 m epsilon in ClassifyBlockingFeature meant
     // the same physical grade classified differently depending on sample
@@ -797,7 +824,7 @@ void TestBlockingFeatureClassificationIsSpacingInvariant()
 }
 
 //TEST 23
-void TestViewshedLongitudeSpacingCorrectsForLatitude()
+TEST(TestViewshedLongitudeSpacingCorrectsForLatitude)
 {
     // A viewshed grid stepped by equal degrees on both axes reaches 30 km either
     // side north-south but only 24.1 km east-west at 36.5 N -- an ellipse, not
@@ -820,7 +847,7 @@ void TestViewshedLongitudeSpacingCorrectsForLatitude()
 }
 
 //TEST 24
-void TestConvertHeightBetweenDatums()
+TEST(TestConvertHeightBetweenDatums)
 {
     // Convert between ellipsoidal (HAE) and
     // orthometric (MSL) using a REQUIRED undulation argument -- ellipsoidal =
@@ -840,7 +867,7 @@ void TestConvertHeightBetweenDatums()
 }
 
 //TEST 25
-void TestComputeLineOfSightRejectsWrongHeightDatum()
+TEST(TestComputeLineOfSightRejectsWrongHeightDatum)
 {
     // A query that mixes datums without the means to convert must be rejected as
     // a value, not an exception. An ellipsoidal height over orthometric terrain
@@ -861,7 +888,7 @@ void TestComputeLineOfSightRejectsWrongHeightDatum()
 }
 
 //TEST 26
-void TestComputeLineOfSightRejectsUnknownTerrainDatum()
+TEST(TestComputeLineOfSightRejectsUnknownTerrainDatum)
 {
     // A sampler that never declared its datum (left at the default Unknown)
     // must not have its elevations silently trusted -- the query is rejected
@@ -882,7 +909,7 @@ void TestComputeLineOfSightRejectsUnknownTerrainDatum()
 }
 
 //TEST 27
-void TestRealElevationSamplerDeclaresOrthometricDatum()
+TEST(TestRealElevationSamplerDeclaresOrthometricDatum)
 {
     // Every IElevationSampler declares the datum of what it returns. SRTM .hgt files are
     // EGM96-referenced -- orthometric (MSL) heights -- regardless of whether
@@ -892,7 +919,7 @@ void TestRealElevationSamplerDeclaresOrthometricDatum()
 }
 
 //TEST 28
-void TestRasterBlockSamplerPositiveRowStep()
+TEST(TestRasterBlockSamplerPositiveRowStep)
 {
     // Positive row step: row 0 sits at the origin's own latitude, and
     // increasing row increases latitude (row 0 = south edge, row 2 = north edge).
@@ -916,7 +943,7 @@ void TestRasterBlockSamplerPositiveRowStep()
 }
 
 //TEST 29
-void TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth()
+TEST(TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth)
 {
     // Real raster sources usually put row 0 at the northern edge, which a signed,
     // negative latitude step states outright instead of leaving it as an
@@ -939,7 +966,7 @@ void TestRasterBlockSamplerNegativeRowStepPlacesRowZeroAtNorth()
 }
 
 //TEST 30
-void TestRasterBlockSamplerVoidCellPassesThrough()
+TEST(TestRasterBlockSamplerVoidCellPassesThrough)
 {
     // A cell's own std::optional carries validity directly -- no invented
     // sentinel value, unlike RealElevationSampler's -32768.
@@ -957,7 +984,7 @@ void TestRasterBlockSamplerVoidCellPassesThrough()
 }
 
 //TEST 31
-void TestRasterBlockSamplerWorksWithLineOfSight()
+TEST(TestRasterBlockSamplerWorksWithLineOfSight)
 {
     // "IElevationSampler itself survives" -- GetTerrainProfile/ComputeLineOfSight
     // need no changes at all to use this sampler instead of a file-backed one.
@@ -980,7 +1007,7 @@ void TestRasterBlockSamplerWorksWithLineOfSight()
 }
 
 //TEST 32
-void TestScratchBufferProfileAllocatesNothingOnReuse()
+TEST(TestScratchBufferProfileAllocatesNothingOnReuse)
 {
     // A per-frame line-of-sight query should be able to
     // reuse one caller-owned buffer instead of allocating a new vector every call.
@@ -1015,7 +1042,7 @@ void TestScratchBufferProfileAllocatesNothingOnReuse()
 }
 
 //TEST 33
-void TestGreatCircleDistanceMatchesKnownValues()
+TEST(TestGreatCircleDistanceMatchesKnownValues)
 {
     // The great-circle distance model had no known-value test anywhere: every
     // profile test used to overwrite distanceFromStartM before asserting, so
@@ -1042,7 +1069,7 @@ void TestGreatCircleDistanceMatchesKnownValues()
 }
 
 //TEST 34
-void TestGreatCircleInterpolateBulgesTowardPole()
+TEST(TestGreatCircleInterpolateBulgesTowardPole)
 {
     // The property that separates a great-circle path from straight-line
     // interpolation in degree-space: between two points sharing a non-equatorial
@@ -1075,7 +1102,7 @@ void TestGreatCircleInterpolateBulgesTowardPole()
 }
 
 //TEST 35
-void TestViewshedRespondsToCurvatureFactor()
+TEST(TestViewshedRespondsToCurvatureFactor)
 {
     // The viewsheds' original blocking defect was that Earth curvature never reached
     // the geometry inside either viewshed: k was accepted as a parameter and then
@@ -1110,7 +1137,7 @@ void TestViewshedRespondsToCurvatureFactor()
 }
 
 //TEST 36
-void TestFastViewshedSeesVoidOnEverySampleOfADiagonalRay()
+TEST(TestFastViewshedSeesVoidOnEverySampleOfADiagonalRay)
 {
     // A void anywhere along a ray must degrade what lies behind it. On a diagonal
     // ray, consecutive samples frequently round into the same grid cell, and the
@@ -1193,7 +1220,7 @@ void TestFastViewshedSeesVoidOnEverySampleOfADiagonalRay()
 }
 
 //TEST 37
-void TestTerrainProfileNeverSamplesCoarserThanRequested()
+TEST(TestTerrainProfileNeverSamplesCoarserThanRequested)
 {
     // GetTerrainProfile's own sample count and distances had no known-value test:
     // every profile test overwrote distanceFromStartM before asserting. Three
@@ -1229,7 +1256,7 @@ void TestTerrainProfileNeverSamplesCoarserThanRequested()
 }
 
 //TEST 38
-void TestLineOfSightInterpolatesByDistanceNotIndex()
+TEST(TestLineOfSightInterpolatesByDistanceNotIndex)
 {
     // A caller-built profile with uneven spacing: samples at 0, 900 and 1000 m,
     // ground 0 -> 85 -> 100 m, both ends 0 m above ground, curvature switched
@@ -1250,7 +1277,7 @@ void TestLineOfSightInterpolatesByDistanceNotIndex()
 }
 
 //TEST 39
-void TestViewshedsAgreeWhenObserverIsUnknown()
+TEST(TestViewshedsAgreeWhenObserverIsUnknown)
 {
     // Two ways nothing is known about the observer: it stands on a void, or its
     // height can't be put on the terrain's datum. Either way every cell -- the
@@ -1280,7 +1307,7 @@ void TestViewshedsAgreeWhenObserverIsUnknown()
 }
 
 //TEST 40
-void TestLineOfSightAcceptsHeightsInAnyTerrainComparableDatum()
+TEST(TestLineOfSightAcceptsHeightsInAnyTerrainComparableDatum)
 {
     // A host holds an airborne platform's altitude as a height above the
     // ellipsoid. Orthometric terrain 100 m / 130 m / 100 m over 100 m, curvature
@@ -1332,7 +1359,7 @@ void TestLineOfSightAcceptsHeightsInAnyTerrainComparableDatum()
 }
 
 //TEST 41
-void TestOneArcSecondTileReadsAtNativeResolution()
+TEST(TestOneArcSecondTileReadsAtNativeResolution)
 {
     // The 1-arcsecond (~30 m) tile holds 3601x3601 posts, which RealElevationSampler
     // infers from the file size. This walks 200 consecutive posts north along one
@@ -1384,7 +1411,7 @@ void TestOneArcSecondTileReadsAtNativeResolution()
 }
 
 //TEST 42
-void TestOneArcSecondTileAgreesWithThreeArcSecondTile()
+TEST(TestOneArcSecondTileAgreesWithThreeArcSecondTile)
 {
     // Two independent products for the same square degree: the ~90 m tile (SRTM
     // v2.1) and the ~30 m tile (SRTMGL1 v3, reprocessed and void-filled). Every
@@ -1437,7 +1464,7 @@ void TestOneArcSecondTileAgreesWithThreeArcSecondTile()
 }
 
 //TEST 43
-void TestRasterBlockViewReadsHostBufferInPlace()
+TEST(TestRasterBlockViewReadsHostBufferInPlace)
 {
     // A raster reply is one flat row-major elevation array plus a parallel validity
     // array. The view must read those arrays where they are. A 3x3 block of 30 m
@@ -1504,7 +1531,7 @@ void TestRasterBlockViewReadsHostBufferInPlace()
 }
 
 //TEST 44
-void TestRealElevationSamplerRejectsMalformedTile()
+TEST(TestRealElevationSamplerRejectsMalformedTile)
 {
     // A .hgt tile is a square of 16-bit posts, so its size must be twice a perfect
     // square. A download cut short is not: a 2x2 tile missing its last post holds 3
@@ -1545,7 +1572,7 @@ void TestRealElevationSamplerRejectsMalformedTile()
 }
 
 //TEST 45
-void TestViewshedsReturnEmptyForGridWithoutCells()
+TEST(TestViewshedsReturnEmptyForGridWithoutCells)
 {
     // A grid with no rows or no columns has no cells. Both viewsheds used to set the
     // observer's cell unconditionally -- writing into an empty result for a 0-cell
@@ -1577,7 +1604,7 @@ void TestViewshedsReturnEmptyForGridWithoutCells()
 }
 
 //TEST 46
-void TestCliNumberParsingRejectsWhatIsNotANumber()
+TEST(TestCliNumberParsingRejectsWhatIsNotANumber)
 {
     // The command line used std::stod/std::stoi, which throw on anything that isn't a
     // number; uncaught, that ended the process with no message. The replacements
@@ -1601,7 +1628,7 @@ void TestCliNumberParsingRejectsWhatIsNotANumber()
 }
 
 //TEST 47   
-void TestRealElevationSamplerReportsTileFacts()
+TEST(TestRealElevationSamplerReportsTileFacts)
 {
     // A 2x2 tile with one void post, written to a file whose name holds a
     // non-ASCII character, as a Turkish user's folder names often do.
@@ -1638,7 +1665,7 @@ void TestRealElevationSamplerReportsTileFacts()
 }
 
 //TEST 48
-void TestViewshedProgressIsReportedAndCanCancel()
+TEST(TestViewshedProgressIsReportedAndCanCancel)
 {
     // A long viewshed must be able to say how far it has got and stop when asked,
     // without the reporting changing a single cell. For both algorithms over a 21x21
@@ -1683,7 +1710,7 @@ void TestViewshedProgressIsReportedAndCanCancel()
 }
 
 //TEST 49
-void TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad()
+TEST(TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad)
 {
     // One loaded tile answering in either interpolation mode without reopening the
     // file: WithInterpolationMode must answer exactly as a sampler opened fresh in that
@@ -1732,7 +1759,7 @@ void TestRealElevationSamplerWithInterpolationModeMatchesAFreshLoad()
 }
 
 //TEST 50
-void TestSharedPathGeometryMatchesHandCalculation()
+TEST(TestSharedPathGeometryMatchesHandCalculation)
 {
     // The curvature drop, the sight line and the Fresnel radius are each written once,
     // shared by line of sight, Fresnel clearance, the fast viewshed and anything that
@@ -1761,7 +1788,7 @@ inline RasterBlockElevationSampler MakeWallScene(GeoPoint observer, double spaci
 }
 
 //TEST 51
-void TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight()
+TEST(TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight)
 {
     // Straight east of a 2 m observer, the wall stands 90 m out and the cell being asked
     // about 180 m out, all on 0 m ground. The sight line to a target of height h there
@@ -1795,7 +1822,7 @@ void TestViewshedTargetHeightSeesOverTheWallAtTheHandWorkedHeight()
 }
 
 //TEST 52
-void TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive()
+TEST(TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive)
 {
     // A taller target can see over more terrain, never less, and it never raises the
     // horizon for the cells behind it: every cell visible at a lower target height stays
@@ -1873,7 +1900,7 @@ void TestViewshedTargetHeightOnlyEverRevealsAndFastStillMatchesNaive()
 }
 
 //TEST 53
-void TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown()
+TEST(TestViewshedTargetHeightInAnUnusableDatumLeavesOnlyTheObserverKnown)
 {
     // A target height above the ellipsoid, with no geoid undulation to put it on the
     // terrain's mean-sea-level datum, can't be compared with the terrain: every cell but
@@ -1942,7 +1969,7 @@ inline bool WithinFastViewshedTolerance(const ViewshedAgreement& agreement, doub
 }
 
 //TEST 54
-void TestViewshedAgreementCountsEachDirectionOverTheVisibleCells()
+TEST(TestViewshedAgreementCountsEachDirectionOverTheVisibleCells)
 {
     // Worked by hand. The reference sees a 3x3 block. The approximation draws the
     // block one column east, leaves a hole in its middle, and adds a stray cell in
@@ -1989,7 +2016,7 @@ void TestViewshedAgreementCountsEachDirectionOverTheVisibleCells()
 }
 
 //TEST 55
-void TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere()
+TEST(TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere)
 {
     // Against the same 3x3 block in a 7x7 grid, where 40 of 49 cells are hidden:
     // counted over every cell, "hidden everywhere" would differ on 9 / 49 = 18%.
@@ -2028,7 +2055,7 @@ void TestViewshedAgreementRejectsAViewshedWithOneAnswerEverywhere()
 }
 
 //TEST 56
-void TestViewshedAgreementRefusesGridsOfDifferentSizes()
+TEST(TestViewshedAgreementRefusesGridsOfDifferentSizes)
 {
     // Nothing to compare cell for cell: the answer says so rather than counting a
     // partial overlap. And two viewsheds that see nothing agree completely.
@@ -2094,7 +2121,7 @@ inline void CheckFastViewshedAgainstNaiveOnRealTerrain(const std::string& path, 
 }
 
 //TEST 57
-void TestFastViewshedAgreesWithNaiveAtThreeObservers()
+TEST(TestFastViewshedAgreesWithNaiveAtThreeObservers)
 {
     // The three observers on the 1-arcsecond tile: little visible, half visible, and
     // in between -- each at 2 km and 5 km.
@@ -2135,7 +2162,7 @@ private:
 };
 
 //TEST 58
-void TestTheLibraryRefusesASpacingItCannotSampleAt()
+TEST(TestTheLibraryRefusesASpacingItCannotSampleAt)
 {
     // A 20 km path due north over level ground at 100 m, with a 400 m ridge 100 m deep
     // across it halfway: at 30 m spacing the ridge blocks the view. Every other spacing
@@ -2183,7 +2210,7 @@ void TestTheLibraryRefusesASpacingItCannotSampleAt()
 }
 
 //TEST 59
-void TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth()
+TEST(TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth)
 {
     // A latitude or longitude that isn't a finite number, or a latitude past a pole, is
     // refused with the reason by every entry point that takes one. The samplers answer
@@ -2254,7 +2281,7 @@ void TestTheLibraryRefusesCoordinatesThatAreNotOnTheEarth()
 }
 
 //TEST 60
-void TestTheLibraryRefusesHeightsThatAreNotNumbers()
+TEST(TestTheLibraryRefusesHeightsThatAreNotNumbers)
 {
     // A height, or its geoid undulation, that isn't a finite number is refused as that --
     // not taken for a datum problem, and never compared: NaN makes every comparison
@@ -2299,7 +2326,7 @@ void TestTheLibraryRefusesHeightsThatAreNotNumbers()
 }
 
 //TEST 61
-void TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse()
+TEST(TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse)
 {
     // k divides the Earth's radius: zero divides by zero, a negative k bends the Earth
     // the wrong way, and NaN turns every comparison false. A frequency of zero or less
@@ -2345,7 +2372,7 @@ void TestTheLibraryRefusesACurvatureFactorOrFrequencyItCannotUse()
 }
 
 //TEST 62
-void TestAViewshedGridThatWouldReachAPoleIsRefused()
+TEST(TestAViewshedGridThatWouldReachAPoleIsRefused)
 {
     // A viewshed lays out its columns along each row's latitude, dividing by its cosine:
     // at a pole there is no longitude to lay them along. A grid is refused when any row
@@ -2376,7 +2403,7 @@ void TestAViewshedGridThatWouldReachAPoleIsRefused()
 }
 
 //TEST 63
-void TestRealElevationSamplerBilinearMatchesAHandWorkedValue()
+TEST(TestRealElevationSamplerBilinearMatchesAHandWorkedValue)
 {
     // The .hgt reader's own bilinear interpolation, against a value worked by hand. Test
     // 49 reads a point in the middle of four posts, where the row and column fractions
@@ -2450,7 +2477,7 @@ inline std::vector<double> DistinctMinimumVisibleHeights(const MinimumVisibleHei
 }
 
 //TEST 64
-void TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight()
+TEST(TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight)
 {
     // The wall scene of test 51: a 2 m observer, 0 m ground, a 50 m wall 90 m east. A
     // target D metres east is seen once the sight line to it clears the wall's top, raised
@@ -2493,7 +2520,7 @@ void TestMinimumVisibleHeightBehindTheWallIsTheHandWorkedHeight()
 }
 
 //TEST 65
-void TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm()
+TEST(TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm)
 {
     // Level ground at 0 m everywhere: only the Earth's curvature hides anything. An eye h
     // above the ground sees it out to the horizon d_h = sqrt(2kR h); a target D beyond that
@@ -2564,7 +2591,7 @@ void TestMinimumVisibleHeightOnASmoothSphereMatchesTheClosedForm()
 }
 
 //TEST 66
-void TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight()
+TEST(TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight)
 {
     // Asking the reference "which cells does a target H above the ground see?" must give
     // exactly the cells ComputeViewshedNaive gives for a target of height H -- and the fast
@@ -2625,7 +2652,7 @@ void TestMinimumVisibleHeightThresholdedIsTheViewshedAtThatHeight()
 }
 
 //TEST 67
-void TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals()
+TEST(TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals)
 {
     // Where the viewshed has no confident answer, neither has this, for the same reason:
     // an observer standing on a void leaves every cell Degraded, as in both viewsheds, with
@@ -2724,7 +2751,7 @@ void TestMinimumVisibleHeightKeepsTheViewshedsNoAnswerStatesAndRefusals()
 inline const double MinimumVisibleHeightComparedAtM[] = { 0.0, 2.0, 10.0, 30.0, 100.0 };
 
 //TEST 68
-void TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers()
+TEST(TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers)
 {
     // The three observers of test 57 on the 1-arcsecond tile, each at 2 km and 5 km, with
     // its defaults: at every height above, the fast version is within the fast viewshed's
@@ -2793,7 +2820,7 @@ void TestMinimumVisibleHeightFastAgreesWithTheReferenceAtThreeObservers()
 }
 
 //TEST 69
-void TestPreparedObserverAnswersTheWallAndTheAirAsTheLineOfSightDoes()
+TEST(TestPreparedObserverAnswersTheWallAndTheAirAsTheLineOfSightDoes)
 {
     // The wall scene of test 51, prepared once out to 300 m. Straight east of the 2 m
     // observer, a target 180 m out clears the 50 m wall once it stands 98.00095 m tall
@@ -2867,7 +2894,7 @@ ViewshedAgreement CompareTargetAnswers(const std::vector<CellVisibility>& approx
 }
 
 //TEST 70
-void TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets()
+TEST(TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets)
 {
     // DATA/prepared_observer_targets.csv lists 15,000 seeded targets for each of the three
     // observers of the fast/naive comparison, over a 50 km disc on the 1-arcsecond tile: a
@@ -2995,7 +3022,7 @@ void TestPreparedObserverAgreesWithLineOfSightOverTheListedTargets()
 }
 
 //TEST 71
-void TestPreparedObserverQueriesAllocateNothing()
+TEST(TestPreparedObserverQueriesAllocateNothing)
 {
     // After the preparation, answering a target allocates nothing, whatever the answer: seen,
     // hidden, past the radius, with no confident answer, or refused. Counted over 10,000
@@ -3027,7 +3054,7 @@ void TestPreparedObserverQueriesAllocateNothing()
 }
 
 //TEST 72
-void TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals()
+TEST(TestPreparedObserverKeepsTheNoAnswerStatesAndRefusals)
 {
     // As the viewsheds: a target whose rays cross a void, or which stands on one, has no
     // confident answer; an observer standing on a void, or a target height that can't be put
@@ -3150,7 +3177,7 @@ private:
 };
 
 //TEST 73
-void TestLineOfSightPairsAreTheSameAtEveryThreadCount()
+TEST(TestLineOfSightPairsAreTheSameAtEveryThreadCount)
 {
     // Eight observers against 241 targets on the 1-arcsecond tile -- on the ground, in the
     // air, some past the tile's edge where there is no data, and one not on the Earth at all --
@@ -3204,7 +3231,7 @@ void TestLineOfSightPairsAreTheSameAtEveryThreadCount()
 }
 
 //TEST 74
-void TestLineOfSightPairsRefuseEachPairItCannotSample()
+TEST(TestLineOfSightPairsRefuseEachPairItCannotSample)
 {
     // As the batch: a spacing it can't sample at refuses every pair, each with its reason; no
     // observers, or no targets, is an empty answer; and an observer's i-th answer is its i-th
@@ -3238,7 +3265,7 @@ void TestLineOfSightPairsRefuseEachPairItCannotSample()
 }
 
 //TEST 75
-void TestReferenceGridsAreTheSameAtEveryThreadCount()
+TEST(TestReferenceGridsAreTheSameAtEveryThreadCount)
 {
     // The naive viewshed and the exact minimum visible height, over 1 km on the 1-arcsecond
     // tile, on 1, 2, 3 threads and one per hardware thread: the same grid to the bit every
@@ -3287,7 +3314,7 @@ public:
 };
 
 //TEST 76
-void TestDataNotGivenIsToldApartFromAVoid()
+TEST(TestDataNotGivenIsToldApartFromAVoid)
 {
     // A void is a hole in data the sampler was given; data not given is ground it never had.
     // Every sampler says which: the raster block and a view over one (a cell with no value,
@@ -3445,7 +3472,7 @@ private:
 };
 
 //TEST 77
-void TestQueryExtentsAreTheBoxesTheQueriesRead()
+TEST(TestQueryExtentsAreTheBoxesTheQueriesRead)
 {
     // Asked before it runs, a query says which box of latitude and longitude it will read;
     // run through a sampler that keeps the box around every point it is asked for, it must
@@ -3502,7 +3529,7 @@ void TestQueryExtentsAreTheBoxesTheQueriesRead()
 }
 
 //TEST 78
-void TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile()
+TEST(TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile)
 {
     // Each query is run twice on the 1-arcsecond tile: once on the whole tile, once on a
     // window of it holding only the posts its reported box needs (PostsCovering). The two
@@ -3602,7 +3629,7 @@ void TestAQueryGivenOnlyItsExtentAnswersAsOnTheWholeTile()
 }
 
 //TEST 79
-void TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm()
+TEST(TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm)
 {
     // A height above sea level or the ellipsoid can put an eye or a target below the ground
     // under it: a target at 200 m above sea level over a 300 m plateau, an observer at 50 m
@@ -3661,7 +3688,7 @@ void TestAnEyeOrTargetBelowItsGroundIsHiddenByEveryAlgorithm()
 }
 
 //TEST 80
-void TestACommandLineHeightSaysItsDatum()
+TEST(TestACommandLineHeightSaysItsDatum)
 {
     // The command line takes a height in any datum the engine can put on the terrain: a bare
     // number, as always, above the ground; <m>:agl the same; <m>:msl above mean sea level;
@@ -3729,14 +3756,14 @@ private:
 };
 
 //TEST 81
-void TestFastGridsAndPreparationAreTheSameAtEveryThreadCount()
+TEST(TestFastGridsAndPreparationAreTheSameAtEveryThreadCount)
 {
     // The fast viewshed -- for the ground, for a target 2,000 m above sea level, and from an
     // observer whose grid runs past the tile's edge -- the fast minimum visible height and a
     // prepared observer's tables, over 3 km on the 1-arcsecond tile, on 1, 2, 3, 7 threads and
     // one per hardware thread: the same to the bit every time. Three threads asked for, three
     // read the terrain. Progress is reported only on the calling thread, and a stop asked for
-    // at the first report stops every thread.
+    // at the first report stops every thread; one asked for at a later report stops the run there.
     RealElevationSampler sampler("DATA/SRTM1/N36W112.hgt", 36.0, -112.0);
     if (!sampler.IsLoaded())
     {
@@ -3816,11 +3843,21 @@ void TestFastGridsAndPreparationAreTheSameAtEveryThreadCount()
     PreparedObserver stoppedRays = prepare(0, [&](double) { rayReports++; return false; }, sampler);
     bool stops = stoppedGrid.cancelled && gridReports == 1 && stoppedRays.cancelled && rayReports == 1;
 
-    Expect(same && reportedHere && startsAtZero && threaded && stops, "TestFastGridsAndPreparationAreTheSameAtEveryThreadCount");
+    // And a stop asked for at a later report, on one thread, where the calling thread takes every
+    // block: the fast viewshed's rays, the naive viewshed's rows and a preparation's rays each
+    // stop at the third report and come back cancelled, with no report after it.
+    auto stopAtTheThird = [](int& reports) { return ViewshedProgress([&reports](double) { return ++reports != 3; }); };
+    int fastReports = 0, naiveReports = 0, prepareReports = 0;
+    bool laterStops = ComputeViewshedFast(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, stopAtTheThird(fastReports), ground, 1).cancelled
+        && ComputeViewshedNaive(observer, Agl(2.0), size, size, spacingDeg, sampler, 4.0 / 3.0, stopAtTheThird(naiveReports), ground, 1).cancelled
+        && prepare(1, stopAtTheThird(prepareReports), sampler).cancelled
+        && fastReports == 3 && naiveReports == 3 && prepareReports == 3;
+
+    Expect(same && reportedHere && startsAtZero && threaded && stops && laterStops, "TestFastGridsAndPreparationAreTheSameAtEveryThreadCount");
 }
 
 //TEST 82
-void TestAGreatCircleArcGivesEveryPointToTheBit()
+TEST(TestAGreatCircleArcGivesEveryPointToTheBit)
 {
     // GreatCircleArc works out the sines and cosines of an arc's ends once, where every point
     // used to take ten of them; every profile, ray and viewshed rests on it. Written out here as
@@ -3941,7 +3978,7 @@ private:
 };
 
 //TEST 83
-void TestTheNaiveViewshedReadsLessAndAnswersTheSame()
+TEST(TestTheNaiveViewshedReadsLessAndAnswersTheSame)
 {
     // Where the tile reader puts ceilings on the ground, the naive viewshed reads only the terrain
     // that can decide each cell. Every cell must still be what it is without them -- the exact
@@ -4017,7 +4054,7 @@ void TestTheNaiveViewshedReadsLessAndAnswersTheSame()
 }
 
 //TEST 84
-void TestACeilingIsNeverBelowWhatTheSamplerReads()
+TEST(TestACeilingIsNeverBelowWhatTheSamplerReads)
 {
     // A ceiling may overstate, never understate: in boxes of every size, some reaching past the
     // tile or a window, no point the tile reader reads inside the box -- nearest or bilinear -- is
@@ -4070,4 +4107,143 @@ void TestACeilingIsNeverBelowWhatTheSamplerReads()
         && onVoid && onVoid->mayHaveGap && rolling.Sample(latitude, onVoidLongitude).data == ElevationData::Void;
 
     Expect(sound && tight && gapsSeen > 50 && boxes == 1600, "TestACeilingIsNeverBelowWhatTheSamplerReads");
+}
+
+// TEST 85
+TEST(TestALineOfSightWithNoAnswerIsNeverVisible)
+{
+    // A path the library can't answer says so, and is never reported as visible -- by the library
+    // or by the command line, which prints UNKNOWN for it. Every way a flat 30 m path can go
+    // unanswered: a void along it, a void at its far end, ground never given, a height that isn't
+    // a number, a k it can't use, a profile of one sample, terrain with no datum, and a void past a
+    // wall that already blocks. Beside them the same flat path, seen, and a wall that blocks it.
+    std::vector<ProfileSample> flat = MakeEvenlySpacedProfile({ 10.0, 10.0, 10.0, 10.0, 10.0 }, 30.0);
+    std::vector<ProfileSample> voidInside = MakeEvenlySpacedProfile({ 10.0, 10.0, std::nullopt, 10.0, 10.0 }, 30.0);
+    std::vector<ProfileSample> voidAtEnd = MakeEvenlySpacedProfile({ 10.0, 10.0, 10.0, 10.0, std::nullopt }, 30.0);
+    std::vector<ProfileSample> notGiven = flat;
+    notGiven[3].elevationM.reset();
+    notGiven[3].dataNotGiven = true;
+    std::vector<ProfileSample> noDatum = flat;
+    for (ProfileSample& sample : noDatum) sample.elevationDatum = VerticalDatum::Unknown;
+    std::vector<ProfileSample> oneSample(flat.begin(), flat.begin() + 1);
+    std::vector<ProfileSample> wall = MakeEvenlySpacedProfile({ 10.0, 10.0, 80.0, 10.0, 10.0 }, 30.0);
+    std::vector<ProfileSample> wallThenVoid = MakeEvenlySpacedProfile({ 10.0, 80.0, 10.0, std::nullopt, 10.0 }, 30.0);
+
+    std::vector<LineOfSightResult> unanswered = {
+        ComputeLineOfSight(voidInside, Agl(2.0), Agl(2.0)),
+        ComputeLineOfSight(voidAtEnd, Agl(2.0), Agl(2.0)),
+        ComputeLineOfSight(notGiven, Agl(2.0), Agl(2.0)),
+        ComputeLineOfSight(flat, Agl(NAN), Agl(2.0)),
+        ComputeLineOfSight(flat, Agl(2.0), Agl(2.0), 0.0),
+        ComputeLineOfSight(oneSample, Agl(2.0), Agl(2.0)),
+        ComputeLineOfSight(noDatum, Agl(2.0), Agl(2.0)),
+        ComputeLineOfSight(wallThenVoid, Agl(2.0), Agl(2.0)),
+    };
+    bool neverVisible = true;
+    for (const LineOfSightResult& los : unanswered)
+    {
+        neverVisible = neverVisible && !IsOk(los.status) && !los.isVisible && std::string(VisibleWord(los)) == "UNKNOWN";
+    }
+
+    LineOfSightResult seen = ComputeLineOfSight(flat, Agl(2.0), Agl(2.0));
+    LineOfSightResult blocked = ComputeLineOfSight(wall, Agl(2.0), Agl(2.0));
+    bool answered = IsOk(seen.status) && seen.isVisible && std::string(VisibleWord(seen)) == "YES"
+        && IsOk(blocked.status) && !blocked.isVisible && std::string(VisibleWord(blocked)) == "NO";
+
+    Expect(neverVisible && answered, "TestALineOfSightWithNoAnswerIsNeverVisible");
+}
+
+// TEST 86
+TEST(TestTheBlockingSampleComesWithItsPlaceInTheProfile)
+{
+    // The blocking point, and the point where the first Fresnel zone is most obstructed, come with
+    // their place in the profile, set where they are found -- not looked up afterwards by matching
+    // coordinates, which two samples can share. Along 200 paths of up to ~6 km on the 3-arcsecond
+    // tile, from eyes 2 m to 202 m up -- about half of them blocked -- the sample at that place is
+    // the very point, at the very elevation, the result names; a path with no blocking point names
+    // no place. And on a hand-built path whose blocking sample shares its coordinates with the
+    // sample before it, the place is the blocking sample's own.
+    RealElevationSampler sampler("DATA/N36W112.hgt", 36.0, -112.0);
+    if (!sampler.IsLoaded())
+    {
+        Skip("TestTheBlockingSampleComesWithItsPlaceInTheProfile", "DATA/N36W112.hgt not found");
+        return;
+    }
+
+    const double spacingDeg = MetersToLatitudeDeg(90.0);
+    bool placed = true;
+    int blockedPaths = 0, clearPaths = 0;
+    for (int i = 0; i < 200; i++)
+    {
+        GeoPoint a{ 36.1 + 0.8 * std::fabs(std::sin(i * 0.61)), -111.9 + 0.8 * std::fabs(std::cos(i * 0.37)) };
+        GeoPoint b{ a.latitudeDeg + 0.04 * std::sin(i * 0.29), a.longitudeDeg + 0.05 * std::cos(i * 0.83) };
+        std::vector<ProfileSample> profile = GetTerrainProfile(a, b, spacingDeg, sampler);
+        LineOfSightResult los = ComputeLineOfSight(profile, Agl(2.0 + 40.0 * (i % 6)), Agl(2.0));
+        FresnelClearanceResult fresnel = ComputeFresnelClearance(profile, Agl(2.0 + 40.0 * (i % 6)), Agl(2.0), 2.4e9);
+        if (los.blockingPoint.has_value())
+        {
+            size_t at = los.blockingSampleIndex.value_or(profile.size());
+            placed = placed && at < profile.size()
+                && profile[at].point.latitudeDeg == los.blockingPoint->latitudeDeg
+                && profile[at].point.longitudeDeg == los.blockingPoint->longitudeDeg
+                && profile[at].elevationM == los.blockingElevationM;
+            blockedPaths++;
+        }
+        else
+        {
+            placed = placed && !los.blockingSampleIndex.has_value();
+            clearPaths++;
+        }
+        if (fresnel.worstPoint.has_value())
+        {
+            size_t at = fresnel.worstSampleIndex.value_or(profile.size());
+            placed = placed && at < profile.size()
+                && profile[at].point.latitudeDeg == fresnel.worstPoint->latitudeDeg
+                && profile[at].point.longitudeDeg == fresnel.worstPoint->longitudeDeg;
+        }
+        else
+        {
+            placed = placed && !fresnel.worstSampleIndex.has_value();
+        }
+    }
+
+    std::vector<ProfileSample> twins = MakeEvenlySpacedProfile({ 10.0, 10.0, 80.0, 10.0, 10.0 }, 30.0);
+    twins[2].point = twins[1].point;
+    LineOfSightResult twinBlocked = ComputeLineOfSight(twins, Agl(2.0), Agl(2.0));
+    bool ownPlace = twinBlocked.blockingSampleIndex == std::optional<size_t>(2);
+
+    Expect(placed && ownPlace && blockedPaths > 20 && clearPaths > 20, "TestTheBlockingSampleComesWithItsPlaceInTheProfile");
+}
+
+// TEST 87
+TEST(TestATileIsReadInOneGoAndHeldOnce)
+{
+    // Every post exactly as the file holds it, high byte first, across the whole range of a
+    // 16-bit post, with the void counted; and a sampler in the other interpolation mode holding
+    // the very same posts rather than a second copy of them -- still answering once the sampler
+    // it came from is gone. A 3 x 3 tile over one degree: (0.25, 0.75) lies midway between the
+    // posts 0, 1, 256 and 32767, so bilinear reads 8256 there.
+    const std::string path = "read_once_test_tile.hgt";
+    const int16_t posts[9] = { -32768, -32767, -256, -1, 0, 1, 255, 256, 32767 };
+    {
+        std::ofstream file(path, std::ios::binary);
+        for (int16_t value : posts)
+        {
+            char bytes[2] = { (char)((value >> 8) & 0xFF), (char)(value & 0xFF) };
+            file.write(bytes, 2);
+        }
+    }
+    auto original = std::make_unique<RealElevationSampler>(path, 0.0, 0.0);
+    std::remove(path.c_str());
+
+    bool exact = original->IsLoaded() && original->Posts().size() == 9 && original->VoidCount() == 1
+        && original->Sample(1.0, 0.0).data == ElevationData::Void;
+    for (size_t i = 0; exact && i < 9; i++) exact = original->Posts()[i] == posts[i];
+
+    RealElevationSampler bilinear = original->WithInterpolationMode(InterpolationMode::Bilinear);
+    bool shared = &bilinear.Posts() == &original->Posts();
+    original.reset();
+    bool outlives = bilinear.Posts().size() == 9 && bilinear.Posts()[8] == 32767 && bilinear.GetElevation(0.25, 0.75) == 8256.0;
+
+    Expect(exact && shared && outlives, "TestATileIsReadInOneGoAndHeldOnce");
 }

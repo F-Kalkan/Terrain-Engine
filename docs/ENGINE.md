@@ -14,7 +14,8 @@ in-memory implementations of it (`FakeElevationSampler`, a tiny index-addressed 
 height built on them (`MinimumVisibleHeight.h`, see "Minimum visible height" below), the
 prepared observer that answers many targets a second from one place (`PreparedObserver.h`,
 see "Many answers per second from a fixed observer" below), many pairs on every core
-(`LineOfSightPairs.h`, `Threads.h`), the boxes of data queries will read (`QueryExtent.h`, see
+(`LineOfSightPairs.h`; `Threads.h` spreads every grid, ray and pair across threads), the
+boxes of data queries will read (`QueryExtent.h`, see
 "Data not given, and the data a query will read" below), and
 `CompareViewsheds` (`ViewshedAgreement.h`), which measures an approximate viewshed
 against its exact reference -- see "Fast vs. naive viewshed" below. It has no
@@ -27,7 +28,9 @@ refused — with big-endian 16-bit signed elevations and void = `-32768`. It rep
 loaded tile's posts per side, void count and south-west corner, and takes its path as a
 `std::filesystem::path`, so a folder or file name with non-ASCII characters opens too. It
 keeps a height pyramid over its posts, to put a ceiling on any box of ground without reading
-it (`CeilingIn`; see "The naive viewshed, reading less" below).
+it (`CeilingIn`; see "The naive viewshed, reading less" below). It reads a file in one go and
+holds its posts once, however many samplers answer from them (see "Reading a tile, and
+holding it once" below).
 
 The Windows dependency (`psapi.h`) lives only in `TerrainEngine` (the CLI/benchmark
 driver), never in `TerrainCore` or `TerrainReader` — it is not a library dependency,
@@ -195,13 +198,16 @@ AMD Ryzen 7 3800X (8 cores / 16 threads), 16 GB RAM, Windows 11 Pro x64, Release
 
 | Operation                                        | Tile         | Wall time     | Peak memory |
 |--------------------------------------------------|--------------|---------------|-------------|
-| 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.13–0.18 ms | ~11.5 MB    |
+| 50 km profile @ 30 m spacing (1,668 samples)     | 3-arcsecond  | ~0.13–0.18 ms | ~9.0 MB     |
 | 30 km-radius viewshed @ 30 m spacing (2000×2000) | 3-arcsecond  | ~1.18–1.19 s  | ~62.5 MB    |
-| 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.29–0.37 ms | ~66.3 MB    |
+| 50 km profile @ 30 m spacing (1,668 samples)     | 1-arcsecond  | ~0.29–0.37 ms | ~41.9 MB    |
 | 30 km-radius viewshed @ 30 m spacing (2000×2000) | 1-arcsecond  | ~1.19–1.26 s  | ~95.5 MB    |
 
 The peak memory rose, ~0.7 MB and ~12 MB, with the tile's height pyramid (see "The naive
-viewshed, reading less" below): from ~10.8, ~61.1, ~54.7 and ~83.1 MB.
+viewshed, reading less" below): from ~10.8, ~61.1, ~54.7 and ~83.1 MB. The two profile rows then
+fell, from ~11.5 and ~66.3 MB, when the reader stopped holding the file's bytes beside its posts
+while loading (see "Reading a tile, and holding it once" below); a viewshed's peak is set by its own
+work, and measured again it is within a megabyte of before.
 
 The viewshed rows are on one thread; on every core the same viewshed takes ~0.18 s (see
 "Fast grids and a prepared observer on every core" below). Every row moved again, down, when
@@ -221,8 +227,8 @@ previous algorithm took ~1.22 s and ~24 MB (3-arcsecond) and ~1.19 s and ~55 MB
 same-day pair is the one to compare.
 
 The 1-arcsecond tile's higher peak memory is the tile, not the computation: 3601×3601
-posts is ~25.9 MB of 16-bit elevations, nine times the 3-arcsecond tile, and the reader
-briefly holds the file's raw bytes and the decoded elevations together while loading.
+posts is ~25.9 MB of 16-bit elevations, nine times the 3-arcsecond tile, with its height
+pyramid beside it.
 (The first 1-arcsecond profile run took 0.77 ms, a cold start; the next two took 0.42 ms.)
 
 These come from the `TerrainEngine.exe` CLI, whose one translation unit also holds the
@@ -769,6 +775,41 @@ The fast viewshed still reads every ray in full: it builds each ray's horizon, w
 sample. The exact minimum visible height, line of sight and many pairs read every sample too;
 they report where a line is blocked and by how much, which a ceiling can't give.
 
+## Reading a tile, and holding it once
+
+A tile's size is checked before it is read: only a file of a whole square of posts is read at
+all, in one call, straight into the posts, each then made from its two bytes, high byte first
+(`RealElevationSampler`, `TestATileIsReadInOneGoAndHeldOnce`). It used to be read a byte at a
+time into a buffer of its own and decoded from there. Measured the same day, built against
+the reader before and after, loading the 1-arcsecond tile -- its height pyramid included,
+~0.04 s of it -- went from ~0.24-0.27 s to ~0.08-0.09 s, the 3-arcsecond one from ~23-27 ms to
+~9 ms, with every post the same.
+
+A sampler in the other interpolation mode (`WithInterpolationMode`) shares the posts and their
+pyramid rather than copying them: neither ever changes, and they stay held for as long as
+either sampler lives. A DLL tile, which keeps one sampler per mode, holds ~37 MB for the
+1-arcsecond tile instead of ~62 MB, and ~4 MB for the 3-arcsecond one instead of ~7 MB.
+Loading no longer holds the file's bytes beside its posts, so the peak while loading is the
+tile and its pyramid alone: a 50 km profile, whose peak the load sets, from ~66.3 MB to ~41.9 MB
+on the 1-arcsecond tile and from ~11.5 MB to ~9.0 MB on the 3-arcsecond one. Reading the posts
+through the shared pointer costs nothing measurable: 2,000 profiles of 50 km take ~101 µs and
+~105 µs each before and after, and the 30 km viewsheds, fast and naive, on one thread and
+sixteen, the same time within the noise.
+
+The line of sight's blocking point and the Fresnel clearance's worst point come with their
+place in the profile (`blockingSampleIndex`, `worstSampleIndex`), set where each is found; the
+DLL reports those, where it used to search the profile for a sample with the same coordinates
+-- which two samples can share (`TestTheBlockingSampleComesWithItsPlaceInTheProfile`).
+
+Every spreading of work across threads -- the rows of each grid, the fast grids' rays, a
+preparation's rays and many pairs -- now goes through one function, `ForEachBlockOnThreads`
+(`Threads.h`): blocks taken from a shared counter, progress on the calling thread only and 0
+before any thread starts, a stop reaching every thread. It was written four times, each a
+little different -- the report of no work done before the threads start had to be added to
+two of them by hand. Every answer is the same to the bit as before, on 1, 4 and 16 threads, by
+a fingerprint of profiles, both viewsheds, both minimum visible heights, a prepared observer
+and many pairs over both tiles.
+
 ## Data not given, and the data a query will read
 
 **The question.** A real-time host loads elevation for a region rather than reading a file
@@ -894,6 +935,13 @@ unreadable elevation file is also distinguished from a genuine void:
 `RealElevationSampler::IsLoaded()` reports load failure explicitly — a missing file, or
 one whose size isn't a whole square of posts, as a download cut short would be — and the CLI refuses
 to run rather than silently treating every query as void.
+
+A line of sight with no confident answer is never reported as visible
+(`TestALineOfSightWithNoAnswerIsNeverVisible`): `isVisible` is true only with status `Ok` and
+nothing blocking, the DLL's `is_visible` likewise, and the command line prints `UNKNOWN`, with
+the status, for every query it can't answer -- `los` and each line of `batch` alike. Until
+v4.3 a path crossing a void kept the visible it started with, and the command line printed
+"Visible: YES" above the status that said there was no answer.
 
 ## API contract
 

@@ -230,9 +230,10 @@ inline double FirstFresnelRadiusM(double wavelengthM, double d1M, double d2M, do
 
 struct LineOfSightResult
 {
-    bool isVisible = false;
+    bool isVisible = false;                      // true only with status Ok and nothing blocking
     ComputationStatus status = ComputationStatus::Ok;
     std::optional<GeoPoint> blockingPoint;
+    std::optional<size_t> blockingSampleIndex;   // the blocking point's place in the profile
     std::optional<double> blockingElevationM;
     double clearanceDeficitM = 0.0;
     TerrainFeatureType blockingFeature = TerrainFeatureType::Unknown;
@@ -265,7 +266,6 @@ struct LineOfSightResult
 inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& profile, DatumHeight observerHeight, DatumHeight targetHeight, double k = 4.0 / 3.0)
 {
     LineOfSightResult result;
-    result.isVisible = true;
     result.clearanceDeficitM = 0;
     double worstDeficitM = -999999;
 
@@ -324,8 +324,8 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
             worstDeficitM = deficitM;
             if (deficitM > 0)
             {
-                result.isVisible = false;
                 result.blockingPoint = profile[i].point;
+                result.blockingSampleIndex = i;
                 result.blockingElevationM = profile[i].elevationM;
                 result.clearanceDeficitM = deficitM;
                 result.blockingFeature = ClassifyBlockingFeature(profile, (int)i);
@@ -333,6 +333,9 @@ inline LineOfSightResult ComputeLineOfSight(const std::vector<ProfileSample>& pr
         }
     }
 
+    // Seen only when the whole path was read and nothing on it blocks: a path with no
+    // confident answer is never reported as visible.
+    result.isVisible = result.status == ComputationStatus::Ok && !result.blockingPoint.has_value();
     return result;
 }
 
@@ -340,6 +343,7 @@ struct FresnelClearanceResult
 {
     double minClearanceFraction = 0.0;
     std::optional<GeoPoint> worstPoint;
+    std::optional<size_t> worstSampleIndex;   // the worst point's place in the profile
     ComputationStatus status = ComputationStatus::Ok;
     InputProblem inputProblem = InputProblem::None; // set with status InvalidInput
 };
@@ -427,6 +431,7 @@ inline FresnelClearanceResult ComputeFresnelClearance(const std::vector<ProfileS
         {
             bestKnownFraction = fraction;
             result.worstPoint = profile[i].point;
+            result.worstSampleIndex = i;
         }
     }
 

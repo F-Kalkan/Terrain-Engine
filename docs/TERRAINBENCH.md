@@ -115,7 +115,8 @@ open the bundled Grand Canyon sample tile and try each tool on it.
   on the clipboard, including the command line that repeats a line-of-sight query exactly.
   The profile exports as CSV, its height columns named for the datum they are in, and the map and viewshed as PNG. The last tile, every
   parameter, the open panel, the panel sizes, the profile's lines and the viewshed layer's
-  settings are remembered. The app follows the
+  settings are remembered, saved beside the old file and moved over it in one step, so a crash
+  partway through never leaves half of them. The app follows the
   system's light or dark theme, and everything works from the keyboard:
   Ctrl+1 moves to the map, Ctrl+2 to Ctrl+5 open the Terrain, Line of Sight, Viewshed and About
   panels, Ctrl+6 moves to the profile, and F5 checks the line of sight or runs the viewshed in
@@ -151,9 +152,9 @@ Besides the engine's own suite, `app/` has two test projects, both run by `build
   heights agreeing to 1e-9 m, and a height above the ellipsoid without its undulation refused
   on each with a message -- the minimum visible height against the DLL's
   own viewshed at round heights and at heights the grid holds, fast and exact, and the view
-  models: validation, results,
-  errors, cancellation, comparisons, remembered settings, and numbers that keep a decimal
-  point on a machine that writes a comma.
+  models: validation, results, errors, cancellation, comparisons, remembered settings and the
+  file they live in -- written whole or not at all, past a half-written one an earlier crash
+  left -- and numbers that keep a decimal point on a machine that writes a comma.
 - `TerrainBench.UI.Tests` (Avalonia.Headless.XUnit): the main flows clicked through a real
   window over the real DLL, including a naive 30 km viewshed that reports progress, leaves
   the window working and cancels, and a minimum visible height whose bands are painted on the

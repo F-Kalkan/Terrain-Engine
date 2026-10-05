@@ -596,6 +596,44 @@ every sample -- or a different walk. The fast viewshed builds every ray's horizo
 every sample too. The naive viewshed asks only whether, and that is what a ceiling can answer.
 The measured gain grows with the radius: ~4x at 5 km, ~20x at 30 km.
 
+## Update: no answer never visible, one way to use threads, a tile held once
+
+Seven small things, none of which changes an answer.
+
+**No answer is never "visible".** A line of sight began as visible and stayed so unless
+something blocked it, so a path across a void came back with no confident answer *and*
+visible. The status said which to believe, and the library, the viewsheds and the app all
+read the status first -- but the command line printed "Visible: YES" first and the status a few
+lines later. Visible is now true only with status Ok and nothing blocking, and the command line
+prints `UNKNOWN` (`VisibleWord`, tested). The earlier note above, about tests that asserted
+only `isVisible` and so passed on a rejected query, was the same default seen from the other
+side.
+
+**One way to spread work over threads.** Taking blocks from a shared counter, reporting
+progress from the calling thread, 0 first, and stopping every thread on a stop was written four
+times -- rows, rays, a preparation's rays, many pairs -- each a little different; two of them
+were missing the first report of no work done until a test caught it. `ForEachBlockOnThreads`
+is now the only copy. A preparation casts its first ray before any other thread starts, so the
+function takes a step to run first; many pairs reports no progress and passes none. Proved the
+same by a fingerprint of every answer at 1, 4 and 16 threads, before and after.
+
+**A tile read in one go and held once.** The reader read a file a byte at a time into a buffer
+and decoded it into a second one; it now checks the size first, reads once into the posts, and
+decodes them in place -- about three times faster to load. The DLL keeps a sampler per
+interpolation mode, and the second copied every post; the posts are now shared, as the height
+pyramid already was, which saves 26 MB a 1-arcsecond tile. Sharing them costs nothing in speed:
+`Sample` reads through one more pointer, within the noise of a 30 km viewshed.
+
+**A place, not a search.** The DLL found the blocking point's sample by searching the profile
+for the same coordinates, which works only while no two samples share them. The line of sight
+and the Fresnel clearance now say the place where they find it.
+
+**A test can't be left out.** Each test was a function, called by hand from a list in `main`;
+one written and not listed would never run, and nothing would say so. `TEST(name)` now
+defines a test and adds it to the run, in the order written, and a run with no tests in it
+fails. And the app saves its settings beside the old file first and then moves them over it in
+one step, so a crash partway through leaves the old settings, not half a file.
+
 ## The DLL boundary
 
 The desktop test bench reaches the engine only through `TerrainEngineApi.dll`, called

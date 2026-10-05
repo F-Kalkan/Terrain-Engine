@@ -239,18 +239,6 @@ namespace
     {
         return EarthRadiusM * DegToRad;
     }
-
-    // Index of the sample a result's point was copied from, or -1.
-    int32_t SampleIndexOf(const std::vector<ProfileSample>& profile, const std::optional<GeoPoint>& point)
-    {
-        if (!point.has_value()) return -1;
-        for (size_t i = 0; i < profile.size(); i++)
-        {
-            if (profile[i].point.latitudeDeg == point->latitudeDeg && profile[i].point.longitudeDeg == point->longitudeDeg)
-                return (int32_t)i;
-        }
-        return -1;
-    }
 }
 
 const char* te_engine_version(void)
@@ -527,7 +515,7 @@ int32_t te_analyze_path(te_tile tile, const te_path_query* query, te_path_result
         result.los_status = (int32_t)los.status;
         result.is_visible = los.isVisible ? 1 : 0;
         result.blocking_feature = (int32_t)los.blockingFeature;
-        result.blocking_sample_index = SampleIndexOf(profile, los.blockingPoint);
+        result.blocking_sample_index = los.blockingSampleIndex.has_value() ? (int32_t)*los.blockingSampleIndex : -1;
         result.has_blocking_point = los.blockingPoint.has_value() ? 1 : 0;
         if (los.blockingPoint.has_value())
         {
@@ -548,7 +536,7 @@ int32_t te_analyze_path(te_tile tile, const te_path_query* query, te_path_result
             result.fresnel_computed = 1;
             result.fresnel_status = (int32_t)fresnel.status;
             result.has_worst_point = fresnel.worstPoint.has_value() ? 1 : 0;
-            result.worst_sample_index = SampleIndexOf(profile, fresnel.worstPoint);
+            result.worst_sample_index = fresnel.worstSampleIndex.has_value() ? (int32_t)*fresnel.worstSampleIndex : -1;
             result.min_clearance_fraction = fresnel.minClearanceFraction;
             result.wavelength_m = wavelengthM;
         }
